@@ -12,10 +12,9 @@ class YoloPostConfig:
     """
     Konfigturasi untuk YOLO post processing
     """
-
-    conf_threshold: float = 0.3
+    conf_threshold: float = 0.25
     iou_threshold: float = 0.4
-    max_detections: int = 300
+    max_detections: int = 50
     # If False, skip NMS and only keep top `max_detections` by score.
     apply_nms: bool = True
     # If True, NMS is class-agnostic (current default behavior).

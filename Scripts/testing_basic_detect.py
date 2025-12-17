@@ -3,6 +3,7 @@ import cv2
 from yolo_kit import YoloPostConfig, draw_detections, load_class_names, load_pipeline
 
 
+
 def read_image(path: str):
     img = cv2.imread(path)
     if img is None:
@@ -11,7 +12,7 @@ def read_image(path: str):
 
 
 def main():
-    path_gambar = "Media/example3.jpg"
+    path_gambar = "Media/example2.jpg"
     gambar = read_image(path_gambar)
 
     pipeline = load_pipeline(

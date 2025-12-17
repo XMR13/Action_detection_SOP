@@ -57,6 +57,15 @@ Jetpack     : 6.0 +
 Repo ini menyediakan demo untuk menjalankan deteksi pada image:
 1. Pastikan dependencies sudah terinstall (repo menggunakan `uv`; jalankan sendiri sesuai environment kamu).
 2. Jalankan:
-   - `python Scripts/testing_basic_detect.py`
-   - `python Scripts/visualize_detections.py`
+   - `python3 -m Scripts.testing_basic_detect`
+   - `python3 -m Scripts.visualize_detections --image Media/pedestrian.png --show --out output.jpg`
 
+### Video / CCTV (file video atau webcam)
+Untuk input video:
+- `python3 -m Scripts.visualize_detections --video path/to/video.mp4 --show --out output.mp4`
+
+Untuk webcam:
+- `python3 -m Scripts.visualize_detections --webcam 0 --show`
+
+Tips:
+- Kalau FPS terlalu berat, coba proses tiap N frame: `--every 2` atau `--every 3`
