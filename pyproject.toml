@@ -1,0 +1,8 @@
+[project]
+name = "action-detection-sop"
+version = "0.1.0"
+description = "Adalah projet yang bertujuan untuk melakukan atuomatic checking dari SOP di area Roll Wrapping"
+
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
