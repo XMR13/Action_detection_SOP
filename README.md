@@ -3,7 +3,26 @@
 ## Project Description.
 Merupakan project yang bertujuan untuk melakukan pengecekan SOP secara otomatis dengan menggunakan metode **Deep Learning** (khususnya *vision* dan *recognition*).
 
-Cara kerja project ini adalah sebagai berikut: 
+Tujuan utamanya adalah melakukan **SOP compliance checking** dari **kamera CCTV real-time**:
+- Deteksi objek penting (contoh: **person**, **helmet/PPE**, dan objek konteks lain bila dibutuhkan).
+- Menilai apakah **aksi/SOP step** tertentu sudah dilakukan (fokus pada *action*, bukan identitas orang).
+
+### Cara kerja (high-level)
+1. Ambil frame dari CCTV (real-time stream).
+2. Lakukan preprocessing (resize/letterbox, normalisasi) untuk input model.
+3. Jalankan inference model (YOLO / model lain) untuk deteksi objek.
+4. Postprocess (decode output, confidence filter, NMS, mapping koordinat kembali ke gambar original).
+5. (Tahap berikutnya) Gunakan hasil deteksi (dan/atau model temporal) untuk memutuskan status SOP: done / not done / unknown. (akan dilanjutkan ketika frame sudah selesa)
+
+### Status saat ini (kode di repo)
+Saat ini repo sudah menyediakan fondasi untuk **object detection YOLO-style** (preprocess → inference backend → postprocess) dan contoh demo inference pada gambar statis. Logic action/SOP akan dibangun di atas fondasi ini.
+
+## Repository Layout (Current)
+- `yolo_kit/` — utilitas runtime deteksi (letterbox, decode+NMS, dan backend inference: ONNX Runtime / TensorRT / TorchScript).
+- `Models/` — model artifacts (contoh `.onnx`) dan `metadata.yaml` (mapping class id → name).
+- `Media/` — sample media untuk demo.
+- `testing_basic_detect.py` — demo sederhana untuk menjalankan deteksi pada sebuah image.
+- `Action_Detection_SOP/` — placeholder package untuk logic SOP/action (akan diperluas).
 
 
 ## Development Environment
@@ -26,8 +45,18 @@ Python      :3.10
 Jetpack     : 6.0 + 
 
 ## How to run the application
-To run this app, first you need to fulfill the prerequisites:
-1. Pyhton 3.10 or above
-2. Pytorch
-3. ONNX/TensorRT, ONNX untuk di laptop, dan TensoRT apabila deployment di jetson
+### Prerequisites (ringkas)
+1. Python 3.10+
+2. OpenCV + NumPy
+3. Backend inference (pilih sesuai kebutuhan):
+   - **ONNX Runtime** (laptop/dev) → `onnxruntime` atau `onnxruntime-gpu`
+   - **TensorRT** (Jetson deployment) → TensorRT Python bindings (+ biasanya membutuhkan PyTorch untuk buffer di backend ini)
+   - **TorchScript** (opsional) → PyTorch
+
+### Quick demo (image detection)
+Repo ini menyediakan demo untuk menjalankan deteksi pada image:
+1. Pastikan dependencies sudah terinstall (repo menggunakan `uv`; jalankan sendiri sesuai environment kamu).
+2. Jalankan:
+   - `python Scripts/testing_basic_detect.py`
+   - `python Scripts/visualize_detections.py`
 

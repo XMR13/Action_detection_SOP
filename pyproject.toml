@@ -1,8 +1,12 @@
 [project]
 name = "action-detection-sop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Adalah projet yang bertujuan untuk melakukan atuomatic checking dari SOP di area Roll Wrapping"
 
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "numpy>=2.2.6",
+    "onnxruntime-gpu==1.20.2",
+    "opencv-python>=4.11.0.86",
+]
