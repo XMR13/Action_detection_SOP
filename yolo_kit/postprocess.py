@@ -24,7 +24,7 @@ class YoloPostConfig:
     # Set True/False to force interpretation; None keeps a simple default.
     anchors_has_objectness: Optional[bool] = None
     # Optional list of class IDs to keep; None keeps all.
-    class_ids: Optional[Sequence[int]] = None
+    class_ids: Optional[Sequence[int]] = 0
 
 
 class YoloPostprocessor:
@@ -120,7 +120,9 @@ class YoloPostprocessor:
         if p.ndim == 2 and (p.shape[1] == 6 or p.shape[0] == 6):
             if p.shape[0] == 6 and p.shape[1] != 6:
                 p = p.T
-            boxes = p[:, 0:4]
+            # Copy to avoid in-place mutations when mapping boxes back to original image coordinates.
+            # (Some callers may reuse `preds` across multiple postprocess variants.)
+            boxes = np.array(p[:, 0:4], copy=True)
             scores = p[:, 4]
             class_ids = p[:, 5].astype(int)
             return boxes, scores, class_ids

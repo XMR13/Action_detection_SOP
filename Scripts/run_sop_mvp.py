@@ -11,7 +11,7 @@ from Action_Detection_SOP.ingest import get_capture_info, open_capture
 from Action_Detection_SOP.reporting import today_date_str, write_daily_csv, write_daily_report, write_session_artifacts
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json
 from Action_Detection_SOP.sop_engine import HelmetRuleConfig, SessionResult, SessionizationConfig, SopEngine, SopEngineConfig
-from yolo_kit import YoloPostConfig, draw_detections, load_class_names, load_pipeline
+from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 from yolo_kit.types import Detection
 
 
@@ -86,8 +86,15 @@ def main() -> int:
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="Models/metadata.yaml", help="Class metadata yaml (names mapping).")
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
+    parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
+    parser.add_argument(
+        "--onnx-providers",
+        default=None,
+        help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
+    )
     parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
+    parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
 
     parser.add_argument("--person-label", action="append", default=["person"], help="Class name for person (repeatable).")
     parser.add_argument("--helmet-label", action="append", default=["helmet"], help="Class name for helmet (repeatable).")
@@ -127,14 +134,23 @@ def main() -> int:
 
     class_ids = sorted(set(person_ids + helmet_ids))
 
+    if args.imgsz < 32:
+        raise ValueError("--imgsz must be >= 32")
+    onnx_providers = None
+    if args.onnx_providers:
+        onnx_providers = [p.strip() for p in str(args.onnx_providers).split(",") if p.strip()]
+
     pipeline = load_pipeline(
         model_path=args.model,
         backend=args.backend,
         post_cfg=YoloPostConfig(
             conf_threshold=float(args.conf),
             iou_threshold=float(args.iou),
+            apply_nms=not bool(args.no_nms),
             class_ids=class_ids,
         ),
+        letterbox_cfg=LetterboxConfig(new_shape=(int(args.imgsz), int(args.imgsz))),
+        onnx_providers=onnx_providers,
     )
 
     cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)

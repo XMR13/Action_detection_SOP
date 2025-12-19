@@ -2,7 +2,7 @@ import argparse
 
 import cv2
 
-from yolo_kit import YoloPostConfig, draw_detections, load_class_names, load_pipeline
+from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 
 
 def main() -> int:
@@ -13,9 +13,16 @@ def main() -> int:
     src.add_argument("--webcam", type=int, default=None, help="Webcam index (e.g., 0).")
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to a YOLO model (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="Models/metadata.yaml", help="Path to class metadata (names mapping).")
+    parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
     parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
+    parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
+    parser.add_argument(
+        "--onnx-providers",
+        default=None,
+        help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
+    )
     parser.add_argument("--show", action="store_true", help="Show a window with visualized detections.")
     parser.add_argument("--out", default=None, help="Optional output path (image or video) to save the visualization.")
     parser.add_argument("--every", type=int, default=1, help="Process every Nth frame for video/webcam.")
@@ -24,10 +31,18 @@ def main() -> int:
 
     class_names = load_class_names(args.metadata) if args.metadata else {}
 
+    if args.imgsz < 32:
+        raise ValueError("--imgsz must be >= 32")
+    onnx_providers = None
+    if args.onnx_providers:
+        onnx_providers = [p.strip() for p in str(args.onnx_providers).split(",") if p.strip()]
+
     pipeline = load_pipeline(
         model_path=args.model,
         backend=args.backend,
-        post_cfg=YoloPostConfig(conf_threshold=args.conf, iou_threshold=args.iou),
+        post_cfg=YoloPostConfig(conf_threshold=args.conf, iou_threshold=args.iou, apply_nms=not bool(args.no_nms)),
+        letterbox_cfg=LetterboxConfig(new_shape=(int(args.imgsz), int(args.imgsz))),
+        onnx_providers=onnx_providers,
     )
 
     # Default behavior stays image-based (backward compatible) when no source is provided.

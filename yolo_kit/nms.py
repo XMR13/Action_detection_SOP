@@ -7,12 +7,11 @@ class NMSConfig:
     iou_threshold: float = 0.45
     max_detections: int = 300
 
-
 def nms(boxes: np.ndarray, scores: np.ndarray, cfg: NMSConfig) -> np.ndarray:
     """
     Simple NumPy NMS. Expects boxes shape (N,4) in xyxy and scores shape (N,).
     Returns indices of boxes to keep.
-    """
+    """ 
 
     if boxes.size == 0:
         return np.empty((0,), dtype=np.int32)
