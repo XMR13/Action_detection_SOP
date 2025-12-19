@@ -24,7 +24,7 @@ class YoloPostConfig:
     # Set True/False to force interpretation; None keeps a simple default.
     anchors_has_objectness: Optional[bool] = None
     # Optional list of class IDs to keep; None keeps all.
-    class_ids: Optional[Sequence[int]] = 0
+    class_ids: Optional[Sequence[int]] = None
 
 
 class YoloPostprocessor:
@@ -115,12 +115,15 @@ class YoloPostprocessor:
             p = p[0] #menghilangkan axis dim 0 
         p = np.squeeze(p)
 
-        # kasus:terlah terdecode (N, 6) => [x1, y1, x2, y2, score, class_id]
-        if p.ndim == 2 and p.shape[1] == 6:
-            boxes = p[:, 0:4] #sisa duanya bukan box
-            scores = p[:, 4] #box
-            class_id = p[:, 4:].astype(int)
-            return boxes, scores, class_id
+        # kasus: telah terdecode (N, 6) atau (6, N) =>
+        # [x1, y1, x2, y2, score, class_id]
+        if p.ndim == 2 and (p.shape[1] == 6 or p.shape[0] == 6):
+            if p.shape[0] == 6 and p.shape[1] != 6:
+                p = p.T
+            boxes = p[:, 0:4]
+            scores = p[:, 4]
+            class_ids = p[:, 5].astype(int)
+            return boxes, scores, class_ids
 
 
         if p.ndim == 2:
@@ -150,12 +153,12 @@ class YoloPostprocessor:
                     class_ids = np.argmax(class_scores, axis=0)
                     scores = class_scores[class_ids, np.arange(class_scores.shape[1])]
 
-            # jika memiliki seperti ni (N, 5 + C) (anchor)
+            # jika memiliki seperti ni (N, 5 + C)
             elif p.shape[1] >= 6:
                 boxes = p[:, :4] 
                 objectness = p[:, 4:5]
                 class_scores = p[:, 5:]
-                class_ids = np.argmax(class_scores, axis=0) #ambil dari axis 0
+                class_ids = np.argmax(class_scores, axis=1)
                 class_conf = class_scores[np.arange(class_scores.shape[0]), class_ids]
                 scores = objectness[:, 0] * class_conf
             else:

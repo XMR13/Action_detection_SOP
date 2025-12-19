@@ -12,19 +12,19 @@ def read_image(path: str):
 
 
 def main():
-    path_gambar = "Media/example2.jpg"
+    path_gambar = "Media/example4.jpg"
     gambar = read_image(path_gambar)
 
     pipeline = load_pipeline(
         model_path="Models/yolov9-s_v2.onnx",
-        post_cfg=YoloPostConfig(conf_threshold=0.45, iou_threshold=0.45)
+        post_cfg=YoloPostConfig(conf_threshold=0.15, iou_threshold=0.35)
     )
 
     class_names = load_class_names("Models/metadata.yaml")
 
     # deteksi
     detections = pipeline(gambar)
-    for det in detections:
+    for det in detections:  
         
         print(det.class_id, det.score, det.as_xyxy())
 

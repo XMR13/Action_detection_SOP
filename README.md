@@ -69,3 +69,16 @@ Untuk webcam:
 
 Tips:
 - Kalau FPS terlalu berat, coba proses tiap N frame: `--every 2` atau `--every 3`
+
+## MVP-A SOP runner (operator session ROI + helmet)
+Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
+
+1) Kalibrasi ROI polygon (sekali per kamera/source):
+   - `python3 -m Scripts.calibrate_roi --video path/to/video.mp4 --out configs/roi.json`
+   - atau RTSP: `python3 -m Scripts.calibrate_roi --rtsp "rtsp://user:pass@host/..." --out configs/roi.json`
+
+2) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
+   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --model Models/your_model.onnx --metadata Models/metadata.yaml --save-video`
+
+Catatan penting:
+- Model + `metadata.yaml` harus punya class **helmet** (repo saat ini memakai COCO metadata contoh, jadi kamu perlu metadata/model yang sesuai untuk PPE).
