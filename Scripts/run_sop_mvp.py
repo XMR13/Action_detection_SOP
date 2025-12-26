@@ -10,7 +10,14 @@ import cv2
 from Action_Detection_SOP.ingest import get_capture_info, open_capture
 from Action_Detection_SOP.reporting import today_date_str, write_daily_csv, write_daily_report, write_session_artifacts
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json
-from Action_Detection_SOP.sop_engine import HelmetRuleConfig, SessionResult, SessionizationConfig, SopEngine, SopEngineConfig
+from Action_Detection_SOP.sop_engine import (
+    HelmetRuleConfig,
+    SessionResult,
+    SessionizationConfig,
+    SopEngine,
+    SopEngineConfig,
+    helmet_associated_with_person,
+)
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 from yolo_kit.types import Detection
 
@@ -98,12 +105,29 @@ def main() -> int:
 
     parser.add_argument("--person-label", action="append", default=["person"], help="Class name for person (repeatable).")
     parser.add_argument("--helmet-label", action="append", default=["helmet"], help="Class name for helmet (repeatable).")
+    parser.add_argument(
+        "--skip-helmet",
+        action="store_true",
+        help="Disable helmet check (helmet status becomes UNKNOWN). Useful before you have a helmet-capable model.",
+    )
+    parser.add_argument(
+        "--require-helmet-class",
+        action="store_true",
+        help="Fail fast if --helmet-label cannot be resolved from --metadata (instead of auto-disabling helmet).",
+    )
 
     parser.add_argument("--analysis-fps", type=float, default=5.0, help="Target analysis FPS (used if source FPS is known).")
     parser.add_argument("--every", type=int, default=0, help="Process every Nth frame (overrides --analysis-fps if >0).")
     parser.add_argument("--start-s", type=float, default=2.0, help="Session start after sustained person presence (seconds).")
     parser.add_argument("--end-s", type=float, default=3.0, help="Session end after sustained absence (seconds).")
     parser.add_argument("--helmet-s", type=float, default=2.0, help="Helmet DONE after sustained association (seconds).")
+    parser.add_argument("--helmet-max-gap", type=int, default=1, help="Allow up to N missing frames inside helmet evidence streak (>=0).")
+    parser.add_argument(
+        "--head-top-frac",
+        type=float,
+        default=0.35,
+        help="Head region height fraction of the person box used to associate helmets (0.05..0.8).",
+    )
     parser.add_argument("--min-person-height", type=int, default=0, help="If >0, short/small person sessions become UNKNOWN.")
 
     parser.add_argument("--roi-upscale", type=float, default=1.0, help="Optional ROI crop upscale factor (>=1.0).")
@@ -123,14 +147,21 @@ def main() -> int:
 
     class_names = load_class_names(args.metadata) if args.metadata else {}
     person_ids = _name_to_ids(class_names, args.person_label)
-    helmet_ids = _name_to_ids(class_names, args.helmet_label)
+    helmet_disabled = bool(args.skip_helmet)
+    helmet_ids = [] if helmet_disabled else _name_to_ids(class_names, args.helmet_label)
     if not person_ids:
         raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")
-    if not helmet_ids:
-        raise ValueError(
-            f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
-            "Provide a metadata.yaml that includes a helmet class."
+    if not helmet_ids and not helmet_disabled:
+        if args.require_helmet_class:
+            raise ValueError(
+                f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
+                "Provide a metadata.yaml that includes a helmet class (or pass --skip-helmet)."
+            )
+        print(
+            f"WARNING: Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
+            "Helmet check will be disabled (helmet=UNKNOWN)."
         )
+        helmet_disabled = True
 
     class_ids = sorted(set(person_ids + helmet_ids))
 
@@ -160,8 +191,13 @@ def main() -> int:
         raise ValueError("--roi-upscale must be >= 1.0")
     if args.roi_expand < 0:
         raise ValueError("--roi-expand must be >= 0")
-    if args.start_s <= 0 or args.end_s <= 0 or args.helmet_s <= 0:
-        raise ValueError("--start-s/--end-s/--helmet-s must be > 0")
+    if args.start_s <= 0 or args.end_s <= 0:
+        raise ValueError("--start-s/--end-s must be > 0")
+    if not helmet_disabled:
+        if args.helmet_s <= 0:
+            raise ValueError("--helmet-s must be > 0")
+        if args.helmet_max_gap < 0:
+            raise ValueError("--helmet-max-gap must be >= 0")
 
     if args.every and args.every > 0:
         every = int(args.every)
@@ -174,13 +210,18 @@ def main() -> int:
             every = 1
             analysis_fps = float(args.analysis_fps)
 
-    engine_cfg = SopEngineConfig(
-        session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
-        helmet=HelmetRuleConfig(
+    helmet_cfg = None
+    if not helmet_disabled:
+        helmet_cfg = HelmetRuleConfig(
             required_seconds=float(args.helmet_s),
             analysis_fps=analysis_fps,
+            head_top_fraction=float(args.head_top_frac),
             min_person_height_px=int(args.min_person_height),
-        ),
+            max_gap_frames=int(args.helmet_max_gap),
+        )
+    engine_cfg = SopEngineConfig(
+        session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
+        helmet=helmet_cfg,
     )
     engine = SopEngine(engine_cfg)
 
@@ -253,8 +294,14 @@ def main() -> int:
                 sid = engine.active_session_id or "-"
                 helmet_status = "-"
                 if engine.active_session_id is not None:
-                    # best-effort live status
-                    helmet_status = "DONE" if any(h.class_id in helmet_ids for h in helmets) else "..."
+                    if helmet_disabled or engine.cfg.helmet is None:
+                        helmet_status = "UNKNOWN"
+                    else:
+                        helmet_status = (
+                            "OK"
+                            if helmet_associated_with_person(persons, helmets, head_top_fraction=engine.cfg.helmet.head_top_fraction)
+                            else "..."
+                        )
                 cv2.putText(
                     vis,
                     f"session={sid} helmet={helmet_status}",

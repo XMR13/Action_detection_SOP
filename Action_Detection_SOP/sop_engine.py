@@ -51,6 +51,7 @@ class HelmetRuleConfig:
     min_person_height_px: int = 0
     # jika session length lebih pendek daripada evidence, default kembali ke UNKNOWN
     short_session_is_unknown: bool = True
+    max_gap_frames: int = 1
 
     def __post_init__(self) -> None:
         if self.analysis_fps <= 0:
@@ -61,6 +62,8 @@ class HelmetRuleConfig:
             raise ValueError("head_top_fraction must be within [0.05, 0.8]")
         if self.min_person_height_px < 0:
             raise ValueError("min_person_height_px must be >= 0")
+        if self.max_gap_frames < 0:
+            raise ValueError("max_gap_frames must be >= 0")
 
     @property
     def required_frames(self) -> int:
@@ -70,10 +73,13 @@ class HelmetRuleConfig:
 @dataclass(frozen=True)
 class SopEngineConfig:
     session: SessionizationConfig = SessionizationConfig()
-    helmet: HelmetRuleConfig = HelmetRuleConfig()
+    helmet: Optional[HelmetRuleConfig] = HelmetRuleConfig()
+    helmet_disabled_note: str = "helmet_check_disabled"
 
     def __post_init__(self) -> None:
         # Jika kedua konfig sesuai dengan fps analysis nya.
+        if self.helmet is None:
+            return
         if abs(self.session.analysis_fps - self.helmet.analysis_fps) > 1e-6:
             raise ValueError("SessionizationConfig.analysis_fps must match HelmetRuleConfig.analysis_fps")
 
@@ -175,7 +181,7 @@ class _ActiveSession:
     start_frame_idx: int
     total_frames: int = 0
     helmet_positive_frames: int = 0
-    helmet_evidence: _EvidenceCounter = field(default_factory=lambda: _EvidenceCounter(required_frames=1))
+    helmet_evidence: Optional[_EvidenceCounter] = None
     max_person_height_px: float = 0.0
     notes: List[str] = field(default_factory=list)
 
@@ -221,26 +227,34 @@ class SopEngine:
         if event == "start":
             self._session_counter += 1
             session_id = f"{self._session_counter:06d}"
-            helmet_counter = _EvidenceCounter(required_frames=self.cfg.helmet.required_frames, max_gap_frames=1)
+            helmet_counter: Optional[_EvidenceCounter] = None
+            if self.cfg.helmet is not None:
+                helmet_counter = _EvidenceCounter(
+                    required_frames=self.cfg.helmet.required_frames,
+                    max_gap_frames=self.cfg.helmet.max_gap_frames,
+                )
             self._active = _ActiveSession(
                 session_id=session_id,
                 start_time_s=time_s,
                 start_frame_idx=frame_idx,
                 helmet_evidence=helmet_counter,
             )
+            if self.cfg.helmet is None:
+                self._active.notes.append(self.cfg.helmet_disabled_note)
 
         if self._active is not None and self._sessionizer.active:
             self._active.total_frames += 1
             self._active.max_person_height_px = max(self._active.max_person_height_px, _max_person_height_px(persons))
 
-            helmet_ok = helmet_associated_with_person(
-                persons,
-                helmets,
-                head_top_fraction=self.cfg.helmet.head_top_fraction,
-            )
-            if helmet_ok:
-                self._active.helmet_positive_frames += 1
-            self._active.helmet_evidence.update(helmet_ok)
+            if self.cfg.helmet is not None and self._active.helmet_evidence is not None:
+                helmet_ok = helmet_associated_with_person(
+                    persons,
+                    helmets,
+                    head_top_fraction=self.cfg.helmet.head_top_fraction,
+                )
+                if helmet_ok:
+                    self._active.helmet_positive_frames += 1
+                self._active.helmet_evidence.update(helmet_ok)
 
         if event == "end":
             if self._active is None:
@@ -270,19 +284,22 @@ class SopEngine:
         operator_status = StepStatus.DONE
 
         total = self._active.total_frames
-        required = self.cfg.helmet.required_frames
-
-        if self._active.helmet_evidence.achieved:
-            helmet_status = StepStatus.DONE
+        if self.cfg.helmet is None:
+            helmet_status = StepStatus.UNKNOWN
         else:
-            if self.cfg.helmet.short_session_is_unknown and total < required:
-                helmet_status = StepStatus.UNKNOWN
-                notes.append("session_too_short_for_helmet_decision")
-            elif self.cfg.helmet.min_person_height_px and self._active.max_person_height_px < self.cfg.helmet.min_person_height_px:
-                helmet_status = StepStatus.UNKNOWN
-                notes.append("person_too_small_for_reliable_helmet")
+            required = self.cfg.helmet.required_frames
+            achieved = bool(self._active.helmet_evidence is not None and self._active.helmet_evidence.achieved)
+            if achieved:
+                helmet_status = StepStatus.DONE
             else:
-                helmet_status = StepStatus.NOT_DONE
+                if self.cfg.helmet.short_session_is_unknown and total < required:
+                    helmet_status = StepStatus.UNKNOWN
+                    notes.append("session_too_short_for_helmet_decision")
+                elif self.cfg.helmet.min_person_height_px and self._active.max_person_height_px < self.cfg.helmet.min_person_height_px:
+                    helmet_status = StepStatus.UNKNOWN
+                    notes.append("person_too_small_for_reliable_helmet")
+                else:
+                    helmet_status = StepStatus.NOT_DONE
 
         return SessionResult(
             session_id=self._active.session_id,
@@ -308,4 +325,3 @@ def iter_status_counts(results: Iterable[SessionResult]) -> Tuple[int, int, int]
         else:
             unknown += 1
     return done, not_done, unknown
-

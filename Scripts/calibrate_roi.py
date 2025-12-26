@@ -1,3 +1,9 @@
+"""
+calibrate_roi.py
+Merupakan program yang digunakan untuk mengkalibrasi area *Region of Interset* (ROI)
+dari area deteksi yang diinginkan
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,7 +22,7 @@ def _read_single_frame(*, image: Optional[str], video: Optional[str], webcam: Op
     if image is not None:
         frame = cv2.imread(image)
         if frame is None:
-            raise FileNotFoundError(f"Could not read image: {image}")
+            raise FileNotFoundError(F"could not read image {image}")
         return frame
 
     if video is not None:
@@ -25,35 +31,37 @@ def _read_single_frame(*, image: Optional[str], video: Optional[str], webcam: Op
         cap = cv2.VideoCapture(rtsp)
     else:
         cap = cv2.VideoCapture(0 if webcam is None else int(webcam))
-
+    
     if not cap.isOpened():
-        raise RuntimeError("Could not open capture source.")
-
+        raise RuntimeError("Tidak bisa membuka sumber dari video capture tersebut")
     try:
         ok, frame = cap.read()
         if not ok or frame is None:
-            raise RuntimeError("Could not read a frame from the source.")
+            raise RuntimeError("tidak bisa embaca frame dari soure yang ada")
         return frame
+    
     finally:
         cap.release()
 
 
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Kalbrasi Interaktif ROI untuk kalibrasi polygonInteractive ROI polygon calibration (click points, save JSON).")
+    parser = argparse.ArgumentParser(description="Interactive ROI polygon untuk kalibrasi (menentukan area yang ingin dijadikan ROI) save di JSON")
     src = parser.add_mutually_exclusive_group(required=True)
-    src.add_argument("--image", default=None, help="Path to an input image.")
-    src.add_argument("--video", default=None, help="Path to an input video file.")
-    src.add_argument("--webcam", type=int, default=None, help="Webcam index (e.g., 0).")
-    src.add_argument("--rtsp", default=None, help="RTSP URL (e.g., rtsp://user:pass@host/...).")
-    parser.add_argument("--out", default="configs/roi.json", help="Output ROI JSON path.")
+    src.add_argument("--image", default=None, help="path ke input image")
+    src.add_argument("--video", default=None, help="path ke input video")
+    src.add_argument("--webcam", type=int, default=None, help="Webcam index")
+    src.add_argument("--rtsp", default=None, help="URL RTSP (r.g., rtsp://user:pass@host/...) etc, etc")
+    parser.add_argument("--out", default="configs/roi.json", help="Output ROI untuk json.")
     args = parser.parse_args()
 
     frame = _read_single_frame(image=args.image, video=args.video, webcam=args.webcam, rtsp=args.rtsp)
-    win = "ROI calibration"
+    win = "ROI Calibration"
     points: List[Point] = []
     saved = False
 
-    def on_mouse(event: int, x: int, y: int, flags: int, param: object) -> None:
+    def on_mouse(event: int, x: int, y:int, flgas:int, param:object ) -> None:
+        """fungsi yang berfungsi untuk membuat kotaknya"""
         nonlocal points
         if event == cv2.EVENT_LBUTTONDOWN:
             points.append((int(x), int(y)))
@@ -63,18 +71,18 @@ def main() -> int:
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.setMouseCallback(win, on_mouse)
 
-    instructions = "L-click add | R-click undo | r reset | s save | q/ESC quit"
+    instructions = "L-click add | R-click undo | r reset | s save | q/ESC untuk keluar"
 
     try:
         while True:
             vis = frame.copy()
-            if len(points) >= 3:
+            if len(points) >=3:
                 vis = draw_roi(vis, RoiPolygon(points=tuple(points)))
             else:
                 for (x, y) in points:
-                    cv2.circle(vis, (x, y), radius=4, color=(0, 255, 255), thickness=-1)
-
-            cv2.putText(vis, instructions, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    cv2.circle(vis, (x, y), radius=4, color=(0,255, 255), thickness=-1)
+                    #put text to explain
+            cv2.putText(vis, instructions, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255))
             cv2.putText(vis, f"points={len(points)}", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             cv2.imshow(win, vis)
 
@@ -86,15 +94,15 @@ def main() -> int:
                 continue
             if key == ord("s"):
                 if len(points) < 3:
-                    print("ROI needs at least 3 points.")
+                    print("ROI harus memilik 3 titik untuk berjalan dengan baik")
                     continue
                 out_path = Path(args.out)
                 save_roi_json(out_path, RoiPolygon(points=tuple(points)))
-                print(f"Saved ROI to: {out_path}")
+                print(f"Menyimpan ROI di {out_path}")
                 saved = True
                 break
     finally:
-        cv2.destroyAllWindows()
+        cv2.destroyAllWindows
 
     return 0 if saved else 1
 
