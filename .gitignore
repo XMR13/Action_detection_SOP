@@ -10,9 +10,10 @@ wheels/
 Progress/
 Models/
 Media/
+datasets/
+docs/
 
 #sigular file
-
 
 # Virtual environments
 .venv
