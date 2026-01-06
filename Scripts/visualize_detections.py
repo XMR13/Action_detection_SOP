@@ -5,6 +5,36 @@ import cv2
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 
 
+def _maybe_resize_max_side(image_bgr, *, max_side: int):
+    if max_side <= 0:
+        return image_bgr
+    if image_bgr is None or not hasattr(image_bgr, "shape"):
+        raise TypeError("image_bgr must be a NumPy array.")
+    h, w = image_bgr.shape[:2]
+    if h <= 0 or w <= 0:
+        raise ValueError(f"Invalid image shape: {getattr(image_bgr, 'shape', None)}")
+    cur_max = max(h, w)
+    if cur_max <= max_side:
+        return image_bgr
+
+    scale = float(max_side) / float(cur_max)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    return cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+def _processed_total_frames_from_capture(cap: cv2.VideoCapture, *, every: int):
+    if every < 1:
+        return None
+    total = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    if total is None or total <= 0:
+        return None
+    total_i = int(total)
+    if total_i <= 0:
+        return None
+    return (total_i + every - 1) // every
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run YOLO detection and visualize bounding boxes + labels.")
     src = parser.add_mutually_exclusive_group()
@@ -13,6 +43,12 @@ def main() -> int:
     src.add_argument("--webcam", type=int, default=None, help="Webcam index (e.g., 0).")
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to a YOLO model (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="Models/metadata_PPE.yaml", help="Path to class metadata (names mapping).")
+    parser.add_argument(
+        "--input-max-side",
+        type=int,
+        default=0,
+        help="Optional downscale before inference/visualization: resize so max(H,W)=N (0=disabled).",
+    )
     parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
     parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
@@ -43,7 +79,7 @@ def main() -> int:
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
     parser.add_argument(
         "--onnx-providers",
-        default=None,
+        default="CUDAExecutionProvider",
         help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
     )
     parser.add_argument(
@@ -69,6 +105,8 @@ def main() -> int:
 
     class_names = load_class_names(args.metadata) if args.metadata else {}
 
+    if args.input_max_side < 0:
+        raise ValueError("--input-max-side must be >= 0")
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
     onnx_providers = None
@@ -105,6 +143,7 @@ def main() -> int:
         img = cv2.imread(image_path)
         if img is None:
             raise FileNotFoundError(f"Could not read image at path: {image_path}")
+        img = _maybe_resize_max_side(img, max_side=int(args.input_max_side))
 
         if args.debug_post:
             import numpy as np
@@ -213,8 +252,23 @@ def main() -> int:
     writer = None
     frame_idx = 0
     processed = 0
+    pbar = None
 
     try:
+        # Default: when writing a video output, show progress (best-effort).
+        # For offline videos we can usually estimate total frames; for webcam the bar is indeterminate.
+        if args.out:
+            try:
+                from tqdm import tqdm  # type: ignore
+            except Exception:
+                tqdm = None  # type: ignore[assignment]
+
+            if tqdm is not None:
+                total = None
+                if args.video is not None:
+                    total = _processed_total_frames_from_capture(cap, every=int(args.every))
+                pbar = tqdm(total=total, unit="frame", desc="visualize")
+
         while True:
             ok, frame = cap.read()
             if not ok or frame is None:
@@ -224,6 +278,7 @@ def main() -> int:
             if (frame_idx - 1) % args.every != 0:
                 continue
 
+            frame = _maybe_resize_max_side(frame, max_side=int(args.input_max_side))
             detections = pipeline(frame)
             vis = draw_detections(frame, detections, class_names=class_names, show_score=True)
 
@@ -247,6 +302,8 @@ def main() -> int:
                     break
 
             processed += 1
+            if pbar is not None:
+                pbar.update(1)
             if args.max_frames and processed >= args.max_frames:
                 break
 
@@ -254,6 +311,8 @@ def main() -> int:
         cap.release()
         if writer is not None:
             writer.release()
+        if pbar is not None:
+            pbar.close()
         if args.show:
             cv2.destroyAllWindows()
 

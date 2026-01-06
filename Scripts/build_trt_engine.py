@@ -1,3 +1,8 @@
+"""
+Docstring for Scripts.build_trt_engine
+Function : For creating TRT Engine for edge deployment
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -68,7 +73,7 @@ def main() -> int:
             "- This script does not require Python TensorRT; it shells out to `trtexec`."
         )
     )
-    parser.add_argument("--onnx", required=True, help="Path to ONNX model (e.g., Models/action_model.onnx).")
+    parser.add_argument("--onnx", required=True, help="Path to ONNX Model (contohnya Models/action_model.onnx).")
     parser.add_argument(
         "--engine",
         default=None,
@@ -77,7 +82,7 @@ def main() -> int:
     parser.add_argument(
         "--input-name",
         default="images",
-        help='ONNX input tensor name (common: "images").',
+        help='ONNX input tensor name (common: "images").'
     )
     parser.add_argument("--imgsz", type=int, default=640, help="Static input size (e.g., 640, 960).")
     parser.add_argument("--fp16", action="store_true", help="Build FP16 engine (recommended on Jetson).")
@@ -97,6 +102,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print the trtexec command but do not execute.")
     args = parser.parse_args()
 
+    #process the args
     onnx_path = Path(args.onnx)
     if not onnx_path.exists():
         raise FileNotFoundError(str(onnx_path))
@@ -106,10 +112,10 @@ def main() -> int:
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
     if args.workspace_mb is not None and args.workspace_mb < 1:
-        raise ValueError("--workspace-mb must be >= 1")
+        raise ValueError("--workspace-mb bust be >= 1")
     if args.int8 and not args.fp16:
-        # Not strictly required, but a common expectation on Jetson builds.
-        print("WARNING: building INT8 without --fp16; ensure this is intentional.")
+        # Not strictly required, but a commaon expectation on jetson builds."
+        print("WARNING: buidling INT8 without --fp16; ensure this is intentional.")
 
     engine_path = Path(args.engine) if args.engine else onnx_path.with_suffix(".engine")
     _maybe_ensure_parent(engine_path)
