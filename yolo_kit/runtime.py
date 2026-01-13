@@ -90,10 +90,14 @@ class YoloPipeline:
         self,
         infer_fn: Callable[[np.ndarray], np.ndarray],
         *,
+        backend: Optional[object] = None,
+        backend_name: Optional[str] = None,
         letterbox_cfg: LetterboxConfig = LetterboxConfig(),
         post_cfg: YoloPostConfig = YoloPostConfig(),
     ):
         self._infer_fn = infer_fn
+        self.backend = backend
+        self.backend_name = backend_name
         self.letterbox_cfg = letterbox_cfg
         self.post = YoloPostprocessor(post_cfg)
 
@@ -183,7 +187,13 @@ def load_pipeline(
                 output_name=onnx_output_name,
             ),
         )
-        return YoloPipeline(ort_backend.infer, letterbox_cfg=letterbox_cfg, post_cfg=post_cfg)
+        return YoloPipeline(
+            ort_backend.infer,
+            backend=ort_backend,
+            backend_name="onnxruntime",
+            letterbox_cfg=letterbox_cfg,
+            post_cfg=post_cfg,
+        )
 
     if chosen == "torchscript":
         from .backends.torchscript_backend import TorchScriptBackend, TorchScriptBackendConfig
@@ -192,7 +202,13 @@ def load_pipeline(
             resolved,
             TorchScriptBackendConfig(device=torch_device, half=torch_half, output_index=torch_output_index),
         )
-        return YoloPipeline(ts_backend.infer, letterbox_cfg=letterbox_cfg, post_cfg=post_cfg)
+        return YoloPipeline(
+            ts_backend.infer,
+            backend=ts_backend,
+            backend_name="torchscript",
+            letterbox_cfg=letterbox_cfg,
+            post_cfg=post_cfg,
+        )
 
     if chosen == "tensorrt":
         from .backends.tensorrt_backend import TensorRTBackend, TensorRTBackendConfig
@@ -206,6 +222,12 @@ def load_pipeline(
                 output_index=trt_output_index,
             ),
         )
-        return YoloPipeline(trt_backend.infer, letterbox_cfg=letterbox_cfg, post_cfg=post_cfg)
+        return YoloPipeline(
+            trt_backend.infer,
+            backend=trt_backend,
+            backend_name="tensorrt",
+            letterbox_cfg=letterbox_cfg,
+            post_cfg=post_cfg,
+        )
 
     raise ValueError(f"Unsupported backend: {backend!r}")

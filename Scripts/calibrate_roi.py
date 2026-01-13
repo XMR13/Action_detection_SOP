@@ -18,26 +18,33 @@ from Action_Detection_SOP.roi import RoiPolygon, draw_roi, save_roi_json
 Point = Tuple[int, int]
 
 
-def _read_single_frame(*, image: Optional[str], video: Optional[str], webcam: Optional[int], rtsp: Optional[str]):
+def _read_single_frame(
+    *, image: Optional[str], video: Optional[str], webcam: Optional[int], rtsp: Optional[str]
+) -> "cv2.typing.MatLike":
+    """Read a single frame from exactly one source."""
     if image is not None:
         frame = cv2.imread(image)
         if frame is None:
-            raise FileNotFoundError(F"could not read image {image}")
+            raise FileNotFoundError(f"Could not read image: {image}")
         return frame
 
+    cap: Optional[cv2.VideoCapture]
     if video is not None:
         cap = cv2.VideoCapture(video)
     elif rtsp is not None:
         cap = cv2.VideoCapture(rtsp)
-    else:
-        cap = cv2.VideoCapture(0 if webcam is None else int(webcam))
-    
+    elif webcam is not None:
+        cap = cv2.VideoCapture(int(webcam))
+    else:  # should be unreachable due to argparse, but keep it safe for direct calls
+        raise ValueError("Invalid input source: provide exactly one of image/video/webcam/rtsp.")
+
     if not cap.isOpened():
-        raise RuntimeError("Tidak bisa membuka sumber dari video capture tersebut")
+        src = video if video is not None else (rtsp if rtsp is not None else f"webcam:{webcam}")
+        raise RuntimeError(f"Tidak bisa membuka sumber video capture: {src}")
     try:
         ok, frame = cap.read()
         if not ok or frame is None:
-            raise RuntimeError("tidak bisa embaca frame dari soure yang ada")
+            raise RuntimeError("Tidak bisa membaca frame dari source yang ada")
         return frame
     
     finally:
@@ -56,6 +63,7 @@ def main() -> int:
     args = parser.parse_args()
 
     frame = _read_single_frame(image=args.image, video=args.video, webcam=args.webcam, rtsp=args.rtsp)
+    frame_h, frame_w = frame.shape[:2]
     win = "ROI Calibration"
     points: List[Point] = []
     saved = False
@@ -97,12 +105,12 @@ def main() -> int:
                     print("ROI harus memilik 3 titik untuk berjalan dengan baik")
                     continue
                 out_path = Path(args.out)
-                save_roi_json(out_path, RoiPolygon(points=tuple(points)))
+                save_roi_json(out_path, RoiPolygon(points=tuple(points), frame_size=(frame_w, frame_h)))
                 print(f"Menyimpan ROI di {out_path}")
                 saved = True
                 break
     finally:
-        cv2.destroyAllWindows
+        cv2.destroyAllWindows()
 
     return 0 if saved else 1
 

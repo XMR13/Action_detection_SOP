@@ -50,7 +50,7 @@ def main() -> int:
         help="Optional downscale before inference/visualization: resize so max(H,W)=N (0=disabled).",
     )
     parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
-    parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
+    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
     parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
     parser.add_argument("--max-det", type=int, default=50, help="Max detections to keep after NMS/top-K.")

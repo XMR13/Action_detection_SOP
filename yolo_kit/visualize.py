@@ -52,7 +52,7 @@ def draw_detections(
     *,
     class_names: Optional[Dict[int, str]] = None,
     show_score: bool = True,
-    box_thickness: int = 2,
+    box_thickness: int = 1,
     font_scale: float = 0.5,
     font_thickness: int = 1,
 ) -> np.ndarray:

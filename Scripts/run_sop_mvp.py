@@ -9,7 +9,7 @@ import cv2
 
 from Action_Detection_SOP.ingest import get_capture_info, open_capture
 from Action_Detection_SOP.reporting import today_date_str, write_daily_csv, write_daily_report, write_session_artifacts
-from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json
+from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json, resolve_roi_for_frame
 from Action_Detection_SOP.sop_engine import (
     HelmetRuleConfig,
     SessionResult,
@@ -99,6 +99,17 @@ def main() -> int:
         default=None,
         help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
     )
+    parser.add_argument(
+        "--require-onnx-provider",
+        action="append",
+        default=[],
+        help='Fail fast if the ONNX Runtime session is not using this provider (repeatable), e.g. "CUDAExecutionProvider".',
+    )
+    parser.add_argument(
+        "--require-cuda",
+        action="store_true",
+        help='Shortcut for --require-onnx-provider CUDAExecutionProvider and forcing --onnx-providers CUDAExecutionProvider.',
+    )
     parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
     parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
@@ -140,7 +151,7 @@ def main() -> int:
     args = parser.parse_args()
 
     roi_path = Path(args.roi)
-    roi = load_roi_json(roi_path)
+    roi_base = load_roi_json(roi_path)
 
     out_dir = Path(args.out_dir)
     date = today_date_str()
@@ -168,7 +179,11 @@ def main() -> int:
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
     onnx_providers = None
-    if args.onnx_providers:
+    require_onnx_providers: List[str] = [str(p).strip() for p in (args.require_onnx_provider or []) if str(p).strip()]
+    if args.require_cuda:
+        require_onnx_providers.append("CUDAExecutionProvider")
+        onnx_providers = ["CUDAExecutionProvider"]
+    elif args.onnx_providers:
         onnx_providers = [p.strip() for p in str(args.onnx_providers).split(",") if p.strip()]
 
     pipeline = load_pipeline(
@@ -183,6 +198,29 @@ def main() -> int:
         letterbox_cfg=LetterboxConfig(new_shape=(int(args.imgsz), int(args.imgsz))),
         onnx_providers=onnx_providers,
     )
+    if pipeline.backend_name == "onnxruntime":
+        ort_backend = pipeline.backend
+        providers_in_use = None
+        available_providers = None
+        if ort_backend is not None and hasattr(ort_backend, "providers_in_use"):
+            providers_in_use = list(getattr(ort_backend, "providers_in_use"))
+        if ort_backend is not None and hasattr(ort_backend, "available_providers"):
+            available_providers = list(getattr(ort_backend, "available_providers"))
+
+        if providers_in_use is not None:
+            print(f"ONNX Runtime session providers: {providers_in_use}")
+
+        if require_onnx_providers:
+            missing = []
+            for rp in require_onnx_providers:
+                if providers_in_use is None or rp not in providers_in_use:
+                    missing.append(rp)
+            if missing:
+                msg = f"Required ONNX Runtime provider(s) not active: {missing}."
+                if available_providers is not None:
+                    msg += f" Available providers: {available_providers}."
+                msg += ' Hint: pass --onnx-providers "CUDAExecutionProvider" (or use --require-cuda).'
+                raise RuntimeError(msg)
 
     cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)
     info = get_capture_info(cap)
@@ -229,6 +267,7 @@ def main() -> int:
     processed = 0
     sessions: List[SessionResult] = []
     session_dirs: List[Path] = []
+    roi_for_frame: Optional[RoiPolygon] = None
 
     writer: Optional[cv2.VideoWriter] = None
     active_session_dir: Optional[Path] = None
@@ -254,8 +293,15 @@ def main() -> int:
             # Timestamp
             t_s = (frame_idx / info.fps) if info.fps else (processed / analysis_fps)
 
+            if roi_for_frame is None:
+                roi_for_frame = resolve_roi_for_frame(
+                    roi_base,
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                )
+
             # Crop ROI bounding rect (for performance) then map detections back.
-            x0, y0, x1, y1 = roi.bounding_rect(expand_px=int(args.roi_expand))
+            x0, y0, x1, y1 = roi_for_frame.bounding_rect(expand_px=int(args.roi_expand))
             x0, y0, x1, y1 = clamp_rect_to_frame((x0, y0, x1, y1), frame_width=frame.shape[1], frame_height=frame.shape[0])
             crop = frame[y0:y1, x0:x1]
 
@@ -267,7 +313,7 @@ def main() -> int:
 
             dets_local = pipeline(crop)
             dets_global = _offset_detections(dets_local, dx=float(x0), dy=float(y0), inv_scale=inv_scale)
-            dets_roi = _filter_by_roi(dets_global, roi)
+            dets_roi = _filter_by_roi(dets_global, roi_for_frame)
             persons, helmets = _split_classes(dets_roi, person_ids=person_ids, helmet_ids=helmet_ids)
 
             result = engine.update(time_s=float(t_s), frame_idx=processed, persons=persons, helmets=helmets)
@@ -288,7 +334,7 @@ def main() -> int:
             vis = frame
             if args.show or (args.save_video and writer is not None):
                 vis = frame.copy()
-                vis = draw_roi(vis, roi)
+                vis = draw_roi(vis, roi_for_frame)
                 vis = draw_detections(vis, dets_roi, class_names=class_names, show_score=True)
 
                 sid = engine.active_session_id or "-"

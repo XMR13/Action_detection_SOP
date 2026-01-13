@@ -5,9 +5,10 @@ from typing import Optional, Tuple
 @dataclass
 class Detection:
     """
-    Generic detection representation used across backends.
+    Generic detection object representation used across backends.
+    Using this dataclass, managing the object become easier
     """
-
+    
     x1: float
     y1: float
     x2: float

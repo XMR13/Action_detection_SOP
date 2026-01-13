@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, load_roi_json
+from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, load_roi_json, resolve_roi_for_frame
 
 try:
     from tqdm import tqdm  # type: ignore
@@ -258,6 +258,8 @@ def main() -> int:
     read = 0
     last_sig: Optional[np.ndarray] = None
     next_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+    roi_active = cfg.roi
+    roi_resolved = False
 
     try:
         while True:
@@ -282,7 +284,15 @@ def main() -> int:
                     pbar.set_postfix(saved=saved)
                 continue
 
-            image = _maybe_crop_roi(frame, cfg.roi, expand_px=cfg.roi_expand)
+            if roi_active is not None and not roi_resolved:
+                roi_active = resolve_roi_for_frame(
+                    roi_active,
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                )
+                roi_resolved = True
+
+            image = _maybe_crop_roi(frame, roi_active, expand_px=cfg.roi_expand)
 
             if cfg.dedupe_threshold > 0:
                 sig = _downscale_gray_cuda(image) if use_cuda else _downscale_gray(image)

@@ -54,10 +54,18 @@ class OnnxRuntimeBackend:
         # If output_name not provided, pick first output.
         self.output_name = cfg.output_name or self.session.get_outputs()[0].name
 
+    @property
+    def providers_in_use(self) -> Sequence[str]:
+        # ORT returns providers in priority order for this session.
+        return tuple(self.session.get_providers())
+
+    @property
+    def available_providers(self) -> Sequence[str]:
+        return tuple(self._ort.get_available_providers())
+
     def infer(self, blob: np.ndarray, extra_inputs: Optional[Dict[str, Any]] = None) -> np.ndarray:
         inputs: Dict[str, Any] = {self.input_name: blob}
         if extra_inputs:
             inputs.update(extra_inputs)
         outputs = self.session.run([self.output_name], inputs)
         return outputs[0]
-

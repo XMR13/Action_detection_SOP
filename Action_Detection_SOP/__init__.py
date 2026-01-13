@@ -11,7 +11,7 @@ dan lebih berfokus kepada
 
 from .ingest import CaptureInfo, get_capture_info, open_capture
 from .reporting import DailyReport, today_date_str, write_daily_csv, write_daily_report, write_session_artifacts
-from .roi import RoiPolygon, draw_roi, load_roi_json, save_roi_json
+from .roi import RoiPolygon, draw_roi, load_roi_json, resolve_roi_for_frame, save_roi_json
 from .sop_engine import HelmetRuleConfig, SessionResult, SessionizationConfig, SopEngine, SopEngineConfig, StepStatus
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "RoiPolygon",
     "draw_roi",
     "load_roi_json",
+    "resolve_roi_for_frame",
     "save_roi_json",
     "HelmetRuleConfig",
     "SessionResult",
