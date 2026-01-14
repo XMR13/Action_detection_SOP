@@ -50,6 +50,20 @@ def write_session_artifacts(
     return session_dir
 
 
+def write_run_config(*, out_dir: Path, date: str, run_config: Dict[str, Any]) -> Path:
+    report_dir = out_dir / "reports" / date
+    report_dir.mkdir(parents=True, exist_ok=True)
+    path = report_dir / "run_config.json"
+    path.write_text(json.dumps(run_config, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def write_session_run_config(*, session_dir: Path, run_config: Dict[str, Any]) -> Path:
+    path = session_dir / "run_config.json"
+    path.write_text(json.dumps(run_config, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def write_daily_report(
     *,
     out_dir: Path,
@@ -112,4 +126,3 @@ def write_daily_csv(
 def today_date_str(now: Optional[datetime] = None) -> str:
     dt = now or datetime.now()
     return dt.strftime("%Y-%m-%d")
-

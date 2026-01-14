@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -8,7 +10,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import cv2
 
 from Action_Detection_SOP.ingest import get_capture_info, open_capture
-from Action_Detection_SOP.reporting import today_date_str, write_daily_csv, write_daily_report, write_session_artifacts
+from Action_Detection_SOP.reporting import (
+    today_date_str,
+    write_daily_csv,
+    write_daily_report,
+    write_run_config,
+    write_session_artifacts,
+    write_session_run_config,
+)
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json, resolve_roi_for_frame
 from Action_Detection_SOP.sop_engine import (
     HelmetRuleConfig,
@@ -73,6 +82,33 @@ def _split_classes(dets: Sequence[Detection], *, person_ids: Sequence[int], helm
     return persons, helmets
 
 
+def _sha256_path(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _file_metadata(path: Path) -> Dict[str, object]:
+    payload: Dict[str, object] = {"path": str(path)}
+    if not path.exists():
+        payload["exists"] = False
+        return payload
+    st = path.stat()
+    payload.update(
+        {
+            "exists": True,
+            "size_bytes": int(st.st_size),
+            "mtime": float(st.st_mtime),
+            "sha256": _sha256_path(path),
+        }
+    )
+    return payload
+
+
 @dataclass(frozen=True)
 class RunOutputs:
     date: str
@@ -88,6 +124,33 @@ def main() -> int:
     src.add_argument("--video", default=None, help="Path to input video file.")
     src.add_argument("--webcam", type=int, default=None, help="Webcam index (e.g., 0).")
     src.add_argument("--rtsp", default=None, help="RTSP URL (e.g., rtsp://user:pass@host/...).")
+    parser.add_argument(
+        "--loop-video",
+        action="store_true",
+        help="If --video reaches EOF, restart from the beginning (useful to simulate a continuous stream).",
+    )
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="Throttle processing to approximate real-time based on timestamps (useful for stream simulation).",
+    )
+    parser.add_argument(
+        "--reconnect",
+        action="store_true",
+        help="If capture read fails, attempt to reopen the source (useful for flaky RTSP).",
+    )
+    parser.add_argument(
+        "--reconnect-wait-s",
+        type=float,
+        default=1.0,
+        help="Seconds to wait before reconnect attempt (only if --reconnect).",
+    )
+    parser.add_argument(
+        "--reconnect-max-tries",
+        type=int,
+        default=30,
+        help="Max reconnect attempts (only if --reconnect).",
+    )
 
     parser.add_argument("--roi", default="configs/roi.json", help="ROI polygon JSON (from Scripts/calibrate_roi.py).")
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
@@ -146,12 +209,18 @@ def main() -> int:
 
     parser.add_argument("--out-dir", default="data", help="Root output directory for sessions/reports.")
     parser.add_argument("--save-video", action="store_true", help="Save per-session annotated MP4 video.")
+    parser.add_argument("--no-thumb", action="store_true", help="Disable per-session thumbnail image.")
     parser.add_argument("--show", action="store_true", help="Show real-time window; press q/ESC to exit.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N processed frames (0=no limit).")
     args = parser.parse_args()
 
     roi_path = Path(args.roi)
     roi_base = load_roi_json(roi_path)
+    if roi_base.frame_size is None:
+        print(
+            "Note: ROI JSON has no frame_size; auto-rescale is disabled. "
+            "Re-save ROI using Scripts/calibrate_roi.py to embed calibration resolution."
+        )
 
     out_dir = Path(args.out_dir)
     date = today_date_str()
@@ -224,6 +293,12 @@ def main() -> int:
 
     cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)
     info = get_capture_info(cap)
+    if args.loop_video and not args.video:
+        raise ValueError("--loop-video is only valid with --video.")
+    if args.reconnect_wait_s < 0:
+        raise ValueError("--reconnect-wait-s must be >= 0")
+    if args.reconnect_max_tries < 0:
+        raise ValueError("--reconnect-max-tries must be >= 0")
 
     if args.roi_upscale < 1.0:
         raise ValueError("--roi-upscale must be >= 1.0")
@@ -268,6 +343,47 @@ def main() -> int:
     sessions: List[SessionResult] = []
     session_dirs: List[Path] = []
     roi_for_frame: Optional[RoiPolygon] = None
+    save_thumb = not bool(args.no_thumb)
+
+    run_config: Dict[str, object] = {
+        "date": date,
+        "args": dict(vars(args)),
+        "source": {
+            "video": args.video,
+            "webcam": args.webcam,
+            "rtsp": args.rtsp,
+        },
+        "analysis_fps": float(analysis_fps),
+        "every": int(every),
+        "roi": {
+            "path": str(roi_path),
+            "frame_size": roi_base.frame_size,
+            "points": list(roi_base.points),
+            "sha256": _sha256_path(roi_path),
+        },
+        "model": _file_metadata(Path(args.model)),
+        "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
+        "postprocess": {
+            "conf": float(args.conf),
+            "iou": float(args.iou),
+            "no_nms": bool(args.no_nms),
+        },
+    }
+
+    start_wall: Optional[float] = None
+    start_t_s: Optional[float] = None
+    reconnect_tries = 0
+    reconnect_events = 0
+    loop_count = 0
+    thumb_written: set[str] = set()
+
+    run_config["stream_sim"] = {
+        "loop_video": bool(args.loop_video),
+        "realtime": bool(args.realtime),
+        "reconnect": bool(args.reconnect),
+        "reconnect_wait_s": float(args.reconnect_wait_s),
+        "reconnect_max_tries": int(args.reconnect_max_tries),
+    }
 
     writer: Optional[cv2.VideoWriter] = None
     active_session_dir: Optional[Path] = None
@@ -280,7 +396,28 @@ def main() -> int:
         while True:
             ok, frame = cap.read()
             if not ok or frame is None:
+                if args.video and args.loop_video:
+                    cap.release()
+                    cap = open_capture(video=args.video)
+                    info = get_capture_info(cap)
+                    loop_count += 1
+                    reconnect_tries = 0
+                    continue
+
+                if args.reconnect:
+                    reconnect_tries += 1
+                    if args.reconnect_max_tries and reconnect_tries > int(args.reconnect_max_tries):
+                        raise RuntimeError(f"Reconnect failed after {args.reconnect_max_tries} tries.")
+                    cap.release()
+                    if args.reconnect_wait_s:
+                        time.sleep(float(args.reconnect_wait_s))
+                    cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)
+                    info = get_capture_info(cap)
+                    reconnect_events += 1
+                    continue
+
                 break
+            reconnect_tries = 0
 
             frame_idx += 1
             if (frame_idx - 1) % every != 0:
@@ -292,6 +429,15 @@ def main() -> int:
 
             # Timestamp
             t_s = (frame_idx / info.fps) if info.fps else (processed / analysis_fps)
+            if args.realtime:
+                if start_wall is None:
+                    start_wall = time.monotonic()
+                    start_t_s = float(t_s)
+                assert start_t_s is not None
+                target_wall = start_wall + (float(t_s) - start_t_s)
+                now_wall = time.monotonic()
+                if target_wall > now_wall:
+                    time.sleep(target_wall - now_wall)
 
             if roi_for_frame is None:
                 roi_for_frame = resolve_roi_for_frame(
@@ -299,6 +445,12 @@ def main() -> int:
                     frame_width=frame.shape[1],
                     frame_height=frame.shape[0],
                 )
+                run_config["roi_resolved"] = {
+                    "frame_size": (int(frame.shape[1]), int(frame.shape[0])),
+                    "points": list(roi_for_frame.points),
+                }
+                run_config["loop_count"] = int(loop_count)
+                run_config["reconnect_events"] = int(reconnect_events)
 
             # Crop ROI bounding rect (for performance) then map detections back.
             x0, y0, x1, y1 = roi_for_frame.bounding_rect(expand_px=int(args.roi_expand))
@@ -318,21 +470,25 @@ def main() -> int:
 
             result = engine.update(time_s=float(t_s), frame_idx=processed, persons=persons, helmets=helmets)
 
+            session_id = engine.active_session_id
+            need_thumb = bool(save_thumb and session_id and session_id not in thumb_written)
+
             # Start per-session video writer lazily once we know the session dir.
-            if args.save_video and engine.active_session_id and active_session_dir is None:
-                active_session_dir = out_dir / "sessions" / date / f"session_{engine.active_session_id}"
+            if (args.save_video or need_thumb) and session_id and active_session_dir is None:
+                active_session_dir = out_dir / "sessions" / date / f"session_{session_id}"
                 active_session_dir.mkdir(parents=True, exist_ok=True)
-                active_video_path = active_session_dir / "annotated.mp4"
-                fps_out = float(analysis_fps) if analysis_fps else 5.0
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                h, w = frame.shape[:2]
-                writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
-                if not writer.isOpened():
-                    raise RuntimeError(f"Failed to open video writer: {active_video_path}")
+                if args.save_video:
+                    active_video_path = active_session_dir / "annotated.mp4"
+                    fps_out = float(analysis_fps) if analysis_fps else 5.0
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    h, w = frame.shape[:2]
+                    writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
+                    if not writer.isOpened():
+                        raise RuntimeError(f"Failed to open video writer: {active_video_path}")
 
             # Visualization (optional)
             vis = frame
-            if args.show or (args.save_video and writer is not None):
+            if args.show or (args.save_video and writer is not None) or need_thumb:
                 vis = frame.copy()
                 vis = draw_roi(vis, roi_for_frame)
                 vis = draw_detections(vis, dets_roi, class_names=class_names, show_score=True)
@@ -358,6 +514,13 @@ def main() -> int:
                     2,
                 )
 
+            if need_thumb and session_id and active_session_dir is not None:
+                thumb_path = active_session_dir / "thumbnail.jpg"
+                ok = cv2.imwrite(str(thumb_path), vis)
+                if not ok:
+                    raise RuntimeError(f"Failed to write thumbnail: {thumb_path}")
+                thumb_written.add(session_id)
+
             if writer is not None and vis is not None:
                 writer.write(vis)
 
@@ -370,6 +533,9 @@ def main() -> int:
             if result is not None:
                 sessions.append(result)
                 session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=result)
+                run_config["loop_count"] = int(loop_count)
+                run_config["reconnect_events"] = int(reconnect_events)
+                write_session_run_config(session_dir=session_dir, run_config=run_config)
                 session_dirs.append(session_dir)
 
                 # Close writer for this session
@@ -384,6 +550,9 @@ def main() -> int:
         if tail is not None:
             sessions.append(tail)
             session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=tail)
+            run_config["loop_count"] = int(loop_count)
+            run_config["reconnect_events"] = int(reconnect_events)
+            write_session_run_config(session_dir=session_dir, run_config=run_config)
             session_dirs.append(session_dir)
 
     finally:
@@ -395,6 +564,7 @@ def main() -> int:
 
     daily_json = write_daily_report(out_dir=out_dir, date=date, sessions=sessions)
     daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
+    run_config_path = write_run_config(out_dir=out_dir, date=date, run_config=run_config)
 
     outputs = RunOutputs(
         date=date,
@@ -405,6 +575,7 @@ def main() -> int:
     )
     print(f"Wrote daily report: {outputs.daily_report_json}")
     print(f"Wrote sessions CSV: {outputs.daily_report_csv}")
+    print(f"Wrote run config: {run_config_path}")
     print(f"Sessions: {len(outputs.session_dirs)}")
 
     return 0
