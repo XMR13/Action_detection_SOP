@@ -21,6 +21,7 @@ from Action_Detection_SOP.reporting import (
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json, resolve_roi_for_frame
 from Action_Detection_SOP.sop_engine import (
     HelmetRuleConfig,
+    RoiDwellRuleConfig,
     SessionResult,
     SessionizationConfig,
     SopEngine,
@@ -194,6 +195,26 @@ def main() -> int:
     parser.add_argument("--every", type=int, default=0, help="Process every Nth frame (overrides --analysis-fps if >0).")
     parser.add_argument("--start-s", type=float, default=2.0, help="Session start after sustained person presence (seconds).")
     parser.add_argument("--end-s", type=float, default=3.0, help="Session end after sustained absence (seconds).")
+    parser.add_argument("--roi-dwell-s", type=float, default=8.0, help="ROI dwell DONE after sustained presence (seconds).")
+    parser.add_argument("--roi-dwell-max-gap", type=float, default=0.4, help="Allow up to N seconds missing inside ROI dwell track (>=0).")
+    parser.add_argument(
+        "--roi-dwell-iou",
+        type=float,
+        default=0.25,
+        help="IoU threshold for matching person tracklets inside ROI (0.05..0.95).",
+    )
+    parser.add_argument(
+        "--roi-dwell-miss",
+        type=float,
+        default=None,
+        help="Max missed seconds before an ROI track is dropped (>=0). Defaults to at least --roi-dwell-max-gap.",
+    )
+    parser.add_argument(
+        "--roi-min-person-height",
+        type=int,
+        default=0,
+        help="If >0, small ROI persons are ignored for dwell tracking.",
+    )
     parser.add_argument("--helmet-s", type=float, default=2.0, help="Helmet DONE after sustained association (seconds).")
     parser.add_argument("--helmet-max-gap", type=int, default=1, help="Allow up to N missing frames inside helmet evidence streak (>=0).")
     parser.add_argument(
@@ -206,9 +227,19 @@ def main() -> int:
 
     parser.add_argument("--roi-upscale", type=float, default=1.0, help="Optional ROI crop upscale factor (>=1.0).")
     parser.add_argument("--roi-expand", type=int, default=0, help="Expand ROI bounding box crop by N pixels (>=0).")
+    parser.add_argument(
+        "--detect-roi-only",
+        action="store_true",
+        help="Run detection only on ROI crop (faster, but ignores outside-ROI people).",
+    )
 
     parser.add_argument("--out-dir", default="data", help="Root output directory for sessions/reports.")
     parser.add_argument("--save-video", action="store_true", help="Save per-session annotated MP4 video.")
+    parser.add_argument(
+        "--save-run-video",
+        action="store_true",
+        help="Save a full-run annotated MP4 under reports/<date>/run_annotated.mp4.",
+    )
     parser.add_argument("--no-thumb", action="store_true", help="Disable per-session thumbnail image.")
     parser.add_argument("--show", action="store_true", help="Show real-time window; press q/ESC to exit.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N processed frames (0=no limit).")
@@ -304,6 +335,20 @@ def main() -> int:
         raise ValueError("--roi-upscale must be >= 1.0")
     if args.roi_expand < 0:
         raise ValueError("--roi-expand must be >= 0")
+    if args.roi_dwell_s <= 0:
+        raise ValueError("--roi-dwell-s must be > 0")
+    if args.roi_dwell_max_gap < 0:
+        raise ValueError("--roi-dwell-max-gap must be >= 0 seconds")
+    if not (0.05 <= args.roi_dwell_iou <= 0.95):
+        raise ValueError("--roi-dwell-iou must be within [0.05, 0.95]")
+    if args.roi_dwell_miss is None:
+        args.roi_dwell_miss = float(args.roi_dwell_max_gap)
+    if args.roi_dwell_miss < 0:
+        raise ValueError("--roi-dwell-miss must be >= 0 seconds")
+    if args.roi_dwell_miss + 1e-9 < args.roi_dwell_max_gap:
+        raise ValueError("--roi-dwell-miss must be >= --roi-dwell-max-gap (seconds)")
+    if args.roi_min_person_height < 0:
+        raise ValueError("--roi-min-person-height must be >= 0")
     if args.start_s <= 0 or args.end_s <= 0:
         raise ValueError("--start-s/--end-s must be > 0")
     if not helmet_disabled:
@@ -332,9 +377,22 @@ def main() -> int:
             min_person_height_px=int(args.min_person_height),
             max_gap_frames=int(args.helmet_max_gap),
         )
+    roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
+    roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
+    if roi_miss_frames < roi_gap_frames:
+        roi_miss_frames = roi_gap_frames
+    roi_dwell_cfg = RoiDwellRuleConfig(
+        required_seconds=float(args.roi_dwell_s),
+        analysis_fps=analysis_fps,
+        max_gap_frames=roi_gap_frames,
+        max_track_missed=roi_miss_frames,
+        iou_match_threshold=float(args.roi_dwell_iou),
+        min_person_height_px=int(args.roi_min_person_height),
+    )
     engine_cfg = SopEngineConfig(
         session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
         helmet=helmet_cfg,
+        roi_dwell=roi_dwell_cfg,
     )
     engine = SopEngine(engine_cfg)
 
@@ -361,6 +419,15 @@ def main() -> int:
             "points": list(roi_base.points),
             "sha256": _sha256_path(roi_path),
         },
+        "roi_dwell": {
+            "required_seconds": float(args.roi_dwell_s),
+            "max_gap_seconds": float(args.roi_dwell_max_gap),
+            "max_gap_frames": int(roi_gap_frames),
+            "max_track_missed_seconds": float(args.roi_dwell_miss),
+            "max_track_missed_frames": int(roi_miss_frames),
+            "iou_match_threshold": float(args.roi_dwell_iou),
+            "min_person_height_px": int(args.roi_min_person_height),
+        },
         "model": _file_metadata(Path(args.model)),
         "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
         "postprocess": {
@@ -368,6 +435,7 @@ def main() -> int:
             "iou": float(args.iou),
             "no_nms": bool(args.no_nms),
         },
+        "detect_roi_only": bool(args.detect_roi_only),
     }
 
     start_wall: Optional[float] = None
@@ -386,7 +454,13 @@ def main() -> int:
     }
 
     writer: Optional[cv2.VideoWriter] = None
+    run_writer: Optional[cv2.VideoWriter] = None
+    run_video_path: Optional[Path] = None
     active_session_dir: Optional[Path] = None
+    last_dets_global: List[Detection] = []
+    last_dets_roi: List[Detection] = []
+    last_persons_all: List[Detection] = []
+    last_helmets_all: List[Detection] = []
 
     win = "SOP MVP-A"
     if args.show:
@@ -420,12 +494,12 @@ def main() -> int:
             reconnect_tries = 0
 
             frame_idx += 1
-            if (frame_idx - 1) % every != 0:
-                continue
+            should_process = (frame_idx - 1) % every == 0
 
-            processed += 1
-            if args.max_frames and processed >= int(args.max_frames):
-                break
+            if should_process:
+                processed += 1
+                if args.max_frames and processed >= int(args.max_frames):
+                    break
 
             # Timestamp
             t_s = (frame_idx / info.fps) if info.fps else (processed / analysis_fps)
@@ -452,26 +526,49 @@ def main() -> int:
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
 
-            # Crop ROI bounding rect (for performance) then map detections back.
-            x0, y0, x1, y1 = roi_for_frame.bounding_rect(expand_px=int(args.roi_expand))
-            x0, y0, x1, y1 = clamp_rect_to_frame((x0, y0, x1, y1), frame_width=frame.shape[1], frame_height=frame.shape[0])
-            crop = frame[y0:y1, x0:x1]
+            result = None
+            if should_process:
+                if args.detect_roi_only:
+                    # Crop ROI bounding rect (for performance) then map detections back.
+                    x0, y0, x1, y1 = roi_for_frame.bounding_rect(expand_px=int(args.roi_expand))
+                    x0, y0, x1, y1 = clamp_rect_to_frame(
+                        (x0, y0, x1, y1), frame_width=frame.shape[1], frame_height=frame.shape[0]
+                    )
+                    crop = frame[y0:y1, x0:x1]
 
-            inv_scale = 1.0
-            if args.roi_upscale != 1.0:
-                s = float(args.roi_upscale)
-                crop = cv2.resize(crop, (int(round(crop.shape[1] * s)), int(round(crop.shape[0] * s))), interpolation=cv2.INTER_LINEAR)
-                inv_scale = 1.0 / s
+                    inv_scale = 1.0
+                    if args.roi_upscale != 1.0:
+                        s = float(args.roi_upscale)
+                        crop = cv2.resize(
+                            crop,
+                            (int(round(crop.shape[1] * s)), int(round(crop.shape[0] * s))),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                        inv_scale = 1.0 / s
 
-            dets_local = pipeline(crop)
-            dets_global = _offset_detections(dets_local, dx=float(x0), dy=float(y0), inv_scale=inv_scale)
-            dets_roi = _filter_by_roi(dets_global, roi_for_frame)
-            persons, helmets = _split_classes(dets_roi, person_ids=person_ids, helmet_ids=helmet_ids)
+                    dets_local = pipeline(crop)
+                    dets_global = _offset_detections(dets_local, dx=float(x0), dy=float(y0), inv_scale=inv_scale)
+                else:
+                    dets_global = pipeline(frame)
 
-            result = engine.update(time_s=float(t_s), frame_idx=processed, persons=persons, helmets=helmets)
+                dets_roi = _filter_by_roi(dets_global, roi_for_frame)
+                persons_all, helmets_all = _split_classes(dets_global, person_ids=person_ids, helmet_ids=helmet_ids)
+                persons_roi = _filter_by_roi(persons_all, roi_for_frame)
+
+                result = engine.update(
+                    time_s=float(t_s),
+                    frame_idx=processed,
+                    persons_in_roi=persons_roi,
+                    persons_all=persons_all,
+                    helmets_all=helmets_all,
+                )
+                last_dets_global = list(dets_global)
+                last_dets_roi = list(dets_roi)
+                last_persons_all = list(persons_all)
+                last_helmets_all = list(helmets_all)
 
             session_id = engine.active_session_id
-            need_thumb = bool(save_thumb and session_id and session_id not in thumb_written)
+            need_thumb = bool(should_process and save_thumb and session_id and session_id not in thumb_written)
 
             # Start per-session video writer lazily once we know the session dir.
             if (args.save_video or need_thumb) and session_id and active_session_dir is None:
@@ -479,7 +576,7 @@ def main() -> int:
                 active_session_dir.mkdir(parents=True, exist_ok=True)
                 if args.save_video:
                     active_video_path = active_session_dir / "annotated.mp4"
-                    fps_out = float(analysis_fps) if analysis_fps else 5.0
+                    fps_out = float(info.fps) if info.fps else (float(analysis_fps) if analysis_fps else 5.0)
                     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                     h, w = frame.shape[:2]
                     writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
@@ -488,25 +585,38 @@ def main() -> int:
 
             # Visualization (optional)
             vis = frame
-            if args.show or (args.save_video and writer is not None) or need_thumb:
+            if args.show or args.save_run_video or (args.save_video and writer is not None) or need_thumb:
                 vis = frame.copy()
                 vis = draw_roi(vis, roi_for_frame)
-                vis = draw_detections(vis, dets_roi, class_names=class_names, show_score=True)
+                dets_vis = last_dets_roi if args.detect_roi_only else last_dets_global
+                vis = draw_detections(vis, dets_vis, class_names=class_names, show_score=True)
 
                 sid = engine.active_session_id or "-"
                 helmet_status = "-"
+                roi_status = "-"
                 if engine.active_session_id is not None:
+                    if engine.cfg.roi_dwell is not None:
+                        required_frames = engine.cfg.roi_dwell.required_frames
+                        dwell_frames = engine.active_roi_dwell_frames
+                        if required_frames > 0 and dwell_frames >= required_frames:
+                            roi_status = "OK"
+                        else:
+                            dwell_s = dwell_frames / analysis_fps if analysis_fps else float(dwell_frames)
+                            req_s = required_frames / analysis_fps if analysis_fps else float(required_frames)
+                            roi_status = f"{dwell_s:.1f}/{req_s:.1f}s"
                     if helmet_disabled or engine.cfg.helmet is None:
                         helmet_status = "UNKNOWN"
                     else:
                         helmet_status = (
                             "OK"
-                            if helmet_associated_with_person(persons, helmets, head_top_fraction=engine.cfg.helmet.head_top_fraction)
+                            if helmet_associated_with_person(
+                                last_persons_all, last_helmets_all, head_top_fraction=engine.cfg.helmet.head_top_fraction
+                            )
                             else "..."
                         )
                 cv2.putText(
                     vis,
-                    f"session={sid} helmet={helmet_status}",
+                    f"session={sid} roi={roi_status} helmet={helmet_status}",
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
@@ -514,12 +624,26 @@ def main() -> int:
                     2,
                 )
 
+            if args.save_run_video and run_writer is None:
+                report_dir = out_dir / "reports" / date
+                report_dir.mkdir(parents=True, exist_ok=True)
+                run_video_path = report_dir / "run_annotated.mp4"
+                fps_out = float(info.fps) if info.fps else (float(analysis_fps) if analysis_fps else 5.0)
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                h, w = frame.shape[:2]
+                run_writer = cv2.VideoWriter(str(run_video_path), fourcc, fps_out, (w, h))
+                if not run_writer.isOpened():
+                    raise RuntimeError(f"Failed to open run video writer: {run_video_path}")
+
             if need_thumb and session_id and active_session_dir is not None:
                 thumb_path = active_session_dir / "thumbnail.jpg"
                 ok = cv2.imwrite(str(thumb_path), vis)
                 if not ok:
                     raise RuntimeError(f"Failed to write thumbnail: {thumb_path}")
                 thumb_written.add(session_id)
+
+            if run_writer is not None and vis is not None:
+                run_writer.write(vis)
 
             if writer is not None and vis is not None:
                 writer.write(vis)
@@ -559,11 +683,15 @@ def main() -> int:
         cap.release()
         if writer is not None:
             writer.release()
+        if run_writer is not None:
+            run_writer.release()
         if args.show:
             cv2.destroyAllWindows()
 
     daily_json = write_daily_report(out_dir=out_dir, date=date, sessions=sessions)
     daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
+    if run_video_path is not None:
+        run_config["run_video"] = _file_metadata(run_video_path)
     run_config_path = write_run_config(out_dir=out_dir, date=date, run_config=run_config)
 
     outputs = RunOutputs(

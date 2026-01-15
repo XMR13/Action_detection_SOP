@@ -15,13 +15,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from .sop_engine import SessionResult, StepStatus, iter_status_counts
+from .sop_engine import SessionResult, StepStatus, iter_roi_status_counts, iter_status_counts
 
 
 @dataclass(frozen=True)
 class DailyReport:
     date: str
     total_sessions: int
+    roi_done: int
+    roi_not_done: int
+    roi_unknown: int
     helmet_done: int
     helmet_not_done: int
     helmet_unknown: int
@@ -31,6 +34,7 @@ def session_result_to_dict(r: SessionResult) -> Dict[str, Any]:
     payload = asdict(r)
     # Enums to strings
     payload["operator_present"] = str(r.operator_present.value)
+    payload["roi_dwell"] = str(r.roi_dwell.value)
     payload["helmet"] = str(r.helmet.value)
     return payload
 
@@ -79,10 +83,14 @@ def write_daily_report(
     
     """
     sessions_list = list(sessions)
+    roi_done, roi_not_done, roi_unknown = iter_roi_status_counts(sessions_list)
     done, not_done, unknown = iter_status_counts(sessions_list)
     report = DailyReport(
         date=date,
         total_sessions=len(sessions_list),
+        roi_done=roi_done,
+        roi_not_done=roi_not_done,
+        roi_unknown=roi_unknown,
         helmet_done=done,
         helmet_not_done=not_done,
         helmet_unknown=unknown,
