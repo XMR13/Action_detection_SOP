@@ -20,6 +20,7 @@ class TestSopProfile(unittest.TestCase):
                 "schema_version": 1,
                 "session_start_seconds": 1.5,
                 "session_end_seconds": 2.5,
+                "min_session_seconds": 1.0,
                 "roi_dwell_seconds": 7.0,
                 "notes": "test",
             }
@@ -28,6 +29,7 @@ class TestSopProfile(unittest.TestCase):
         self.assertIsInstance(profile, SopProfile)
         self.assertEqual(profile.session_start_seconds, 1.5)
         self.assertEqual(profile.session_end_seconds, 2.5)
+        self.assertEqual(profile.min_session_seconds, 1.0)
         self.assertEqual(profile.roi_dwell_seconds, 7.0)
         self.assertEqual(profile.notes, "test")
 
@@ -55,6 +57,18 @@ class TestSopProfile(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             load_sop_profile(path)
+
+    def test_missing_min_session_defaults_to_zero(self) -> None:
+        path = self._write_profile(
+            {
+                "schema_version": 1,
+                "session_start_seconds": 1.0,
+                "session_end_seconds": 2.0,
+                "roi_dwell_seconds": 3.0,
+            }
+        )
+        profile = load_sop_profile(path)
+        self.assertEqual(profile.min_session_seconds, 0.0)
 
 
 if __name__ == "__main__":

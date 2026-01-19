@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import shutil
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -139,6 +140,9 @@ def main() -> int:
                 parts.append(cleaned)
         return parts or None
 
+    def _session_duration_s(session: SessionResult) -> float:
+        return max(0.0, float(session.end_time_s) - float(session.start_time_s))
+
     parser = argparse.ArgumentParser(description="MVP-A SOP runner (operator session in ROI + helmet compliance).")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--video", default=None, help="Path to input video file.")
@@ -170,6 +174,18 @@ def main() -> int:
         type=int,
         default=30,
         help="Max reconnect attempts (only if --reconnect).",
+    )
+    parser.add_argument(
+        "--source-fps",
+        type=float,
+        default=0.0,
+        help="Override capture FPS when OpenCV reports 0/wrong (0=auto).",
+    )
+    parser.add_argument(
+        "--video-fps-out",
+        type=float,
+        default=0.0,
+        help="Override saved video FPS (0=auto from source; falls back to analysis fps).",
     )
 
     parser.add_argument("--roi", default="configs/roi.json", help="ROI polygon JSON (from Scripts/calibrate_roi.py).")
@@ -228,6 +244,12 @@ def main() -> int:
         type=float,
         default=None,
         help="Session end after sustained absence (seconds). Overrides --sop-profile if set.",
+    )
+    parser.add_argument(
+        "--min-session-s",
+        type=float,
+        default=None,
+        help="Discard sessions shorter than this (seconds). Overrides --sop-profile if set. 0 = keep all.",
     )
     parser.add_argument(
         "--roi-dwell-s",
@@ -307,6 +329,11 @@ def main() -> int:
         sop_profile.session_end_seconds if sop_profile else None,
         DEFAULT_SESSION_END_S,
     )
+    min_session_s = _resolve_seconds(
+        args.min_session_s,
+        sop_profile.min_session_seconds if sop_profile else None,
+        0.0,
+    )
     roi_dwell_s = _resolve_seconds(
         args.roi_dwell_s,
         sop_profile.roi_dwell_seconds if sop_profile else None,
@@ -314,6 +341,7 @@ def main() -> int:
     )
     args.start_s = start_s
     args.end_s = end_s
+    args.min_session_s = min_session_s
     args.roi_dwell_s = roi_dwell_s
 
     roi_path = Path(args.roi)
@@ -349,6 +377,10 @@ def main() -> int:
 
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
+    if args.source_fps < 0:
+        raise ValueError("--source-fps must be >= 0")
+    if args.video_fps_out < 0:
+        raise ValueError("--video-fps-out must be >= 0")
     onnx_providers = None
     require_onnx_providers: List[str] = [
         _sanitize_ort_provider_name(p) for p in (args.require_onnx_provider or []) if _sanitize_ort_provider_name(p)
@@ -424,19 +456,25 @@ def main() -> int:
         raise ValueError("--roi-min-person-height must be >= 0")
     if args.start_s <= 0 or args.end_s <= 0:
         raise ValueError("--start-s/--end-s must be > 0")
+    if args.min_session_s < 0:
+        raise ValueError("--min-session-s must be >= 0")
     if not helmet_disabled:
         if args.helmet_s <= 0:
             raise ValueError("--helmet-s must be > 0")
         if args.helmet_max_gap < 0:
             raise ValueError("--helmet-max-gap must be >= 0")
 
+    source_fps = float(args.source_fps) if args.source_fps and args.source_fps > 0 else info.fps
+    if source_fps is not None and source_fps <= 0:
+        source_fps = None
+
     if args.every and args.every > 0:
         every = int(args.every)
-        analysis_fps = info.fps / every if info.fps else float(args.analysis_fps)
+        analysis_fps = source_fps / every if source_fps else float(args.analysis_fps)
     else:
-        if info.fps and info.fps > 0:
-            every = max(1, int(round(info.fps / float(args.analysis_fps))))
-            analysis_fps = info.fps / every
+        if source_fps and source_fps > 0:
+            every = max(1, int(round(source_fps / float(args.analysis_fps))))
+            analysis_fps = source_fps / every
         else:
             every = 1
             analysis_fps = float(args.analysis_fps)
@@ -484,11 +522,14 @@ def main() -> int:
             "webcam": args.webcam,
             "rtsp": args.rtsp,
         },
+        "source_fps_raw": float(info.fps) if info.fps else None,
+        "source_fps": float(source_fps) if source_fps else None,
         "analysis_fps": float(analysis_fps),
         "every": int(every),
         "sessionization": {
             "start_seconds": float(args.start_s),
             "end_seconds": float(args.end_s),
+            "min_session_seconds": float(args.min_session_s),
         },
         "roi": {
             "path": str(roi_path),
@@ -513,6 +554,7 @@ def main() -> int:
             "no_nms": bool(args.no_nms),
         },
         "detect_roi_only": bool(args.detect_roi_only),
+        "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
     }
 
     if sop_profile_path is None:
@@ -523,6 +565,9 @@ def main() -> int:
             "data": asdict(sop_profile) if sop_profile is not None else None,
             "file": _file_metadata(sop_profile_path),
         }
+
+    warnings: List[str] = []
+    discarded_sessions: List[Dict[str, object]] = []
 
     start_wall: Optional[float] = None
     start_t_s: Optional[float] = None
@@ -588,7 +633,7 @@ def main() -> int:
                     break
 
             # Timestamp
-            t_s = (frame_idx / info.fps) if info.fps else (processed / analysis_fps)
+            t_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
             if args.realtime:
                 if start_wall is None:
                     start_wall = time.monotonic()
@@ -605,10 +650,22 @@ def main() -> int:
                     frame_width=frame.shape[1],
                     frame_height=frame.shape[0],
                 )
+                if roi_base.frame_size is not None:
+                    base_w, base_h = roi_base.frame_size
+                    stream_size = (int(frame.shape[1]), int(frame.shape[0]))
+                    if (base_w, base_h) != stream_size:
+                        msg = (
+                            "ROI frame_size differs from stream resolution; ROI was auto-rescaled. "
+                            f"roi_frame_size={(base_w, base_h)} stream_size={stream_size}"
+                        )
+                        print(f"WARNING: {msg}")
+                        warnings.append(msg)
                 run_config["roi_resolved"] = {
                     "frame_size": (int(frame.shape[1]), int(frame.shape[0])),
                     "points": list(roi_for_frame.points),
                 }
+                if warnings:
+                    run_config["warnings"] = list(warnings)
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
 
@@ -662,7 +719,10 @@ def main() -> int:
                 active_session_dir.mkdir(parents=True, exist_ok=True)
                 if args.save_video:
                     active_video_path = active_session_dir / "annotated.mp4"
-                    fps_out = float(info.fps) if info.fps else (float(analysis_fps) if analysis_fps else 5.0)
+                    if args.video_fps_out and args.video_fps_out > 0:
+                        fps_out = float(args.video_fps_out)
+                    else:
+                        fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
                     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                     h, w = frame.shape[:2]
                     writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
@@ -714,7 +774,10 @@ def main() -> int:
                 report_dir = out_dir / "reports" / date
                 report_dir.mkdir(parents=True, exist_ok=True)
                 run_video_path = report_dir / "run_annotated.mp4"
-                fps_out = float(info.fps) if info.fps else (float(analysis_fps) if analysis_fps else 5.0)
+                if args.video_fps_out and args.video_fps_out > 0:
+                    fps_out = float(args.video_fps_out)
+                else:
+                    fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 h, w = frame.shape[:2]
                 run_writer = cv2.VideoWriter(str(run_video_path), fourcc, fps_out, (w, h))
@@ -741,6 +804,23 @@ def main() -> int:
                     break
 
             if result is not None:
+                duration_s = _session_duration_s(result)
+                if args.min_session_s > 0 and duration_s < float(args.min_session_s):
+                    discarded_sessions.append(
+                        {
+                            "session_id": result.session_id,
+                            "duration_s": duration_s,
+                            "reason": "min_session_seconds",
+                        }
+                    )
+                    if writer is not None:
+                        writer.release()
+                        writer = None
+                    if active_session_dir is not None:
+                        shutil.rmtree(active_session_dir, ignore_errors=True)
+                        active_session_dir = None
+                    thumb_written.discard(result.session_id)
+                    continue
                 sessions.append(result)
                 session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=result)
                 run_config["loop_count"] = int(loop_count)
@@ -755,15 +835,25 @@ def main() -> int:
                 active_session_dir = None
 
         # End-of-stream flush
-        end_time_s = (frame_idx / info.fps) if info.fps else (processed / analysis_fps)
+        end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
         tail = engine.flush(time_s=float(end_time_s))
         if tail is not None:
-            sessions.append(tail)
-            session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=tail)
-            run_config["loop_count"] = int(loop_count)
-            run_config["reconnect_events"] = int(reconnect_events)
-            write_session_run_config(session_dir=session_dir, run_config=run_config)
-            session_dirs.append(session_dir)
+            duration_s = _session_duration_s(tail)
+            if args.min_session_s > 0 and duration_s < float(args.min_session_s):
+                discarded_sessions.append(
+                    {
+                        "session_id": tail.session_id,
+                        "duration_s": duration_s,
+                        "reason": "min_session_seconds",
+                    }
+                )
+            else:
+                sessions.append(tail)
+                session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=tail)
+                run_config["loop_count"] = int(loop_count)
+                run_config["reconnect_events"] = int(reconnect_events)
+                write_session_run_config(session_dir=session_dir, run_config=run_config)
+                session_dirs.append(session_dir)
 
     finally:
         cap.release()
@@ -778,6 +868,8 @@ def main() -> int:
     daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
     if run_video_path is not None:
         run_config["run_video"] = _file_metadata(run_video_path)
+    if discarded_sessions:
+        run_config["discarded_sessions"] = list(discarded_sessions)
     run_config_path = write_run_config(out_dir=out_dir, date=date, run_config=run_config)
 
     outputs = RunOutputs(

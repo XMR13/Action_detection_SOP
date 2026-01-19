@@ -11,6 +11,7 @@ class SopProfile:
     schema_version: int
     session_start_seconds: float
     session_end_seconds: float
+    min_session_seconds: float = 0.0
     roi_dwell_seconds: float
     notes: Optional[str] = None
 
@@ -21,6 +22,8 @@ class SopProfile:
             raise ValueError("session_start_seconds must be > 0")
         if self.session_end_seconds <= 0:
             raise ValueError("session_end_seconds must be > 0")
+        if self.min_session_seconds < 0:
+            raise ValueError("min_session_seconds must be >= 0")
         if self.roi_dwell_seconds <= 0:
             raise ValueError("roi_dwell_seconds must be > 0")
 
@@ -58,6 +61,7 @@ def load_sop_profile(path: Path) -> SopProfile:
         "schema_version",
         "session_start_seconds",
         "session_end_seconds",
+        "min_session_seconds",
         "roi_dwell_seconds",
         "notes",
     }
@@ -68,6 +72,9 @@ def load_sop_profile(path: Path) -> SopProfile:
     schema_version = _require_int(payload, "schema_version")
     session_start_seconds = _require_number(payload, "session_start_seconds")
     session_end_seconds = _require_number(payload, "session_end_seconds")
+    min_session_seconds = float(payload.get("min_session_seconds", 0.0))
+    if min_session_seconds < 0:
+        raise ValueError("min_session_seconds must be >= 0")
     roi_dwell_seconds = _require_number(payload, "roi_dwell_seconds")
     notes = payload.get("notes")
     if notes is not None and not isinstance(notes, str):
@@ -77,6 +84,7 @@ def load_sop_profile(path: Path) -> SopProfile:
         schema_version=schema_version,
         session_start_seconds=session_start_seconds,
         session_end_seconds=session_end_seconds,
+        min_session_seconds=min_session_seconds,
         roi_dwell_seconds=roi_dwell_seconds,
         notes=notes,
     )

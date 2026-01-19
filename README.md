@@ -84,6 +84,10 @@ Untuk webcam:
 Tips:
 
 - Kalau FPS terlalu berat, coba proses tiap N frame: `--every 2` atau `--every 3`
+- Jika FPS dari RTSP/NVR tidak terbaca (atau video output terlihat lambat), pakai:
+  - `--source-fps <angka>` untuk override FPS input
+  - `--video-fps-out <angka>` untuk paksa FPS video hasil simpan
+- Untuk buang sesi yang terlalu pendek (noise), gunakan `--min-session-s <angka>` (0 = tidak dibuang).
 
 ## Running tests (uv)
 
