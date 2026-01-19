@@ -85,6 +85,11 @@ Tips:
 
 - Kalau FPS terlalu berat, coba proses tiap N frame: `--every 2` atau `--every 3`
 
+## Running tests (uv)
+
+- `uv run pytest .`
+- Or: `uv run python -m pytest .\\tests\\`
+
 ## MVP-A SOP runner (operator session ROI + helmet)
 
 Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
@@ -93,8 +98,12 @@ Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
    - `python3 -m Scripts.calibrate_roi --video path/to/video.mp4 --out configs/roi.json`
    - atau RTSP: `python3 -m Scripts.calibrate_roi --rtsp "rtsp://user:pass@host/..." --out configs/roi.json`
 
-2) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
-   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --model Models/your_model.onnx --metadata Models/metadata.yaml --save-video`
+2) (Optional) Atur timing SOP (admin):
+   - `cp configs/sop_profile.example.json configs/sop_profile.json`
+   - Edit `configs/sop_profile.json` (session start/end & ROI dwell seconds).
+
+3) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
+   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_model.onnx --metadata Models/metadata.yaml --save-video`
 
 Catatan penting:
 

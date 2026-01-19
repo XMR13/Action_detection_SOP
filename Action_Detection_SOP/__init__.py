@@ -9,7 +9,28 @@ dan lebih berfokus kepada
 - Reporting
 """
 
-from .ingest import CaptureInfo, get_capture_info, open_capture
+from __future__ import annotations
+
+from typing import Any
+
+from .config import SopProfile, load_sop_profile
+
+# Optional dependency boundary:
+# `ingest` depends on OpenCV (`cv2`) and should not break imports of the SOP logic
+# modules (tests can run without cv2 installed).
+try:
+    from .ingest import CaptureInfo, get_capture_info, open_capture
+except ModuleNotFoundError as exc:
+    if getattr(exc, "name", None) != "cv2":
+        raise
+
+    CaptureInfo = Any  # type: ignore[misc,assignment]
+
+    def open_capture(*args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+        raise RuntimeError("OpenCV (cv2) is not installed. Install opencv-python to use capture ingestion.")
+
+    def get_capture_info(*args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+        raise RuntimeError("OpenCV (cv2) is not installed. Install opencv-python to use capture ingestion.")
 from .reporting import (
     DailyReport,
     today_date_str,
@@ -26,6 +47,8 @@ __all__ = [
     "CaptureInfo",
     "get_capture_info",
     "open_capture",
+    "SopProfile",
+    "load_sop_profile",
     "DailyReport",
     "today_date_str",
     "write_daily_csv",

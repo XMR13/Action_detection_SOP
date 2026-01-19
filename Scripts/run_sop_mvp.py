@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 
+from Action_Detection_SOP.config import load_sop_profile
 from Action_Detection_SOP.ingest import get_capture_info, open_capture
 from Action_Detection_SOP.reporting import (
     today_date_str,
@@ -30,6 +31,10 @@ from Action_Detection_SOP.sop_engine import (
 )
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 from yolo_kit.types import Detection
+
+DEFAULT_SESSION_START_S = 2.0
+DEFAULT_SESSION_END_S = 3.0
+DEFAULT_ROI_DWELL_S = 8.0
 
 
 def _name_to_ids(class_names: Dict[int, str], labels: Sequence[str]) -> List[int]:
@@ -120,6 +125,20 @@ class RunOutputs:
 
 
 def main() -> int:
+    def _sanitize_ort_provider_name(name: str) -> str:
+        # PowerShell line continuations and copy/paste can leave stray backticks/quotes.
+        return str(name).strip().strip("'\"`")
+
+    def _parse_ort_providers(raw: Optional[str]) -> Optional[List[str]]:
+        if raw is None:
+            return None
+        parts: List[str] = []
+        for p in str(raw).split(","):
+            cleaned = _sanitize_ort_provider_name(p)
+            if cleaned:
+                parts.append(cleaned)
+        return parts or None
+
     parser = argparse.ArgumentParser(description="MVP-A SOP runner (operator session in ROI + helmet compliance).")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--video", default=None, help="Path to input video file.")
@@ -154,13 +173,18 @@ def main() -> int:
     )
 
     parser.add_argument("--roi", default="configs/roi.json", help="ROI polygon JSON (from Scripts/calibrate_roi.py).")
+    parser.add_argument(
+        "--sop-profile",
+        default=None,
+        help="Optional SOP timing profile JSON (admin-tuned). CLI timing flags override values in this profile.",
+    )
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="Models/metadata.yaml", help="Class metadata yaml (names mapping).")
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
     parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
     parser.add_argument(
         "--onnx-providers",
-        default=None,
+        default="CUDAExecutionProvider,CPUExecutionProvider",
         help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
     )
     parser.add_argument(
@@ -193,9 +217,24 @@ def main() -> int:
 
     parser.add_argument("--analysis-fps", type=float, default=5.0, help="Target analysis FPS (used if source FPS is known).")
     parser.add_argument("--every", type=int, default=0, help="Process every Nth frame (overrides --analysis-fps if >0).")
-    parser.add_argument("--start-s", type=float, default=2.0, help="Session start after sustained person presence (seconds).")
-    parser.add_argument("--end-s", type=float, default=3.0, help="Session end after sustained absence (seconds).")
-    parser.add_argument("--roi-dwell-s", type=float, default=8.0, help="ROI dwell DONE after sustained presence (seconds).")
+    parser.add_argument(
+        "--start-s",
+        type=float,
+        default=None,
+        help="Session start after sustained person presence (seconds). Overrides --sop-profile if set.",
+    )
+    parser.add_argument(
+        "--end-s",
+        type=float,
+        default=None,
+        help="Session end after sustained absence (seconds). Overrides --sop-profile if set.",
+    )
+    parser.add_argument(
+        "--roi-dwell-s",
+        type=float,
+        default=None,
+        help="ROI dwell DONE after sustained presence (seconds). Overrides --sop-profile if set.",
+    )
     parser.add_argument("--roi-dwell-max-gap", type=float, default=0.4, help="Allow up to N seconds missing inside ROI dwell track (>=0).")
     parser.add_argument(
         "--roi-dwell-iou",
@@ -244,6 +283,38 @@ def main() -> int:
     parser.add_argument("--show", action="store_true", help="Show real-time window; press q/ESC to exit.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N processed frames (0=no limit).")
     args = parser.parse_args()
+    args_raw = dict(vars(args))
+
+    sop_profile = None
+    sop_profile_path = Path(args.sop_profile) if args.sop_profile else None
+    if sop_profile_path is not None:
+        sop_profile = load_sop_profile(sop_profile_path)
+
+    def _resolve_seconds(cli_value: Optional[float], profile_value: Optional[float], default_value: float) -> float:
+        if cli_value is not None:
+            return float(cli_value)
+        if profile_value is not None:
+            return float(profile_value)
+        return float(default_value)
+
+    start_s = _resolve_seconds(
+        args.start_s,
+        sop_profile.session_start_seconds if sop_profile else None,
+        DEFAULT_SESSION_START_S,
+    )
+    end_s = _resolve_seconds(
+        args.end_s,
+        sop_profile.session_end_seconds if sop_profile else None,
+        DEFAULT_SESSION_END_S,
+    )
+    roi_dwell_s = _resolve_seconds(
+        args.roi_dwell_s,
+        sop_profile.roi_dwell_seconds if sop_profile else None,
+        DEFAULT_ROI_DWELL_S,
+    )
+    args.start_s = start_s
+    args.end_s = end_s
+    args.roi_dwell_s = roi_dwell_s
 
     roi_path = Path(args.roi)
     roi_base = load_roi_json(roi_path)
@@ -279,12 +350,14 @@ def main() -> int:
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
     onnx_providers = None
-    require_onnx_providers: List[str] = [str(p).strip() for p in (args.require_onnx_provider or []) if str(p).strip()]
+    require_onnx_providers: List[str] = [
+        _sanitize_ort_provider_name(p) for p in (args.require_onnx_provider or []) if _sanitize_ort_provider_name(p)
+    ]
     if args.require_cuda:
         require_onnx_providers.append("CUDAExecutionProvider")
-        onnx_providers = ["CUDAExecutionProvider"]
-    elif args.onnx_providers:
-        onnx_providers = [p.strip() for p in str(args.onnx_providers).split(",") if p.strip()]
+        onnx_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    else:
+        onnx_providers = _parse_ort_providers(args.onnx_providers)
 
     pipeline = load_pipeline(
         model_path=args.model,
@@ -405,7 +478,7 @@ def main() -> int:
 
     run_config: Dict[str, object] = {
         "date": date,
-        "args": dict(vars(args)),
+        "args": args_raw,
         "source": {
             "video": args.video,
             "webcam": args.webcam,
@@ -413,6 +486,10 @@ def main() -> int:
         },
         "analysis_fps": float(analysis_fps),
         "every": int(every),
+        "sessionization": {
+            "start_seconds": float(args.start_s),
+            "end_seconds": float(args.end_s),
+        },
         "roi": {
             "path": str(roi_path),
             "frame_size": roi_base.frame_size,
@@ -437,6 +514,15 @@ def main() -> int:
         },
         "detect_roi_only": bool(args.detect_roi_only),
     }
+
+    if sop_profile_path is None:
+        run_config["sop_profile"] = {"path": None}
+    else:
+        run_config["sop_profile"] = {
+            "path": str(sop_profile_path),
+            "data": asdict(sop_profile) if sop_profile is not None else None,
+            "file": _file_metadata(sop_profile_path),
+        }
 
     start_wall: Optional[float] = None
     start_t_s: Optional[float] = None
