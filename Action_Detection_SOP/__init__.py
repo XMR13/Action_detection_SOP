@@ -7,6 +7,8 @@ dan lebih berfokus kepada
 - ROI/Session
 - keadaan SOP + Rules (DONE/ NOT DONE/ UNKOWN)
 - Reporting
+- Runner (logika running script mainnya)
+- tracking evidence untuk menentukan apakah terdapat hal ini atau tidak
 """
 
 from __future__ import annotations

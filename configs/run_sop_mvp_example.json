@@ -1,0 +1,17 @@
+{
+  "source": {
+    "video": "path/to/video.mp4"
+  },
+  "roi": "configs/roi_v4.json",
+  "sop_profile": "configs/sop_profile_example.json",
+  "model": "Models/action_model.onnx",
+  "metadata": "configs/metadata_PPE.yaml",
+  "analysis_fps": 5.0,
+  "save_video": true,
+  "no_evidence": false,
+  "evidence_pre_s": 2.0,
+  "evidence_post_s": 2.0,
+  "evidence_max_s": 6.0,
+  "person_label": ["person"],
+  "helmet_label": ["helmet"]
+}

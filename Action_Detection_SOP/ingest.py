@@ -11,6 +11,7 @@ class CaptureInfo:
     fps: Optional[float]
     width: Optional[int]
     height: Optional[int]
+    frame_count: Optional[int]
 
 
 def open_capture(*, video: Optional[str] = None, webcam: Optional[int] = None, rtsp: Optional[str] = None) -> cv2.VideoCapture:
@@ -42,5 +43,10 @@ def get_capture_info(cap: cv2.VideoCapture) -> CaptureInfo:
     w_val = int(w) if w and w > 0 else None
     h_val = int(h) if h and h > 0 else None
 
-    return CaptureInfo(fps=fps_val, width=w_val, height=h_val)
+    count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    if count is None or count <= 0:
+        count_val = None
+    else:
+        count_val = int(count)
 
+    return CaptureInfo(fps=fps_val, width=w_val, height=h_val, frame_count=count_val)

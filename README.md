@@ -92,6 +92,7 @@ Tips:
   - `--evidence-pre-s`, `--evidence-post-s`, `--evidence-max-s`, atau nonaktifkan via `--no-evidence`
   - Output: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4` + `evidence.json`
 - Setiap `checklist.json` menyertakan `start_time_iso`, `end_time_iso`, `start_date`, `end_date` (waktu lokal saat run dimulai + offset durasi).
+- Progress console bisa ditampilkan dengan `--progress` (default: aktif untuk `--video`, nonaktif untuk RTSP/webcam).
 
 ## Running tests (uv)
 
@@ -110,7 +111,15 @@ Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
    - `cp configs/sop_profile.example.json configs/sop_profile.json`
    - Edit `configs/sop_profile.json` (session start/end & ROI dwell seconds).
 
-3) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
+3) (Opsional) Pakai file config supaya tidak perlu banyak argumen CLI:
+   - `cp configs/run_sop_mvp.example.json configs/run_sop_mvp.json`
+   - Edit `configs/run_sop_mvp.json` (set source + model + metadata, dll).
+   - Jalankan: `python3 -m Scripts.run_sop_mvp --config configs/run_sop_mvp.json`
+   - Format key mengikuti nama argumen CLI (tanpa `--`), plus optional `source` block (`video/webcam/rtsp`).
+   - `source` hanya boleh berisi **satu** dari `video` / `webcam` / `rtsp`.
+   - CLI tetap bisa override nilai config jika dibutuhkan.
+
+4) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
    - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_model.onnx --metadata Models/metadata.yaml --save-video`
 
 Catatan penting:
