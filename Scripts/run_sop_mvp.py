@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 
 from Action_Detection_SOP.config import load_sop_profile
+from Action_Detection_SOP.evidence import EvidenceClipConfig, EvidenceClipData, EvidenceClipper
 from Action_Detection_SOP.ingest import get_capture_info, open_capture
 from Action_Detection_SOP.reporting import (
     today_date_str,
@@ -123,6 +126,51 @@ class RunOutputs:
     session_dirs: Tuple[Path, ...]
     daily_report_json: Path
     daily_report_csv: Path
+
+
+def _write_evidence_clip(
+    *,
+    clip_data: EvidenceClipData,
+    session_dir: Path,
+    index: int,
+) -> Optional[Dict[str, object]]:
+    if not clip_data.frames:
+        return None
+    evidence_dir = session_dir / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{clip_data.clip.name}_{index:02d}.mp4"
+    path = evidence_dir / filename
+    frame0 = clip_data.frames[0]
+    h, w = frame0.shape[:2]
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fps_out = float(clip_data.clip.fps)
+    writer = cv2.VideoWriter(str(path), fourcc, fps_out, (w, h))
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open evidence video writer: {path}")
+    for frame in clip_data.frames:
+        writer.write(frame)
+    writer.release()
+
+    return {
+        "name": clip_data.clip.name,
+        "file": str(path.relative_to(session_dir)),
+        "event_time_s": float(clip_data.clip.event_time_s),
+        "event_frame_idx": int(clip_data.clip.event_frame_idx),
+        "start_time_s": float(clip_data.clip.start_time_s),
+        "end_time_s": float(clip_data.clip.end_time_s),
+        "actual_start_time_s": float(clip_data.clip.actual_start_time_s),
+        "actual_end_time_s": float(clip_data.clip.actual_end_time_s),
+        "frame_count": int(clip_data.clip.frame_count),
+        "fps": float(clip_data.clip.fps),
+    }
+
+
+def _write_evidence_manifest(*, session_dir: Path, clips: List[Dict[str, object]]) -> Optional[Path]:
+    if not clips:
+        return None
+    path = session_dir / "evidence.json"
+    path.write_text(json.dumps({"clips": clips}, indent=2, sort_keys=True), encoding="utf-8")
+    return path
 
 
 def main() -> int:
@@ -302,6 +350,10 @@ def main() -> int:
         help="Save a full-run annotated MP4 under reports/<date>/run_annotated.mp4.",
     )
     parser.add_argument("--no-thumb", action="store_true", help="Disable per-session thumbnail image.")
+    parser.add_argument("--no-evidence", action="store_true", help="Disable evidence clips around DONE events.")
+    parser.add_argument("--evidence-pre-s", type=float, default=2.0, help="Seconds of evidence before DONE events.")
+    parser.add_argument("--evidence-post-s", type=float, default=2.0, help="Seconds of evidence after DONE events.")
+    parser.add_argument("--evidence-max-s", type=float, default=6.0, help="Max total length for each evidence clip.")
     parser.add_argument("--show", action="store_true", help="Show real-time window; press q/ESC to exit.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N processed frames (0=no limit).")
     args = parser.parse_args()
@@ -463,6 +515,13 @@ def main() -> int:
             raise ValueError("--helmet-s must be > 0")
         if args.helmet_max_gap < 0:
             raise ValueError("--helmet-max-gap must be >= 0")
+    if not args.no_evidence:
+        if args.evidence_pre_s < 0:
+            raise ValueError("--evidence-pre-s must be >= 0")
+        if args.evidence_post_s < 0:
+            raise ValueError("--evidence-post-s must be >= 0")
+        if args.evidence_max_s <= 0:
+            raise ValueError("--evidence-max-s must be > 0")
 
     source_fps = float(args.source_fps) if args.source_fps and args.source_fps > 0 else info.fps
     if source_fps is not None and source_fps <= 0:
@@ -478,6 +537,18 @@ def main() -> int:
         else:
             every = 1
             analysis_fps = float(args.analysis_fps)
+
+    evidence_enabled = not bool(args.no_evidence)
+    evidence_cfg: Optional[EvidenceClipConfig] = None
+    evidence_clipper: Optional[EvidenceClipper] = None
+    if evidence_enabled:
+        evidence_cfg = EvidenceClipConfig(
+            pre_seconds=float(args.evidence_pre_s),
+            post_seconds=float(args.evidence_post_s),
+            max_seconds=float(args.evidence_max_s),
+            analysis_fps=float(analysis_fps),
+        )
+        evidence_clipper = EvidenceClipper(evidence_cfg)
 
     helmet_cfg = None
     if not helmet_disabled:
@@ -546,6 +617,14 @@ def main() -> int:
             "iou_match_threshold": float(args.roi_dwell_iou),
             "min_person_height_px": int(args.roi_min_person_height),
         },
+        "evidence": {
+            "enabled": bool(evidence_enabled),
+            "pre_seconds": float(args.evidence_pre_s),
+            "post_seconds": float(args.evidence_post_s),
+            "max_seconds": float(args.evidence_max_s),
+            "analysis_fps": float(analysis_fps),
+            "events": ["roi_dwell_done", "helmet_done"],
+        },
         "model": _file_metadata(Path(args.model)),
         "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
         "postprocess": {
@@ -556,6 +635,11 @@ def main() -> int:
         "detect_roi_only": bool(args.detect_roi_only),
         "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
     }
+
+    if evidence_cfg is not None:
+        pre_s, post_s = evidence_cfg.resolved_window()
+        run_config["evidence"]["resolved_pre_seconds"] = float(pre_s)
+        run_config["evidence"]["resolved_post_seconds"] = float(post_s)
 
     if sop_profile_path is None:
         run_config["sop_profile"] = {"path": None}
@@ -571,10 +655,14 @@ def main() -> int:
 
     start_wall: Optional[float] = None
     start_t_s: Optional[float] = None
+    run_start_dt: Optional[datetime] = None
     reconnect_tries = 0
     reconnect_events = 0
     loop_count = 0
     thumb_written: set[str] = set()
+    evidence_session_id: Optional[str] = None
+    evidence_clip_counts: Dict[str, int] = {}
+    evidence_clips: List[Dict[str, object]] = []
 
     run_config["stream_sim"] = {
         "loop_video": bool(args.loop_video),
@@ -638,11 +726,18 @@ def main() -> int:
                 if start_wall is None:
                     start_wall = time.monotonic()
                     start_t_s = float(t_s)
+                    run_start_dt = datetime.now()
                 assert start_t_s is not None
                 target_wall = start_wall + (float(t_s) - start_t_s)
                 now_wall = time.monotonic()
                 if target_wall > now_wall:
                     time.sleep(target_wall - now_wall)
+            else:
+                if run_start_dt is None:
+                    run_start_dt = datetime.now()
+
+            if run_start_dt is not None and "run_start_iso" not in run_config:
+                run_config["run_start_iso"] = run_start_dt.isoformat(timespec="seconds")
 
             if roi_for_frame is None:
                 roi_for_frame = resolve_roi_for_frame(
@@ -710,8 +805,16 @@ def main() -> int:
                 last_persons_all = list(persons_all)
                 last_helmets_all = list(helmets_all)
 
+            events = engine.pop_events() if should_process else ()
             session_id = engine.active_session_id
             need_thumb = bool(should_process and save_thumb and session_id and session_id not in thumb_written)
+
+            if evidence_enabled and evidence_clipper is not None:
+                if evidence_session_id is None and session_id is not None:
+                    evidence_session_id = session_id
+                    evidence_clipper.reset()
+                    evidence_clip_counts = {}
+                    evidence_clips = []
 
             # Start per-session video writer lazily once we know the session dir.
             if (args.save_video or need_thumb) and session_id and active_session_dir is None:
@@ -731,7 +834,14 @@ def main() -> int:
 
             # Visualization (optional)
             vis = frame
-            if args.show or args.save_run_video or (args.save_video and writer is not None) or need_thumb:
+            need_vis = bool(
+                args.show
+                or args.save_run_video
+                or (args.save_video and writer is not None)
+                or need_thumb
+                or (evidence_enabled and evidence_session_id is not None and should_process)
+            )
+            if need_vis:
                 vis = frame.copy()
                 vis = draw_roi(vis, roi_for_frame)
                 dets_vis = last_dets_roi if args.detect_roi_only else last_dets_global
@@ -791,6 +901,30 @@ def main() -> int:
                     raise RuntimeError(f"Failed to write thumbnail: {thumb_path}")
                 thumb_written.add(session_id)
 
+            if evidence_enabled and evidence_clipper is not None and evidence_session_id is not None and should_process:
+                completed = evidence_clipper.add_frame(time_s=float(t_s), frame=vis)
+                if completed:
+                    session_dir = out_dir / "sessions" / date / f"session_{evidence_session_id}"
+                    session_dir.mkdir(parents=True, exist_ok=True)
+                    for clip_data in completed:
+                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
+                        evidence_clip_counts[clip_data.clip.name] = idx
+                        meta = _write_evidence_clip(
+                            clip_data=clip_data,
+                            session_dir=session_dir,
+                            index=idx,
+                        )
+                        if meta is not None:
+                            evidence_clips.append(meta)
+                for ev in events:
+                    if ev.session_id != evidence_session_id:
+                        continue
+                    evidence_clipper.trigger(
+                        name=ev.name,
+                        time_s=float(ev.time_s),
+                        frame_idx=int(ev.frame_idx),
+                    )
+
             if run_writer is not None and vis is not None:
                 run_writer.write(vis)
 
@@ -804,6 +938,16 @@ def main() -> int:
                     break
 
             if result is not None:
+                if run_start_dt is not None:
+                    start_dt = run_start_dt + timedelta(seconds=float(result.start_time_s))
+                    end_dt = run_start_dt + timedelta(seconds=float(result.end_time_s))
+                    result = replace(
+                        result,
+                        start_time_iso=start_dt.isoformat(timespec="seconds"),
+                        end_time_iso=end_dt.isoformat(timespec="seconds"),
+                        start_date=start_dt.date().isoformat(),
+                        end_date=end_dt.date().isoformat(),
+                    )
                 duration_s = _session_duration_s(result)
                 if args.min_session_s > 0 and duration_s < float(args.min_session_s):
                     discarded_sessions.append(
@@ -816,16 +960,39 @@ def main() -> int:
                     if writer is not None:
                         writer.release()
                         writer = None
-                    if active_session_dir is not None:
-                        shutil.rmtree(active_session_dir, ignore_errors=True)
-                        active_session_dir = None
+                    discard_dir = out_dir / "sessions" / date / f"session_{result.session_id}"
+                    if discard_dir.exists():
+                        shutil.rmtree(discard_dir, ignore_errors=True)
+                    active_session_dir = None
                     thumb_written.discard(result.session_id)
+                    if evidence_enabled and evidence_clipper is not None:
+                        evidence_clipper.reset()
+                        evidence_session_id = None
+                        evidence_clip_counts = {}
+                        evidence_clips = []
                     continue
                 sessions.append(result)
                 session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=result)
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
                 write_session_run_config(session_dir=session_dir, run_config=run_config)
+                if evidence_enabled and evidence_clipper is not None and evidence_session_id == result.session_id:
+                    pending = evidence_clipper.flush()
+                    for clip_data in pending:
+                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
+                        evidence_clip_counts[clip_data.clip.name] = idx
+                        meta = _write_evidence_clip(
+                            clip_data=clip_data,
+                            session_dir=session_dir,
+                            index=idx,
+                        )
+                        if meta is not None:
+                            evidence_clips.append(meta)
+                    _write_evidence_manifest(session_dir=session_dir, clips=evidence_clips)
+                    evidence_clipper.reset()
+                    evidence_session_id = None
+                    evidence_clip_counts = {}
+                    evidence_clips = []
                 session_dirs.append(session_dir)
 
                 # Close writer for this session
@@ -838,6 +1005,16 @@ def main() -> int:
         end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
         tail = engine.flush(time_s=float(end_time_s))
         if tail is not None:
+            if run_start_dt is not None:
+                start_dt = run_start_dt + timedelta(seconds=float(tail.start_time_s))
+                end_dt = run_start_dt + timedelta(seconds=float(tail.end_time_s))
+                tail = replace(
+                    tail,
+                    start_time_iso=start_dt.isoformat(timespec="seconds"),
+                    end_time_iso=end_dt.isoformat(timespec="seconds"),
+                    start_date=start_dt.date().isoformat(),
+                    end_date=end_dt.date().isoformat(),
+                )
             duration_s = _session_duration_s(tail)
             if args.min_session_s > 0 and duration_s < float(args.min_session_s):
                 discarded_sessions.append(
@@ -847,12 +1024,37 @@ def main() -> int:
                         "reason": "min_session_seconds",
                     }
                 )
+                discard_dir = out_dir / "sessions" / date / f"session_{tail.session_id}"
+                if discard_dir.exists():
+                    shutil.rmtree(discard_dir, ignore_errors=True)
+                if evidence_enabled and evidence_clipper is not None:
+                    evidence_clipper.reset()
+                    evidence_session_id = None
+                    evidence_clip_counts = {}
+                    evidence_clips = []
             else:
                 sessions.append(tail)
                 session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=tail)
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
                 write_session_run_config(session_dir=session_dir, run_config=run_config)
+                if evidence_enabled and evidence_clipper is not None and evidence_session_id == tail.session_id:
+                    pending = evidence_clipper.flush()
+                    for clip_data in pending:
+                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
+                        evidence_clip_counts[clip_data.clip.name] = idx
+                        meta = _write_evidence_clip(
+                            clip_data=clip_data,
+                            session_dir=session_dir,
+                            index=idx,
+                        )
+                        if meta is not None:
+                            evidence_clips.append(meta)
+                    _write_evidence_manifest(session_dir=session_dir, clips=evidence_clips)
+                    evidence_clipper.reset()
+                    evidence_session_id = None
+                    evidence_clip_counts = {}
+                    evidence_clips = []
                 session_dirs.append(session_dir)
 
     finally:

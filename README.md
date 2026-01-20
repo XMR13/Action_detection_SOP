@@ -88,6 +88,10 @@ Tips:
   - `--source-fps <angka>` untuk override FPS input
   - `--video-fps-out <angka>` untuk paksa FPS video hasil simpan
 - Untuk buang sesi yang terlalu pendek (noise), gunakan `--min-session-s <angka>` (0 = tidak dibuang).
+- Evidence clips sekitar event DONE diambil otomatis. Atur dengan:
+  - `--evidence-pre-s`, `--evidence-post-s`, `--evidence-max-s`, atau nonaktifkan via `--no-evidence`
+  - Output: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4` + `evidence.json`
+- Setiap `checklist.json` menyertakan `start_time_iso`, `end_time_iso`, `start_date`, `end_date` (waktu lokal saat run dimulai + offset durasi).
 
 ## Running tests (uv)
 

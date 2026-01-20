@@ -11,8 +11,8 @@ class SopProfile:
     schema_version: int
     session_start_seconds: float
     session_end_seconds: float
-    min_session_seconds: float = 0.0
     roi_dwell_seconds: float
+    min_session_seconds: float = 0.0
     notes: Optional[str] = None
 
     def __post_init__(self) -> None:

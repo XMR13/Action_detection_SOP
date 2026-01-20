@@ -146,6 +146,33 @@ class TestSopEngineMvpA(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].roi_dwell, StepStatus.DONE)
 
+    def test_emits_evidence_events(self) -> None:
+        fps = 5.0
+        engine = SopEngine(
+            SopEngineConfig(
+                session=SessionizationConfig(start_seconds=0.2, end_seconds=1.0, analysis_fps=fps),
+                helmet=HelmetRuleConfig(required_seconds=1.0, analysis_fps=fps, max_gap_frames=0),
+                roi_dwell=RoiDwellRuleConfig(required_seconds=1.0, analysis_fps=fps),
+            )
+        )
+        events = []
+        frame_idx = 1
+        for _ in range(8):
+            t_s = frame_idx / fps
+            persons = [_person_det()]
+            engine.update(
+                time_s=t_s,
+                frame_idx=frame_idx,
+                persons_in_roi=persons,
+                persons_all=persons,
+                helmets_all=[_helmet_det()],
+            )
+            events.extend(engine.pop_events())
+            frame_idx += 1
+        names = [e.name for e in events]
+        self.assertIn("roi_dwell_done", names)
+        self.assertIn("helmet_done", names)
+
 
 if __name__ == "__main__":
     unittest.main()

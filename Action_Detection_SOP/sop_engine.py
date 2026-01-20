@@ -21,6 +21,14 @@ class StepStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class EvidenceEvent:
+    name: str
+    time_s: float
+    frame_idx: int
+    session_id: str
+
+
+@dataclass(frozen=True)
 class SessionizationConfig:
     start_seconds: float = 2.0
     end_seconds: float = 3.0
@@ -140,6 +148,10 @@ class SessionResult:
     total_frames: int
     roi_dwell_max_frames: int
     helmet_positive_frames: int
+    start_time_iso: Optional[str] = None
+    end_time_iso: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     notes: Tuple[str, ...] = ()
 
 
@@ -318,6 +330,8 @@ class _ActiveSession:
     helmet_evidence: Optional[_EvidenceCounter] = None
     max_person_height_px: float = 0.0
     max_roi_person_height_px: float = 0.0
+    roi_dwell_done: bool = False
+    helmet_done: bool = False
     notes: List[str] = field(default_factory=list)
 
 
@@ -339,6 +353,7 @@ class SopEngine:
         )
         self._active: Optional[_ActiveSession] = None
         self._session_counter = 0
+        self._events: List[EvidenceEvent] = []
 
     @property
     def active_session_id(self) -> Optional[str]:
@@ -349,6 +364,13 @@ class SopEngine:
         if self._active is None:
             return 0
         return int(self._active.roi_dwell_max_frames)
+
+    def pop_events(self) -> Tuple[EvidenceEvent, ...]:
+        if not self._events:
+            return ()
+        events = tuple(self._events)
+        self._events.clear()
+        return events
 
     def update(
         self,
@@ -409,6 +431,18 @@ class SopEngine:
                 current_max = self._active.roi_dwell_tracker.update(persons_in_roi)
                 if current_max > self._active.roi_dwell_max_frames:
                     self._active.roi_dwell_max_frames = current_max
+                if not self._active.roi_dwell_done:
+                    required = self.cfg.roi_dwell.required_frames
+                    if required > 0 and self._active.roi_dwell_max_frames >= required:
+                        self._active.roi_dwell_done = True
+                        self._events.append(
+                            EvidenceEvent(
+                                name="roi_dwell_done",
+                                time_s=float(time_s),
+                                frame_idx=int(frame_idx),
+                                session_id=self._active.session_id,
+                            )
+                        )
 
             if self.cfg.helmet is not None and self._active.helmet_evidence is not None:
                 helmet_ok = helmet_associated_with_person(
@@ -419,6 +453,16 @@ class SopEngine:
                 if helmet_ok:
                     self._active.helmet_positive_frames += 1
                 self._active.helmet_evidence.update(helmet_ok)
+                if not self._active.helmet_done and self._active.helmet_evidence.achieved:
+                    self._active.helmet_done = True
+                    self._events.append(
+                        EvidenceEvent(
+                            name="helmet_done",
+                            time_s=float(time_s),
+                            frame_idx=int(frame_idx),
+                            session_id=self._active.session_id,
+                        )
+                    )
 
         if event == "end":
             if self._active is None:
