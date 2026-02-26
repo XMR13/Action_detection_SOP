@@ -97,6 +97,9 @@ def apply_run_config(
     int_keys = {
         "webcam",
         "reconnect_max_tries",
+        "rtsp_open_timeout_ms",
+        "rtsp_read_timeout_ms",
+        "rtsp_buffer_size",
         "imgsz",
         "every",
         "roi_min_person_height",
@@ -108,6 +111,8 @@ def apply_run_config(
     }
     float_keys = {
         "reconnect_wait_s",
+        "reconnect_wait_max_s",
+        "reconnect_backoff",
         "source_fps",
         "video_fps_out",
         "conf",
@@ -132,6 +137,7 @@ def apply_run_config(
         "loop_video",
         "realtime",
         "reconnect",
+        "rtsp_prefer_ffmpeg",
         "require_cuda",
         "no_nms",
         "skip_helmet",

@@ -21,7 +21,8 @@ except ModuleNotFoundError:
 from Action_Detection_SOP.config import load_sop_profile
 from Action_Detection_SOP.evidence import EvidenceClipConfig, EvidenceClipper
 from Action_Detection_SOP.evidence_io import write_evidence_clip, write_evidence_manifest
-from Action_Detection_SOP.ingest import get_capture_info, open_capture
+from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capture
+from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
 from Action_Detection_SOP.reporting import (
     today_date_str,
     write_daily_csv,
@@ -171,6 +172,12 @@ def _format_progress(
     return f"frames={frame_idx} read_fps={read_fps:5.1f} proc_fps={proc_fps:5.1f}"
 
 
+def _rtsp_option_or_none(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    return int(value) if int(value) > 0 else None
+
+
 @dataclass(frozen=True)
 class RunOutputs:
     date: str
@@ -314,14 +321,22 @@ def run_mvp(
                 msg += ' Hint: pass --onnx-providers "CUDAExecutionProvider" (or use --require-cuda).'
                 raise RuntimeError(msg)
 
-    cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)
-    info = get_capture_info(cap)
     if args.loop_video and not args.video:
         raise ValueError("--loop-video is only valid with --video.")
     if args.reconnect_wait_s < 0:
         raise ValueError("--reconnect-wait-s must be >= 0")
+    if args.reconnect_wait_max_s < 0:
+        raise ValueError("--reconnect-wait-max-s must be >= 0")
+    if args.reconnect_backoff < 1.0:
+        raise ValueError("--reconnect-backoff must be >= 1.0")
     if args.reconnect_max_tries < 0:
         raise ValueError("--reconnect-max-tries must be >= 0")
+    if args.rtsp_open_timeout_ms < 0:
+        raise ValueError("--rtsp-open-timeout-ms must be >= 0")
+    if args.rtsp_read_timeout_ms < 0:
+        raise ValueError("--rtsp-read-timeout-ms must be >= 0")
+    if args.rtsp_buffer_size < 0:
+        raise ValueError("--rtsp-buffer-size must be >= 0")
 
     if args.roi_upscale < 1.0:
         raise ValueError("--roi-upscale must be >= 1.0")
@@ -357,6 +372,54 @@ def run_mvp(
             raise ValueError("--evidence-post-s must be >= 0")
         if args.evidence_max_s <= 0:
             raise ValueError("--evidence-max-s must be > 0")
+
+    reconnect_tries = 0
+    reconnect_events = 0
+
+    rtsp_open_timeout_ms = _rtsp_option_or_none(int(args.rtsp_open_timeout_ms))
+    rtsp_read_timeout_ms = _rtsp_option_or_none(int(args.rtsp_read_timeout_ms))
+    rtsp_buffer_size = _rtsp_option_or_none(int(args.rtsp_buffer_size))
+    rtsp_prefer_ffmpeg = bool(args.rtsp_prefer_ffmpeg)
+
+    def _open_capture_with_retries(*, initial_open: bool) -> Tuple[cv2.VideoCapture, CaptureInfo]:
+        nonlocal reconnect_tries, reconnect_events
+        while True:
+            try:
+                new_cap = open_capture(
+                    video=args.video,
+                    webcam=args.webcam,
+                    rtsp=args.rtsp,
+                    rtsp_prefer_ffmpeg=rtsp_prefer_ffmpeg,
+                    rtsp_open_timeout_ms=rtsp_open_timeout_ms,
+                    rtsp_read_timeout_ms=rtsp_read_timeout_ms,
+                    rtsp_buffer_size=rtsp_buffer_size,
+                )
+                new_info = get_capture_info(new_cap)
+                if reconnect_tries > 0:
+                    print(f"Reconnect succeeded after {reconnect_tries} attempt(s).")
+                if not initial_open:
+                    reconnect_events += 1
+                reconnect_tries = 0
+                return new_cap, new_info
+            except Exception as exc:
+                if not args.reconnect:
+                    raise
+                reconnect_tries += 1
+                if args.reconnect_max_tries and reconnect_tries > int(args.reconnect_max_tries):
+                    raise RuntimeError(f"Reconnect failed after {args.reconnect_max_tries} tries.") from exc
+                wait_s = reconnect_wait_seconds(
+                    attempt=reconnect_tries,
+                    base_wait_s=float(args.reconnect_wait_s),
+                    backoff=float(args.reconnect_backoff),
+                    wait_cap_s=float(args.reconnect_wait_max_s),
+                )
+                context = "open" if initial_open else "reconnect"
+                print(f"Capture {context} failed (attempt {reconnect_tries}): {exc}")
+                if wait_s > 0:
+                    print(f"Retrying in {wait_s:.1f}s...")
+                    time.sleep(wait_s)
+
+    cap, info = _open_capture_with_retries(initial_open=True)
 
     source_fps = float(args.source_fps) if args.source_fps and args.source_fps > 0 else info.fps
     if source_fps is not None and source_fps <= 0:
@@ -499,8 +562,6 @@ def run_mvp(
     start_wall: Optional[float] = None
     start_t_s: Optional[float] = None
     run_start_dt: Optional[datetime] = None
-    reconnect_tries = 0
-    reconnect_events = 0
     loop_count = 0
     thumb_written: set[str] = set()
     evidence_session_id: Optional[str] = None
@@ -512,7 +573,13 @@ def run_mvp(
         "realtime": bool(args.realtime),
         "reconnect": bool(args.reconnect),
         "reconnect_wait_s": float(args.reconnect_wait_s),
+        "reconnect_wait_max_s": float(args.reconnect_wait_max_s),
+        "reconnect_backoff": float(args.reconnect_backoff),
         "reconnect_max_tries": int(args.reconnect_max_tries),
+        "rtsp_prefer_ffmpeg": bool(rtsp_prefer_ffmpeg),
+        "rtsp_open_timeout_ms": int(rtsp_open_timeout_ms) if rtsp_open_timeout_ms is not None else None,
+        "rtsp_read_timeout_ms": int(rtsp_read_timeout_ms) if rtsp_read_timeout_ms is not None else None,
+        "rtsp_buffer_size": int(rtsp_buffer_size) if rtsp_buffer_size is not None else None,
     }
 
     writer: Optional[cv2.VideoWriter] = None
@@ -551,26 +618,24 @@ def run_mvp(
             if not ok or frame is None:
                 if args.video and args.loop_video:
                     cap.release()
-                    cap = open_capture(video=args.video)
+                    cap = open_capture(
+                        video=args.video,
+                        rtsp_prefer_ffmpeg=rtsp_prefer_ffmpeg,
+                        rtsp_open_timeout_ms=rtsp_open_timeout_ms,
+                        rtsp_read_timeout_ms=rtsp_read_timeout_ms,
+                        rtsp_buffer_size=rtsp_buffer_size,
+                    )
                     info = get_capture_info(cap)
                     loop_count += 1
                     reconnect_tries = 0
                     continue
 
                 if args.reconnect:
-                    reconnect_tries += 1
-                    if args.reconnect_max_tries and reconnect_tries > int(args.reconnect_max_tries):
-                        raise RuntimeError(f"Reconnect failed after {args.reconnect_max_tries} tries.")
                     cap.release()
-                    if args.reconnect_wait_s:
-                        time.sleep(float(args.reconnect_wait_s))
-                    cap = open_capture(video=args.video, webcam=args.webcam, rtsp=args.rtsp)
-                    info = get_capture_info(cap)
-                    reconnect_events += 1
+                    cap, info = _open_capture_with_retries(initial_open=False)
                     continue
 
                 break
-            reconnect_tries = 0
 
             frame_idx += 1
             should_process = (frame_idx - 1) % every == 0

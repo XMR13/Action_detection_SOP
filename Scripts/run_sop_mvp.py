@@ -38,10 +38,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait before reconnect attempt (only if --reconnect).",
     )
     parser.add_argument(
+        "--reconnect-wait-max-s",
+        type=float,
+        default=30.0,
+        help="Max reconnect wait after backoff (0 = no cap).",
+    )
+    parser.add_argument(
+        "--reconnect-backoff",
+        type=float,
+        default=1.5,
+        help="Reconnect backoff multiplier (>=1.0).",
+    )
+    parser.add_argument(
         "--reconnect-max-tries",
         type=int,
-        default=30,
-        help="Max reconnect attempts (only if --reconnect).",
+        default=0,
+        help="Max reconnect attempts (0 = retry forever).",
+    )
+    parser.add_argument(
+        "--rtsp-open-timeout-ms",
+        type=int,
+        default=10000,
+        help="RTSP open timeout hint for OpenCV backend (0 = disabled).",
+    )
+    parser.add_argument(
+        "--rtsp-read-timeout-ms",
+        type=int,
+        default=5000,
+        help="RTSP read timeout hint for OpenCV backend (0 = disabled).",
+    )
+    parser.add_argument(
+        "--rtsp-buffer-size",
+        type=int,
+        default=1,
+        help="OpenCV capture buffer size hint for RTSP (0 = backend default).",
+    )
+    parser.add_argument(
+        "--rtsp-prefer-ffmpeg",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prefer FFmpeg backend for RTSP open when available.",
     )
     parser.add_argument(
         "--source-fps",

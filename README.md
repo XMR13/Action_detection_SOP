@@ -87,6 +87,10 @@ Tips:
 - Jika FPS dari RTSP/NVR tidak terbaca (atau video output terlihat lambat), pakai:
   - `--source-fps <angka>` untuk override FPS input
   - `--video-fps-out <angka>` untuk paksa FPS video hasil simpan
+- Untuk stream RTSP yang putus-nyambung, aktifkan reconnect persisten:
+  - `--reconnect --reconnect-max-tries 0` (retry terus)
+  - Tuning retry: `--reconnect-wait-s`, `--reconnect-backoff`, `--reconnect-wait-max-s`
+  - Tuning capture RTSP: `--rtsp-open-timeout-ms`, `--rtsp-read-timeout-ms`, `--rtsp-buffer-size`
 - Untuk buang sesi yang terlalu pendek (noise), gunakan `--min-session-s <angka>` (0 = tidak dibuang).
 - Evidence clips sekitar event DONE diambil otomatis. Atur dengan:
   - `--evidence-pre-s`, `--evidence-post-s`, `--evidence-max-s`, atau nonaktifkan via `--no-evidence`
