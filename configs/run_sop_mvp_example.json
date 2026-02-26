@@ -2,7 +2,7 @@
   "source": {
     "video": "path/to/video.mp4"
   },
-  "roi": "configs/roi_v4.json",
+  "roi": "configs/roi_v5.json",
   "sop_profile": "configs/sop_profile_example.json",
   "model": "Models/action_model.onnx",
   "metadata": "configs/metadata_PPE.yaml",

@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--roi-dwell-iou",
         type=float,
-        default=0.25,
+        default=0.35,
         help="IoU threshold for matching person tracklets inside ROI (0.05..0.95).",
     )
     parser.add_argument(
