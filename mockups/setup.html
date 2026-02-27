@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Setup Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body class="page-setup">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/indah-kiat-logo.png" alt="Indah Kiat logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrap SOP Review</h1>
+            <p class="sub">Mengubah konfigurasi untuk setup yang ada.</p>
+            <p class="brand-path">mockups/setup.html</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">
+            <strong>Dashboard</strong>
+            <span class="pill">monitor</span>
+          </a>
+          <a href="review-queue.html">
+            <strong>Review Queue</strong>
+            <span class="pill">review</span>
+          </a>
+          <a class="active" href="setup.html" aria-current="page">
+            <strong>Setup</strong>
+            <span class="pill brand">active</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Menu boundary</h3>
+          <p class="caption">
+            This page combines camera setup, retention, and review policy so the product stays small.
+          </p>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar">
+          <div class="title">
+            <h2>Setup</h2>
+            <p>
+              Pengendalian setup operasional untuk server website dan workflow review</p>
+          </div>
+          <div class="filters">
+            <span class="hint">ASP.NET Core + SQL Server target</span>
+            <span class="hint">evidence stored on server disk</span>
+          </div>
+        </header>
+
+        <section class="mode-banner">
+          <div class="mode-copy">
+            <span class="mode-eyebrow">MINIMAL ADMIN</span>
+            <span class="mode-title">Only expose settings that directly affect review trust and ingest stability.</span>
+            <span class="mode-desc">
+              Training, model packaging, and Jetson-side runtime tuning stay outside this website UI.
+            </span>
+          </div>
+          <div class="mode-tags">
+            <span class="pill">site defaults</span>
+            <span class="pill ink">camera mapping</span>
+            <span class="pill brand">retention policy</span>
+          </div>
+        </section>
+
+        <section class="config-grid">
+          <article class="panel config-card">
+            <h3>Site & Camera Defaults</h3>
+            <div class="meta">
+              <div class="row">
+                <span class="key">Default site</span>
+                <span class="val">Subang</span>
+              </div>
+              <div class="row">
+                <span class="key">Primary lane camera</span>
+                <span class="val">cam_01 / wrapping-lane</span>
+              </div>
+              <div class="row">
+                <span class="key">Timezone</span>
+                <span class="val">Asia/Jakarta</span>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn">Edit Mapping</button>
+              <button class="btn">Add Camera</button>
+            </div>
+          </article>
+
+          <article class="panel config-card">
+            <h3>Aturan Review  <i>(policy)</i></h3>
+            <div class="checklist">
+              <div class="step-card">
+                <div class="step-head">
+                  <strong>Auto-accept machine DONE</strong>
+                  <span class="pill yes">enabled</span>
+                </div>
+                <p>Only when confidence and evidence policy both pass the configured threshold.</p>
+              </div>
+              <div class="step-card">
+                <div class="step-head">
+                  <strong>Force manual review on UNKNOWN</strong>
+                  <span class="pill brand">required</span>
+                </div>
+                <p>Protects against false DONE in poor visibility conditions.</p>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn primary">Edit Review Rules</button>
+            </div>
+          </article>
+
+          <article class="panel config-card">
+            <h3>Bukti path penyimpanan</h3>
+            <div class="meta">
+              <div class="row">
+                <span class="key">Server path</span>
+                <span class="val">evidence/subang/cam_01/2026-02-27/</span>
+              </div>
+              <div class="row">
+                <span class="key">Thumbnail retention</span>
+                <span class="val">90 days</span>
+              </div>
+              <div class="row">
+                <span class="key">Clip retention</span>
+                <span class="val">30 days</span>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn">Open Retention Policy</button>
+              <button class="btn">Test Storage</button>
+            </div>
+          </article>
+
+          <article class="panel config-card">
+            <h3>Roles & Handoff</h3>
+            <div class="timeline compact">
+              <div class="tl-item">
+                <span class="t">Reviewer</span>
+                <span class="d">Can comment and override session outcomes.</span>
+              </div>
+              <div class="tl-item">
+                <span class="t">Supervisor</span>
+                <span class="d">Can change policy settings and export reports.</span>
+              </div>
+              <div class="tl-item">
+                <span class="t">Service account</span>
+                <span class="d">Used by Jetson uploader for idempotent session ingest.</span>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

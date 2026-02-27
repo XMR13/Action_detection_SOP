@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Session Detail Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body class="page-event-detail">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/indah-kiat-logo.png" alt="Indah Kiat logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrap SOP Review</h1>
+            <p class="sub">Session-level audit view with evidence, comments, and override history.</p>
+            <p class="brand-path">mockups/session-detail.html</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">
+            <strong>Dashboard</strong>
+            <span class="pill">overview</span>
+          </a>
+          <a class="active" href="review-queue.html" aria-current="page">
+            <strong>Review Queue</strong>
+            <span class="pill brand">detail</span>
+          </a>
+          <a href="setup.html">
+            <strong>Setup</strong>
+            <span class="pill ink">config</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Context page, not menu page</h3>
+          <p class="caption">
+            Session detail should be entered from Dashboard or Review Queue. It does not need
+            a primary menu item of its own.
+          </p>
+          <a class="btn primary" href="review-queue.html">Back to Queue</a>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar">
+          <div class="title">
+            <h2>Session Detail</h2>
+            <p>Evidence and audit trail for one machine session.</p>
+          </div>
+          <div class="filters">
+            <span class="hint">Site: Subang</span>
+            <span class="hint">Camera: cam_01</span>
+            <span class="hint">UID: iks-subang-c01-20260227-014</span>
+          </div>
+        </header>
+
+        <section class="mode-banner detail">
+          <div class="mode-copy">
+            <span class="mode-eyebrow">AUDIT DETAIL</span>
+            <span class="mode-title">Machine said UNKNOWN. Reviewer kept it UNKNOWN with a glare note.</span>
+            <span class="mode-desc">
+              The detailed page exists for traceability, not speed. Everything tied to a session should be visible here.
+            </span>
+          </div>
+          <div class="mode-tags">
+            <span class="pill dir-b">machine unknown</span>
+            <span class="pill ink">reviewed by line-lead-02</span>
+            <span class="pill">16:14:22</span>
+          </div>
+        </section>
+
+        <section class="two-col detail-layout detail-grid">
+          <article class="grid">
+            <div class="big-thumb detail-thumb">
+              <div class="bbox" aria-hidden="true"></div>
+              <div class="line" aria-hidden="true"></div>
+              <div class="frame-overlay">
+                <span class="pill">thumbnail.jpg</span>
+                <span class="pill brand">event clip available</span>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-head">
+                <div>
+              <h3>Event Timeline</h3>
+                  <p class="caption">Tie the reviewer note to a precise evidence moment.</p>
+                </div>
+                <span class="pill">evidence.json</span>
+              </div>
+              <div class="timeline">
+                <div class="tl-item">
+                  <span class="t">00.0s</span>
+                  <span class="d">Session starts after person persists in ROI above threshold.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">03.4s</span>
+                  <span class="d">Helmet detection appears briefly but confidence is unstable.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">08.1s</span>
+                  <span class="d">Glare peaks on upper frame and person head region becomes unreliable.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">10.8s</span>
+                  <span class="d">Session closes. Final checklist saved to checklist.json.</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="grid">
+            <div class="panel">
+              <div class="section-head">
+                <div>
+                  <h3>Checklist</h3>
+                  <p class="caption">Show machine and human decisions side by side.</p>
+                </div>
+                <span class="pill">status diff</span>
+              </div>
+              <div class="checklist">
+                <div class="step-card">
+                  <div class="step-head">
+                    <strong>Operator present in ROI</strong>
+                    <div class="step-pills">
+                      <span class="pill yes">machine DONE</span>
+                      <span class="pill yes">review DONE</span>
+                    </div>
+                  </div>
+                  <p>Stable person presence. No reviewer intervention needed.</p>
+                </div>
+                <div class="step-card">
+                  <div class="step-head">
+                    <strong>Helmet compliance</strong>
+                    <div class="step-pills">
+                      <span class="pill dir-b">machine UNKNOWN</span>
+                      <span class="pill dir-b">review UNKNOWN</span>
+                    </div>
+                  </div>
+                  <p>Reviewer agreed there was not enough evidence to claim DONE or NOT DONE.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Session Metadata</h3>
+              <div class="meta">
+                <div class="row">
+                  <span class="key">Session ID</span>
+                  <span class="val">IKS-C01-014</span>
+                </div>
+                <div class="row">
+                  <span class="key">Session UID</span>
+                  <span class="val">iks-subang-c01-20260227-014</span>
+                </div>
+                <div class="row">
+                  <span class="key">Start time</span>
+                  <span class="val">2026-02-27 16:12:08</span>
+                </div>
+                <div class="row">
+                  <span class="key">Duration</span>
+                  <span class="val">10.8 seconds</span>
+                </div>
+                <div class="row">
+                  <span class="key">Model version</span>
+                  <span class="val">ppe-yolo-onnx-v3</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Comments & Overrides</h3>
+              <div class="timeline">
+                <div class="tl-item">
+                  <span class="t">16:14:22 | line-lead-02</span>
+                  <span class="d">Kept helmet status UNKNOWN because glare obscured the head region for most of the clip.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">16:14:31 | system</span>
+                  <span class="d">Audit record saved. Daily report will reflect reviewed outcome separately from machine output.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Artifacts</h3>
+              <div class="artifacts-list">
+                <div class="artifact-item">
+                  <strong>checklist.json</strong>
+                  <span>Final machine checklist payload</span>
+                </div>
+                <div class="artifact-item">
+                  <strong>thumbnail.jpg</strong>
+                  <span>Primary evidence image shown in queue</span>
+                </div>
+                <div class="artifact-item">
+                  <strong>evidence/helmet_done_01.mp4</strong>
+                  <span>Optional clip written by event clipper</span>
+                </div>
+                <div class="artifact-item">
+                  <strong>run_config.json</strong>
+                  <span>Thresholds and config source for reproducibility</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

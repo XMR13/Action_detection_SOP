@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Review Queue Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body class="page-review-queue">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/indah-kiat-logo.png" alt="Indah Kiat logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrap SOP Review</h1>
+            <p class="sub">Review hasil pengecekan otomatis.</p>
+            <p class="brand-path">mockups/review-queue.html</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">
+            <strong>Dashboard</strong>
+            <span class="pill">daily pulse</span>
+          </a>
+          <a class="active" href="review-queue.html" aria-current="page">
+            <strong>Review Queue</strong>
+            <span class="pill brand">active</span>
+          </a>
+          <a href="setup.html">
+            <strong>Setup</strong>
+            <span class="pill ink">rules</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Queue principles</h3>
+          <div class="timeline compact">
+            <div class="tl-item">
+              <span class="t">One active session</span>
+              <span class="d">Large evidence frame and checklist stay on screen together.</span>
+            </div>
+            <div class="tl-item">
+              <span class="t">Fast keys</span>
+              <span class="d">Y, N, S plus J, K for rapid handoff through the queue.</span>
+            </div>
+            <div class="tl-item">
+              <span class="t">Audit-safe</span>
+              <span class="d">Comments and overrides are attached to the machine result, not replacing it.</span>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar">
+          <div class="title">
+            <h2>Review Queue</h2>
+            <p>Memprioritaskan sesi ambigu atau yang gagal sebelum diteruskan ke report.</p>
+          </div>
+          <div class="filters">
+            <span class="hint">Site: Subang</span>
+            <span class="hint">Camera: cam_01</span>
+            <span class="hint">Queue length: 14</span>
+          </div>
+        </header>
+
+        <section class="mode-banner queue">
+          <div class="mode-copy">
+            <span class="mode-eyebrow">REVIEW MODE</span>
+            <span class="mode-title">Session IKS-C01-2026-02-27-014 is waiting for a human decision.</span>
+            <span class="mode-desc">
+              UNKNOWN should be easy to keep. The UI should not pressure reviewers into false DONE.
+            </span>
+          </div>
+          <div class="mode-tags">
+            <span class="pill brand">unknown helmet</span>
+            <span class="pill">session 14 of 14</span>
+            <span class="pill ink">entered 16:12</span>
+          </div>
+        </section>
+
+        <section class="queue-status-grid">
+          <article class="queue-status-card">
+            <div class="label">Pending</div>
+            <div class="value">14</div>
+          </article>
+          <article class="queue-status-card yes">
+            <div class="label">Diterima</div>
+            <div class="value">88</div>
+          </article>
+          <article class="queue-status-card no">
+            <div class="label">Ditolak</div>
+            <div class="value">21</div>
+          </article>
+          <article class="queue-status-card">
+            <div class="label">Manual unknown</div>
+            <div class="value">6</div>
+          </article>
+        </section>
+
+        <section class="two-col queue-layout">
+          <article class="grid">
+            <div class="big-thumb queue-thumb">
+              <div class="bbox" aria-hidden="true"></div>
+              <div class="line" aria-hidden="true"></div>
+              <div class="frame-overlay">
+                <span class="pill brand">helmet confidence drop</span>
+                <span class="pill">event +2.4s</span>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="section-head">
+                <div>
+                  <h3>Timeline Bukti</h3>
+                  <p class="caption">Machine evidence should always sit next to the reviewer action.</p>
+                </div>
+                  <a class="pill" href="session-detail.html">Full Detail</a>
+              </div>
+              <div class="timeline">
+                <div class="tl-item">
+                  <span class="t">16:12:08.214</span>
+                  <span class="d">Session opened when person remained in ROI beyond start threshold.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">16:12:11.720</span>
+                  <span class="d">Helmet confidence flickered below sustained rule for 1.3 seconds.</span>
+                </div>
+                <div class="tl-item">
+                  <span class="t">16:12:18.005</span>
+                  <span class="d">Session closed and machine saved final checklist as UNKNOWN for helmet.</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="queue-panel panel">
+            <div class="queue-next-strip">
+              <div class="queue-next-copy">
+                <span class="head">Current case</span>
+                <span class="body">IKS-C01-2026-02-27-014 | operator shift A</span>
+              </div>
+              <span class="pill no">needs attention</span>
+            </div>
+
+            <div class="checklist">
+              <div class="step-card">
+                <div class="step-head">
+                  <strong>Operator present in ROI</strong>
+                  <span class="pill yes">DONE</span>
+                </div>
+                <p>Sustained for 10.8 seconds. Session is valid.</p>
+              </div>
+              <div class="step-card">
+                <div class="step-head">
+                  <strong>Helmet compliance</strong>
+                  <span class="pill dir-b">UNKNOWN</span>
+                </div>
+                <p>Top-of-person overlap dropped because of glare and head angle.</p>
+              </div>
+            </div>
+
+            <div class="meta">
+              <div class="row">
+                <span class="key">Machine verdict</span>
+                <span class="val">UNKNOWN</span>
+              </div>
+              <div class="row">
+                <span class="key">Session UID</span>
+                <span class="val">iks-subang-c01-20260227-014</span>
+              </div>
+              <div class="row">
+                <span class="key">Evidence available</span>
+                <span class="val">thumbnail + clip</span>
+              </div>
+            </div>
+
+            <form id="review-form" data-disable-on-submit>
+              <input id="review-status" name="review_status" type="hidden" value="PENDING" />
+              <div class="field">
+                <label for="review-note">Reviewer note</label>
+                <textarea
+                  id="review-note"
+                  name="review_note"
+                  placeholder="Explain why the machine result should be accepted, rejected, or kept unknown…"
+                  autocomplete="off"
+                ></textarea>
+              </div>
+
+              <div class="queue-actions">
+                <div class="queue-actions-head">
+                  <strong>Review action</strong>
+                  <span class="caption">Pick one decision, then move on.</span>
+                </div>
+                <div class="queue-actions-grid">
+                  <button class="btn yes btn-action" type="submit" data-review-status="QUALIFIED">
+                    Approve
+                  </button>
+                  <button class="btn no btn-action" type="submit" data-review-status="NOT_QUALIFIED">
+                    Reject
+                  </button>
+                  <button class="btn secondary btn-action" type="submit" data-review-status="PENDING">
+                    Unknown
+                  </button>
+                  <a class="btn btn-action btn-detail" href="session-detail.html">Detail</a>
+                </div>
+                <div class="queue-help">
+                  <span class="hint"><span class="kbd">Y</span> approve</span>
+                  <span class="hint"><span class="kbd">N</span> reject</span>
+                  <span class="hint"><span class="kbd">S</span> unknown</span>
+                  <span class="hint"><span class="kbd">J</span>/<span class="kbd">K</span> queue</span>
+                </div>
+              </div>
+            </form>
+
+            <div class="queue-mini-list">
+              <a class="queue-mini-item" href="#" data-queue-link>
+                <div class="queue-mini-main">
+                  <strong>IKS-C01-010</strong>
+                  <span>Machine NO | no helmet sustained</span>
+                </div>
+                <span class="pill no">NO</span>
+              </a>
+              <a class="queue-mini-item active" href="#" data-queue-link>
+                <div class="queue-mini-main">
+                  <strong>IKS-C01-014</strong>
+                  <span>Machine UNKNOWN | glare on head region</span>
+                </div>
+                <span class="pill dir-b">U</span>
+              </a>
+              <a class="queue-mini-item" href="#" data-queue-link>
+                <div class="queue-mini-main">
+                  <strong>IKS-C01-016</strong>
+                  <span>Needs confirmation | clip uploaded late</span>
+                </div>
+                <span class="pill">P</span>
+              </a>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="js/site.js"></script>
+  </body>
+</html>

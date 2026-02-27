@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Dashboard Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body class="page-dashboard">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/indah-kiat-logo.png" alt="Indah Kiat logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrap SOP Review</h1>
+            <p class="sub">Dashbord untuk mengecek hasil auto check SOP Roll wrapping</p>
+            <p class="brand-path">mockups/index.html</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a class="active" href="index.html" aria-current="page">
+            <strong>Dashboard</strong>
+            <span class="pill brand">live pulse</span>
+          </a>
+          <a href="review-queue.html">
+            <strong>Review Queue</strong>
+            <span class="pill">operator flow</span>
+          </a>
+          <a href="setup.html">
+            <strong>Setup</strong>
+            <span class="pill ink">minimal admin</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Why Only 3 Menus</h3>
+          <p class="caption">
+            This system is not a broad admin portal. Users mostly need to monitor
+            sessions, review machine output, and adjust a small set of site rules.
+          </p>
+          <div class="timeline compact">
+            <div class="tl-item">
+              <span class="t">Dashboard</span>
+              <span class="d">Daily volume, SLA, site filters, recent sessions.</span>
+            </div>
+            <div class="tl-item">
+              <span class="t">Review Queue</span>
+              <span class="d">Operator comments and YES/NO/UNKNOWN overrides.</span>
+            </div>
+            <div class="tl-item">
+              <span class="t">Setup</span>
+              <span class="d">Camera defaults, evidence policy, retention, roles.</span>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar">
+          <div class="title">
+            <h2>Dashboard</h2>
+            <p>Pengecekan harian untuk SOP berdasarkan tempat dan kamera.</p>
+          </div>
+
+          <div class="filters" aria-label="Filters">
+            <div class="field">
+              <label for="site">Site</label>
+              <select id="site" name="site">
+                <option>Subang</option>
+                <option>Serang</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="camera">Camera</label>
+              <select id="camera" name="camera">
+                <option>cam_17 | Roll wrapping</option>
+                <option>cam_18 | staging</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="range">Date range</label>
+              <select id="range" name="range">
+                <option>Today</option>
+                <option>Last 7 days</option>
+                <option>This month</option>
+              </select>
+            </div>
+          </div>
+        </header>
+
+        <section class="mode-banner">
+          <div class="mode-copy">
+            <span class="mode-eyebrow">OPS PULSE</span>
+            <span class="mode-title">Lane is stable. Review backlog is below shift threshold.</span>
+            <span class="mode-desc">
+              The website should feel like an operations console first, not a report archive.
+            </span>
+          </div>
+          <div class="mode-tags">
+            <span class="pill">pending 14</span>
+            <span class="pill ink">avg review 3.1 min</span>
+            <span class="pill brand">target &lt; 10 min</span>
+          </div>
+        </section>
+
+        <section class="kpis">
+          <article class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <span class="kpi-label">Sesi yang dideteksi</span>
+                <span class="kpi-accent ink">S</span>
+              </div>
+              <div class="kpi-value">126</div>
+              <div class="kpi-hint">+9 vs. yesterday</div>
+            </div>
+          </article>
+          <article class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <span class="kpi-label">Review pending</span>
+                <span class="kpi-accent brand">Q</span>
+              </div>
+              <div class="kpi-value">14</div>
+              <div class="kpi-hint">4 urgent sessions from cam_01</div>
+            </div>
+          </article>
+          <article class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <span class="kpi-label">Helmet (CHECKED)</span>
+                <span class="kpi-accent yes">Y</span>
+              </div>
+              <div class="kpi-value">101</div>
+              <div class="kpi-hint">80.1% across reviewed sessions</div>
+            </div>
+          </article>
+          <article class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <span class="kpi-label">persentase sesi <br> yang tidak terdeteksi</span>
+                <span class="kpi-accent dir-b">U</span>
+              </div>
+              <div class="kpi-value">7.1%</div>
+              <div class="kpi-hint">Mostly glare during 14:00-15:00</div>
+            </div>
+          </article>
+          <article class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <span class="kpi-label">Pengecekan manual</span>
+                <span class="kpi-accent no">M</span>
+              </div>
+              <div class="kpi-value">3</div>
+              <div class="kpi-hint">2 NO, 1 UNKNOWN</div>
+            </div>
+          </article>
+        </section>
+
+        <section class="row2">
+          <article class="dashboard-trend">
+            <div class="pad">
+              <div class="btn-row">
+                <span class="pill dir-a">DONE</span>
+                <span class="pill dir-b">UNKNOWN</span>
+                <span class="pill no">NOT DONE</span>
+              </div>
+              <div class="trend-context">
+                <p class="trend-meaning">
+                  <b>Tend line Auto Check SOP sesuai</b> range date yang dipilih
+                </p>
+                <div class="trend-meta-pills">
+                  <span class="trend-key"><span class="trend-key-line dir-a"></span>DONE</span>
+                  <span class="trend-key"><span class="trend-key-line dir-b"></span>UNKNOWN</span>
+                </div>
+              </div>
+              <div class="trend-chart-wrap">
+                <svg class="trend-svg" viewBox="0 0 760 190" role="img" aria-label="Session trend">
+                  <line class="trend-grid-line" x1="52" y1="26" x2="720" y2="26"></line>
+                  <line class="trend-grid-line" x1="52" y1="84" x2="720" y2="84"></line>
+                  <line class="trend-grid-line" x1="52" y1="142" x2="720" y2="142"></line>
+                  <text class="trend-grid-value" x="42" y="29">50</text>
+                  <text class="trend-grid-value" x="42" y="87">30</text>
+                  <text class="trend-grid-value" x="42" y="145">10</text>
+                  <path class="trend-line dir-a" d="M60 138 C140 128, 180 114, 240 118 S360 102, 420 88 S560 64, 720 72"></path>
+                  <path class="trend-line dir-b" d="M60 152 C130 149, 180 142, 240 138 S360 128, 420 132 S560 121, 720 126"></path>
+                  <circle class="trend-focus-dot dir-a" cx="720" cy="72" r="4.5"></circle>
+                  <circle class="trend-focus-dot dir-b" cx="720" cy="126" r="4.5"></circle>
+                  <text class="trend-axis-label" x="100" y="176">06:00</text>
+                  <text class="trend-axis-label" x="240" y="176">09:00</text>
+                  <text class="trend-axis-label" x="380" y="176">12:00</text>
+                  <text class="trend-axis-label" x="520" y="176">15:00</text>
+                  <text class="trend-axis-label" x="660" y="176">18:00</text>
+                </svg>
+                <div class="trend-x-title">Shift time</div>
+              </div>
+              <div class="trend-value-strip">
+                <span class="pill">done peak 46</span>
+                <span class="pill">unknown spike 15:00</span>
+                <span class="pill brand">review queue stable</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <h3>Antrian review</h3>
+            <p class="caption">
+              Hasil pengecekan otomatis beserta dengan penjelasannya
+              
+            </p>
+            <div class="queue-status-grid compact-grid">
+              <div class="queue-status-card">
+                <div class="label">Perlu review manual</div>
+                <div class="value">3</div>
+              </div>
+              <div class="queue-status-card yes">
+                <div class="label">Diterima</div>
+                <div class="value">88</div>
+              </div>
+              <div class="queue-status-card no">
+                <div class="label">Machine NO</div>
+                <div class="value">21</div>
+              </div>
+              <div class="queue-status-card">
+                <div class="label">Menunggu review</div>
+                <div class="value">14</div>
+              </div>
+            </div>
+            <div class="queue-next-strip">
+              <div class="queue-next-copy">
+                <span class="head">Sesi selanjutnya</span>
+                <span class="body">IKS-C01-2026-02-27-014 | UNKNOWN helmet verdict</span>
+              </div>
+              <a class="btn primary" href="review-queue.html">Open Queue</a>
+            </div>
+            <div class="timeline compact">
+              <div class="tl-item">
+                <span class="t">Path Bukti</span>
+                <span class="d">Thumbnail + clip pengecekan SOP yang berlaku.</span>
+              </div>
+              <div class="tl-item">
+                <span class="t">Workflow operator manual</span>
+                <span class="d">Mengecek, komen, ubah jika perlu, kemudian lanjut ke sesi berikutnya.</span>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Sesi terbaru</h3>
+              <p class="caption">Hasil pengecekan terbaru berdasarkan pemrosesan di Jetson</p>
+            </div>
+            <span class="pill">sessions.csv + checklist.json</span>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Sesi</th>
+                  <th scope="col">Mulai</th>
+                  <th scope="col">Pengecekan SOP</th>
+                  <th scope="col">Keadaan mesin</th>
+                  <th scope="col">Remark</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="session-cell">
+                      <span class="thumb" aria-hidden="true"></span>
+                      <div>
+                        <strong>IKS-C01-014</strong>
+                        <div class="table-sub">cam_01 | shift A</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>16:12:08</td>
+                  <td><span class="pill yes">ROI done</span> <span class="pill dir-b">helmet unknown</span></td>
+                  <td><span class="pill">pending</span></td>
+                  <td>Glare on top edge.</td>
+                  <td><a class="btn btn-compact primary action-inspect" href="session-detail.html">Inspect</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="session-cell">
+                      <span class="thumb" aria-hidden="true"></span>
+                      <div>
+                        <strong>IKS-C01-013</strong>
+                        <div class="table-sub">cam_01 | shift A</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>16:03:42</td>
+                  <td><span class="pill yes">ROI done</span> <span class="pill yes">helmet done</span></td>
+                  <td><span class="pill ok">approved</span></td>
+                  <td>Auto accepted.</td>
+                  <td><a class="btn btn-compact" href="session-detail.html">Open</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="session-cell">
+                      <span class="thumb" aria-hidden="true"></span>
+                      <div>
+                        <strong>IKS-C01-012</strong>
+                        <div class="table-sub">cam_01 | shift A</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>15:58:11</td>
+                  <td><span class="pill yes">ROI done</span> <span class="pill no">helmet not done</span></td>
+                  <td><span class="pill no">overridden</span></td>
+                  <td>Operator confirmed missing helmet.</td>
+                  <td><a class="btn btn-compact" href="session-detail.html">Open</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
