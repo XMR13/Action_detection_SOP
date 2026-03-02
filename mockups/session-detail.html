@@ -29,9 +29,13 @@
             <strong>Dashboard</strong>
             <span class="pill">overview</span>
           </a>
-          <a class="active" href="review-queue.html" aria-current="page">
+          <a href="review-queue.html">
             <strong>Review Queue</strong>
-            <span class="pill brand">detail</span>
+            <span class="pill">queue</span>
+          </a>
+          <a class="active" href="session-detail.html" aria-current="page">
+            <strong>Session Detail</strong>
+            <span class="pill brand">active</span>
           </a>
           <a href="setup.html">
             <strong>Setup</strong>
@@ -44,20 +48,24 @@
         </nav>
 
         <section class="panel sidebar-note">
-          <h3>Context page, not menu page</h3>
+          <h3>Detail-level Review</h3>
           <p class="caption">
-            Session detail should be entered from Dashboard or Review Queue. It does not need
-            a primary menu item of its own.
+            Use this page to inspect evidence, timeline events, and final machine vs reviewer decision history.
           </p>
           <a class="btn primary" href="review-queue.html">Back to Queue</a>
         </section>
       </aside>
 
       <main class="content" id="main-content">
-        <header class="topbar">
+        <header class="topbar detail-header">
           <div class="title">
             <h2>Session Detail</h2>
-            <p>Evidence and audit trail for one machine session.</p>
+            <p>Evidence-first review for one machine session.</p>
+            <div class="detail-crumb">
+              <a href="review-queue.html#iks-c01-014">Review Queue</a>
+              <span>/</span>
+              <span>IKS-C01-014</span>
+            </div>
           </div>
           <div class="filters">
             <span class="hint">Site: Subang</span>
@@ -69,38 +77,46 @@
         <section class="mode-banner detail">
           <div class="mode-copy">
             <span class="mode-eyebrow">AUDIT DETAIL</span>
-            <span class="mode-title">Machine said UNKNOWN. Reviewer kept it UNKNOWN with a glare note.</span>
+            <span class="mode-title">Inspect evidence first, then commit one final reviewer decision.</span>
             <span class="mode-desc">
-              The detailed page exists for traceability, not speed. Everything tied to a session should be visible here.
+              Queue is for triage. This page is where decision and audit note are finalized.
             </span>
           </div>
           <div class="mode-tags">
             <span class="pill dir-b">machine unknown</span>
-            <span class="pill ink">reviewed by line-lead-02</span>
-            <span class="pill">16:14:22</span>
+            <span class="pill">human pending</span>
+            <span class="pill ink">opened 16:14:22</span>
           </div>
         </section>
 
-        <section class="two-col detail-layout detail-grid">
-          <article class="grid">
-            <div class="big-thumb detail-thumb">
-              <div class="bbox" aria-hidden="true"></div>
-              <div class="line" aria-hidden="true"></div>
-              <div class="frame-overlay">
-                <span class="pill">thumbnail.jpg</span>
-                <span class="pill brand">event clip available</span>
-              </div>
-            </div>
-
-            <div class="panel">
+        <section class="detail-shell">
+          <section class="detail-main">
+            <article class="panel detail-evidence-panel">
               <div class="section-head">
                 <div>
-              <h3>Event Timeline</h3>
-                  <p class="caption">Tie the reviewer note to a precise evidence moment.</p>
+                  <h3>Evidence Player</h3>
+                  <p class="caption">Primary clip context and key moments for this session.</p>
                 </div>
-                <span class="pill">evidence.json</span>
+                <span class="pill brand">clip available</span>
               </div>
-              <div class="timeline">
+
+              <div class="big-thumb detail-thumb detail-player">
+                <div class="bbox" aria-hidden="true"></div>
+                <div class="line" aria-hidden="true"></div>
+                <div class="frame-overlay">
+                  <span class="pill">thumbnail.jpg</span>
+                  <span class="pill">clip 00:10.8</span>
+                </div>
+              </div>
+
+              <div class="detail-evidence-strip">
+                <span class="pill">entry frame +0.0s</span>
+                <span class="pill dir-b">confidence drop +3.4s</span>
+                <span class="pill">glare peak +8.1s</span>
+                <a class="pill" href="#artifacts">open artifacts</a>
+              </div>
+
+              <div class="timeline detail-key-events">
                 <div class="tl-item">
                   <span class="t">00.0s</span>
                   <span class="d">Session starts after person persists in ROI above threshold.</span>
@@ -118,106 +134,158 @@
                   <span class="d">Session closes. Final checklist saved to checklist.json.</span>
                 </div>
               </div>
-            </div>
-          </article>
+            </article>
 
-          <article class="grid">
-            <div class="panel">
+            <div class="detail-lower-grid">
+              <article class="panel">
+                <div class="section-head">
+                  <div>
+                    <h3>Checklist</h3>
+                    <p class="caption">Machine vs human status per SOP step.</p>
+                  </div>
+                  <span class="pill">status diff</span>
+                </div>
+                <div class="checklist">
+                  <div class="step-card">
+                    <div class="step-head">
+                      <strong>Operator present in ROI</strong>
+                      <div class="step-pills">
+                        <span class="pill yes">machine DONE</span>
+                        <span class="pill yes">review DONE</span>
+                      </div>
+                    </div>
+                    <p>Stable person presence. No reviewer intervention needed.</p>
+                  </div>
+                  <div class="step-card">
+                    <div class="step-head">
+                      <strong>Helmet compliance</strong>
+                      <div class="step-pills">
+                        <span class="pill dir-b">machine UNKNOWN</span>
+                        <span class="pill dir-b">review UNKNOWN</span>
+                      </div>
+                    </div>
+                    <p>Insufficient certainty due to glare and head-angle occlusion.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <h3>Session Metadata</h3>
+                <div class="meta">
+                  <div class="row">
+                    <span class="key">Session ID</span>
+                    <span class="val">IKS-C01-014</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Session UID</span>
+                    <span class="val">iks-subang-c01-20260227-014</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Start time</span>
+                    <span class="val">2026-02-27 16:12:08</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Duration</span>
+                    <span class="val">10.8 seconds</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Model version</span>
+                    <span class="val">ppe-yolo-onnx-v3</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="detail-lower-grid">
+              <article class="panel">
+                <h3>Comments & Overrides</h3>
+                <div class="timeline">
+                  <div class="tl-item">
+                    <span class="t">Pending reviewer input</span>
+                    <span class="d">No manual decision has been saved yet for this session.</span>
+                  </div>
+                  <div class="tl-item">
+                    <span class="t">16:14:31 | system</span>
+                    <span class="d">After save, machine result and human override are both recorded in audit trail.</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel" id="artifacts">
+                <h3>Artifacts</h3>
+                <div class="artifacts-list">
+                  <div class="artifact-item">
+                    <strong>checklist.json</strong>
+                    <span>Final machine checklist payload</span>
+                  </div>
+                  <div class="artifact-item">
+                    <strong>thumbnail.jpg</strong>
+                    <span>Primary evidence image shown in queue</span>
+                  </div>
+                  <div class="artifact-item">
+                    <strong>evidence/helmet_done_01.mp4</strong>
+                    <span>Optional clip written by event clipper</span>
+                  </div>
+                  <div class="artifact-item">
+                    <strong>run_config.json</strong>
+                    <span>Thresholds and config source for reproducibility</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <aside class="detail-rail">
+            <article class="panel detail-decision-panel">
               <div class="section-head">
                 <div>
-                  <h3>Checklist</h3>
-                  <p class="caption">Show machine and human decisions side by side.</p>
+                  <h3>Reviewer Decision</h3>
+                  <p class="caption">Apply one final result after reviewing clip evidence.</p>
                 </div>
-                <span class="pill">status diff</span>
+                <span class="pill">required</span>
               </div>
-              <div class="checklist">
-                <div class="step-card">
-                  <div class="step-head">
-                    <strong>Operator present in ROI</strong>
-                    <div class="step-pills">
-                      <span class="pill yes">machine DONE</span>
-                      <span class="pill yes">review DONE</span>
-                    </div>
-                  </div>
-                  <p>Stable person presence. No reviewer intervention needed.</p>
-                </div>
-                <div class="step-card">
-                  <div class="step-head">
-                    <strong>Helmet compliance</strong>
-                    <div class="step-pills">
-                      <span class="pill dir-b">machine UNKNOWN</span>
-                      <span class="pill dir-b">review UNKNOWN</span>
-                    </div>
-                  </div>
-                  <p>Reviewer agreed there was not enough evidence to claim DONE or NOT DONE.</p>
-                </div>
-              </div>
-            </div>
 
-            <div class="panel">
-              <h3>Session Metadata</h3>
-              <div class="meta">
-                <div class="row">
-                  <span class="key">Session ID</span>
-                  <span class="val">IKS-C01-014</span>
-                </div>
-                <div class="row">
-                  <span class="key">Session UID</span>
-                  <span class="val">iks-subang-c01-20260227-014</span>
-                </div>
-                <div class="row">
-                  <span class="key">Start time</span>
-                  <span class="val">2026-02-27 16:12:08</span>
-                </div>
-                <div class="row">
-                  <span class="key">Duration</span>
-                  <span class="val">10.8 seconds</span>
-                </div>
-                <div class="row">
-                  <span class="key">Model version</span>
-                  <span class="val">ppe-yolo-onnx-v3</span>
-                </div>
+              <div class="detail-status-row">
+                <span class="pill dir-b">machine UNKNOWN</span>
+                <span class="pill pending">review PENDING</span>
+                <span class="pill">evidence ready</span>
               </div>
-            </div>
 
-            <div class="panel">
-              <h3>Comments & Overrides</h3>
-              <div class="timeline">
-                <div class="tl-item">
-                  <span class="t">16:14:22 | line-lead-02</span>
-                  <span class="d">Kept helmet status UNKNOWN because glare obscured the head region for most of the clip.</span>
+              <form id="review-form" class="detail-decision-form" data-disable-on-submit>
+                <input id="review-status" name="review_status" type="hidden" value="PENDING" />
+                <input id="selected-session-id" name="selected_session_id" type="hidden" value="IKS-C01-014" />
+                <div class="field">
+                  <label for="review-note">Reviewer note</label>
+                  <textarea
+                    id="review-note"
+                    name="review_note"
+                    placeholder="State what evidence supports your decision."
+                    autocomplete="off"
+                  ></textarea>
                 </div>
-                <div class="tl-item">
-                  <span class="t">16:14:31 | system</span>
-                  <span class="d">Audit record saved. Daily report will reflect reviewed outcome separately from machine output.</span>
-                </div>
-              </div>
-            </div>
 
-            <div class="panel">
-              <h3>Artifacts</h3>
-              <div class="artifacts-list">
-                <div class="artifact-item">
-                  <strong>checklist.json</strong>
-                  <span>Final machine checklist payload</span>
+                <div class="detail-decision-grid">
+                  <button class="btn yes detail-decision-btn" type="submit" data-review-status="QUALIFIED">Approve</button>
+                  <button class="btn no detail-decision-btn" type="submit" data-review-status="NOT_QUALIFIED">Reject</button>
+                  <button class="btn secondary detail-decision-btn" type="submit" data-review-status="PENDING">Unknown</button>
                 </div>
-                <div class="artifact-item">
-                  <strong>thumbnail.jpg</strong>
-                  <span>Primary evidence image shown in queue</span>
+
+                <div class="detail-nav-row">
+                  <a class="btn" href="review-queue.html#iks-c01-014">Back to Queue</a>
+                  <a class="btn primary" href="session-detail.html#iks-c01-016">Next Pending</a>
                 </div>
-                <div class="artifact-item">
-                  <strong>evidence/helmet_done_01.mp4</strong>
-                  <span>Optional clip written by event clipper</span>
+
+                <div class="queue-help">
+                  <span class="hint"><span class="kbd">Y</span> approve</span>
+                  <span class="hint"><span class="kbd">N</span> reject</span>
+                  <span class="hint"><span class="kbd">S</span> unknown</span>
                 </div>
-                <div class="artifact-item">
-                  <strong>run_config.json</strong>
-                  <span>Thresholds and config source for reproducibility</span>
-                </div>
-              </div>
-            </div>
-          </article>
+              </form>
+            </article>
+          </aside>
         </section>
       </main>
     </div>
+    <script src="js/site.js"></script>
   </body>
 </html>
