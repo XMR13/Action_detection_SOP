@@ -2212,6 +2212,59 @@ textarea {
   cursor: pointer;
 }
 
+.queue-evidence-cell {
+  display: flex;
+  align-items: center;
+}
+
+.queue-evidence-preview {
+  position: relative;
+  width: 74px;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(45, 55, 72, 0.2);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.queue-evidence-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.queue-evidence-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(232, 24, 32, 0.95), rgba(182, 17, 23, 0.95));
+  border: 1px solid rgba(122, 17, 17, 0.72);
+  box-shadow: 0 6px 14px rgba(182, 17, 23, 0.32);
+}
+
+.queue-evidence-empty {
+  background: linear-gradient(180deg, rgba(245, 246, 248, 0.86), rgba(229, 232, 238, 0.8));
+}
+
+.queue-evidence-none {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: rgba(45, 55, 72, 0.66);
+  text-align: center;
+  line-height: 44px;
+}
+
 .queue-row-active {
   background: rgba(232, 24, 32, 0.08);
 }

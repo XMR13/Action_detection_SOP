@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+from typing import Optional
+
+import uvicorn
+
+from Action_Detection_SOP.web_mvp.app import create_app
+from Action_Detection_SOP.web_mvp.settings import WebMvpSettings
+
+
+def _default_data_dir() -> Path:
+    # Default to repo-local `data/` (matches SOP runner output), but allow override via env.
+    env = os.environ.get("SOP_DATA_DIR", "").strip()
+    return Path(env) if env else (Path.cwd() / "data")
+
+
+def _default_db_path(data_dir: Path) -> Path:
+    return data_dir / "web_mvp.sqlite3"
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the SOP Review Website MVP (FastAPI + SQLite).")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--data-dir", type=Path, default=_default_data_dir())
+    parser.add_argument("--db-path", type=Path, default=None)
+    parser.add_argument("--ui-dir", type=Path, default=(Path.cwd() / "mockups"))
+    parser.add_argument("--admin-password", default=os.environ.get("SOP_ADMIN_PASSWORD"))
+    parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (dev only).")
+    args = parser.parse_args(argv)
+
+    data_dir: Path = args.data_dir
+    db_path: Path = args.db_path if args.db_path is not None else _default_db_path(data_dir)
+    ui_dir: Path = args.ui_dir
+
+    settings = WebMvpSettings(
+        data_dir=data_dir,
+        db_path=db_path,
+        ui_dir=ui_dir,
+        admin_password=args.admin_password,
+    )
+    app = create_app(settings)
+    uvicorn.run(app, host=str(args.host), port=int(args.port), reload=bool(args.reload))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

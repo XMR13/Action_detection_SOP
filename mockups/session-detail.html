@@ -64,13 +64,13 @@
             <div class="detail-crumb">
               <a href="review-queue.html#iks-c01-014">Review Queue</a>
               <span>/</span>
-              <span>IKS-C01-014</span>
+              <span id="detail-session-id">-</span>
             </div>
           </div>
           <div class="filters">
             <span class="hint">Site: Subang</span>
             <span class="hint">Camera: cam_01</span>
-            <span class="hint">UID: iks-subang-c01-20260227-014</span>
+            <span class="hint" id="detail-session-uid-hint">UID: -</span>
           </div>
         </header>
 
@@ -246,14 +246,23 @@
               </div>
 
               <div class="detail-status-row">
-                <span class="pill dir-b">machine UNKNOWN</span>
-                <span class="pill pending">review PENDING</span>
+                <span class="pill dir-b" id="detail-machine-status">machine -</span>
+                <span class="pill pending" id="detail-review-status">review -</span>
                 <span class="pill">evidence ready</span>
               </div>
 
               <form id="review-form" class="detail-decision-form" data-disable-on-submit>
                 <input id="review-status" name="review_status" type="hidden" value="PENDING" />
-                <input id="selected-session-id" name="selected_session_id" type="hidden" value="IKS-C01-014" />
+                <input id="selected-session-id" name="selected_session_id" type="hidden" value="" />
+                <div class="field">
+                  <label for="override-helmet">Helmet override</label>
+                  <select id="override-helmet" name="override_helmet">
+                    <option value="">No override</option>
+                    <option value="DONE">DONE</option>
+                    <option value="NOT_DONE">NOT DONE</option>
+                    <option value="UNKNOWN">UNKNOWN</option>
+                  </select>
+                </div>
                 <div class="field">
                   <label for="review-note">Reviewer note</label>
                   <textarea

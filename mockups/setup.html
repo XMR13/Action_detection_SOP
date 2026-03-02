@@ -168,8 +168,31 @@
               </div>
             </div>
           </article>
+
+          <article class="panel config-card">
+            <h3>Ingest (Manual)</h3>
+            <p class="caption">Copy `data/` to this server, then rescan to refresh the queue.</p>
+            <div class="meta">
+              <div class="row">
+                <span class="key">Data dir</span>
+                <span class="val" id="admin-data-dir">-</span>
+              </div>
+              <div class="row">
+                <span class="key">Last scan (UTC)</span>
+                <span class="val" id="admin-last-scan">-</span>
+              </div>
+              <div class="row">
+                <span class="key">Session count</span>
+                <span class="val" id="admin-session-count">-</span>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" id="admin-rescan" type="button">Rescan Now</button>
+            </div>
+          </article>
         </section>
       </main>
     </div>
+    <script src="js/site.js"></script>
   </body>
 </html>
