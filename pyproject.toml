@@ -6,9 +6,11 @@ description = "Adalah projet yang bertujuan untuk melakukan atuomatic checking d
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "fastapi>=0.135.1",
     "numpy>=2.2.6",
     "onnxruntime-gpu==1.20.2",
     "opencv-python>=4.11.0.86",
     "pytest>=9.0.2",
     "tqdm>=4.67.1",
+    "uvicorn>=0.41.0",
 ]

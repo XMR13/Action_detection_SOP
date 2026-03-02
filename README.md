@@ -129,3 +129,11 @@ Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
 Catatan penting:
 
 - Model + `metadata.yaml` harus punya class **helmet** (repo saat ini memakai COCO metadata contoh, jadi kamu perlu metadata/model yang sesuai untuk PPE).
+
+## Website MVP (FastAPI + SQLite)
+
+Untuk draft website yang bisa jalan cepat di server on-prem (AI box), repo ini menyediakan backend MVP berbasis Python.
+
+- Jalankan: `uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data`
+- Set password admin (Basic Auth): `SOP_ADMIN_PASSWORD=your_password`
+- Akses: `http://<AI_BOX_IP>:8000/` (UI di `/ui/*`, API di `/api/*`)
