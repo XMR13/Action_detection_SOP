@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+import re
+from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import BasicAuthConfig, BasicAuthMiddleware
 from .review_store import ReviewRecord, get_review, get_reviews_by_uid, init_db, upsert_review
@@ -27,6 +30,89 @@ def _machine_helmet_status(session: SessionArtifact) -> str:
 def _machine_roi_status(session: SessionArtifact) -> str:
     roi = session.checklist.get("roi_dwell")
     return str(roi) if isinstance(roi, str) and roi else "UNKNOWN"
+
+
+def _normalize_step_status(value: Any) -> str:
+    if not isinstance(value, str):
+        return "UNKNOWN"
+    v = value.strip().upper()
+    if v in {"DONE", "NOT_DONE", "UNKNOWN"}:
+        return v
+    return "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class EffectiveReview:
+    status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]
+    source: Literal["MANUAL", "AUTO", "PENDING"]
+    auto_reason: Optional[str] = None
+
+
+def _session_duration_s(session: SessionArtifact) -> float:
+    start_s = float(session.checklist.get("start_time_s") or 0.0)
+    end_s = float(session.checklist.get("end_time_s") or 0.0)
+    return max(0.0, end_s - start_s)
+
+
+def _auto_approve_blocker(notes: Any) -> Optional[str]:
+    if not isinstance(notes, list):
+        return None
+    for raw in notes:
+        if not isinstance(raw, str):
+            continue
+        tag = raw.strip().lower()
+        if not tag:
+            continue
+        if ("too_short" in tag) or ("too_small" in tag) or ("disabled" in tag):
+            return tag
+    return None
+
+
+def _should_auto_approve_session(*, session: SessionArtifact, settings: WebMvpSettings) -> tuple[bool, Optional[str]]:
+    if not settings.auto_approve_done_enabled:
+        return False, "auto_approve_disabled"
+
+    helmet = _normalize_step_status(_machine_helmet_status(session))
+    if helmet != "DONE":
+        return False, "helmet_not_done"
+
+    roi = _normalize_step_status(_machine_roi_status(session))
+    if roi != "DONE":
+        return False, "roi_not_done"
+
+    duration_s = _session_duration_s(session)
+    if duration_s < float(settings.auto_approve_min_duration_s):
+        return False, "duration_too_short"
+
+    blocker = _auto_approve_blocker(session.checklist.get("notes"))
+    if blocker:
+        return False, f"blocked_by_note:{blocker}"
+
+    has_evidence = _clip_count(session) > 0 or session.paths.thumbnail_jpg.exists()
+    if not has_evidence:
+        return False, "no_evidence"
+
+    return True, "policy_pass"
+
+
+def _effective_review_for_session(
+    *,
+    session: SessionArtifact,
+    review: Optional[ReviewRecord],
+    settings: WebMvpSettings,
+) -> EffectiveReview:
+    if review is not None:
+        manual_status = str(review.review_status).upper()
+        if manual_status == "QUALIFIED":
+            return EffectiveReview(status="QUALIFIED", source="MANUAL")
+        if manual_status == "NOT_QUALIFIED":
+            return EffectiveReview(status="NOT_QUALIFIED", source="MANUAL")
+        return EffectiveReview(status="PENDING", source="MANUAL")
+
+    allow_auto, reason = _should_auto_approve_session(session=session, settings=settings)
+    if allow_auto:
+        return EffectiveReview(status="QUALIFIED", source="AUTO", auto_reason=reason)
+    return EffectiveReview(status="PENDING", source="PENDING", auto_reason=reason)
 
 
 def _clip_count(session: SessionArtifact) -> int:
@@ -62,10 +148,70 @@ def _safe_session_dir(data_dir: Path, session: SessionArtifact, rel_path: str) -
     return target
 
 
+def _safe_rel_path(rel_path: str) -> Path:
+    rel_path = rel_path.replace("\\", "/")
+    p = Path(rel_path)
+    if p.is_absolute():
+        raise HTTPException(status_code=400, detail="Invalid rel_path (absolute)")
+    if not rel_path.strip():
+        raise HTTPException(status_code=400, detail="Invalid rel_path (empty)")
+    parts = [part for part in p.parts if part not in (".", "")]
+    if any(part == ".." for part in parts):
+        raise HTTPException(status_code=400, detail="Invalid rel_path (parent traversal)")
+    return Path(*parts)
+
+
+def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
 class ReviewUpsertIn(BaseModel):
     review_status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"] = Field(...)
     review_note: str = Field(default="")
     overrides: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionUpsertIn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    session_uid: str = Field(...)
+    session_id: str = Field(...)
+    start_date: Optional[str] = Field(default=None, description="YYYY-MM-DD; used for storage layout.")
+    end_date: Optional[str] = Field(default=None, description="YYYY-MM-DD; used if start_date is missing.")
+
+
+def _storage_date(payload: SessionUpsertIn) -> str:
+    if payload.start_date and isinstance(payload.start_date, str):
+        return payload.start_date
+    if payload.end_date and isinstance(payload.end_date, str):
+        return payload.end_date
+    raise HTTPException(status_code=400, detail="Missing start_date/end_date (YYYY-MM-DD)")
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _validate_date_ymd(date: str) -> None:
+    if not _DATE_RE.match(date):
+        raise HTTPException(status_code=400, detail="Invalid date (expected YYYY-MM-DD)")
+
+
+def _validate_token(value: str, *, label: str) -> None:
+    if not value or not _SAFE_TOKEN_RE.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {label}")
+
+
+def _validate_session_uid(session_uid: str) -> None:
+    # We generate uuid4 hex today; accept safe tokens so we can evolve later.
+    _validate_token(session_uid, label="session_uid")
+
+
+def _validate_session_id(session_id: str) -> None:
+    _validate_token(session_id, label="session_id")
 
 
 def create_app(settings: WebMvpSettings) -> FastAPI:
@@ -109,6 +255,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "db_path": str(settings.db_path),
             "last_scan_utc": index.last_scan_utc,
             "session_count": len(index.list()),
+            "auto_approve_done_enabled": settings.auto_approve_done_enabled,
+            "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
         }
 
     @app.get("/api/stats")
@@ -118,23 +266,85 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         pending = 0
         approved = 0
         rejected = 0
-        unknown = 0
+        decided = 0
+        human_reviewed = 0
+        auto_approved = 0
+        manual_overrides = 0
+        manual_helmet_overrides = 0
+
+        machine_done = 0
+        machine_not_done = 0
+        machine_unknown = 0
+        final_done = 0
+        final_not_done = 0
+        final_unknown = 0
+
         for s in sessions:
             r = reviews.get(s.session_uid)
-            status = "PENDING" if r is None else r.review_status
+            eff = _effective_review_for_session(session=s, review=r, settings=settings)
+            status = eff.status
             if status == "QUALIFIED":
                 approved += 1
+                decided += 1
             elif status == "NOT_QUALIFIED":
                 rejected += 1
+                decided += 1
             else:
                 pending += 1
-                unknown += 1
+
+            machine_helmet = _normalize_step_status(_machine_helmet_status(s))
+            if machine_helmet == "DONE":
+                machine_done += 1
+            elif machine_helmet == "NOT_DONE":
+                machine_not_done += 1
+            else:
+                machine_unknown += 1
+
+            final_helmet = machine_helmet
+            if r is not None:
+                human_reviewed += 1
+                if r.overrides:
+                    manual_overrides += 1
+                override = r.overrides.get("helmet")
+                if isinstance(override, str) and override:
+                    final_helmet = _normalize_step_status(override)
+                    if final_helmet != machine_helmet:
+                        manual_helmet_overrides += 1
+            elif eff.source == "AUTO" and status == "QUALIFIED":
+                auto_approved += 1
+
+            if final_helmet == "DONE":
+                final_done += 1
+            elif final_helmet == "NOT_DONE":
+                final_not_done += 1
+            else:
+                final_unknown += 1
+
+        total = len(sessions)
+        review_completion_pct = (float(decided) * 100.0 / float(total)) if total > 0 else 0.0
+        final_unknown_pct = (float(final_unknown) * 100.0 / float(total)) if total > 0 else 0.0
+        reviewed_final_done_pct = (float(final_done) * 100.0 / float(decided)) if decided > 0 else 0.0
         return {
-            "total_sessions": len(sessions),
+            "total_sessions": total,
             "pending": pending,
             "approved": approved,
             "rejected": rejected,
-            "unknown": unknown,
+            # Keep `unknown` for compatibility with existing UI cards.
+            "unknown": final_unknown,
+            "reviewed": decided,
+            "human_reviewed": human_reviewed,
+            "auto_approved": auto_approved,
+            "review_completion_pct": review_completion_pct,
+            "manual_overrides": manual_overrides,
+            "manual_helmet_overrides": manual_helmet_overrides,
+            "machine_helmet_done": machine_done,
+            "machine_helmet_not_done": machine_not_done,
+            "machine_helmet_unknown": machine_unknown,
+            "final_helmet_done": final_done,
+            "final_helmet_not_done": final_not_done,
+            "final_helmet_unknown": final_unknown,
+            "final_unknown_pct": final_unknown_pct,
+            "reviewed_final_done_pct": reviewed_final_done_pct,
         }
 
     @app.get("/api/sessions")
@@ -151,7 +361,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         out: List[Dict[str, Any]] = []
         for s in sessions:
             r = reviews.get(s.session_uid)
-            rs = "PENDING" if r is None else r.review_status
+            eff = _effective_review_for_session(session=s, review=r, settings=settings)
+            rs = eff.status
             if review_status and rs != review_status:
                 continue
 
@@ -179,6 +390,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "machine_helmet": machine,
                     "machine_roi_dwell": _machine_roi_status(s),
                     "review_status": rs,
+                    "review_source": eff.source,
                     "final_helmet": final,
                     "has_thumbnail": s.paths.thumbnail_jpg.exists(),
                     "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if s.paths.thumbnail_jpg.exists() else None,
@@ -194,10 +406,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
     @app.get("/api/sessions/{session_uid}")
     def get_session(session_uid: str) -> Dict[str, Any]:
+        _validate_session_uid(session_uid)
         s = index.get(session_uid)
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
         r = get_review(settings.db_path, session_uid)
+        eff = _effective_review_for_session(session=s, review=r, settings=settings)
         machine_helmet = _machine_helmet_status(s)
         final_helmet = machine_helmet
         if r is not None:
@@ -239,6 +453,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "machine_helmet": machine_helmet,
             "machine_roi_dwell": _machine_roi_status(s),
             "final_helmet": final_helmet,
+            "review_status": eff.status,
+            "review_source": eff.source,
+            "auto_review_reason": eff.auto_reason,
             "review": None if r is None else r.__dict__,
             "clips": clips,
             "has_thumbnail": s.paths.thumbnail_jpg.exists(),
@@ -246,8 +463,34 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "artifacts": artifacts,
         }
 
+    @app.put("/api/sessions/{session_uid}")
+    def put_session(session_uid: str, payload: SessionUpsertIn) -> Dict[str, Any]:
+        if payload.session_uid != session_uid:
+            raise HTTPException(status_code=400, detail="session_uid mismatch")
+
+        date = _storage_date(payload)
+        _validate_session_uid(session_uid)
+        _validate_session_id(payload.session_id)
+        _validate_date_ymd(date)
+
+        # In ingestion mode, store by UID to avoid collisions across devices/runs.
+        session_dir = settings.data_dir / "sessions" / date / session_uid
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        checklist_path = session_dir / "checklist.json"
+        _atomic_write_json(checklist_path, payload.model_dump(mode="json"))
+
+        index.refresh()
+        return {
+            "status": "ok",
+            "session_uid": session_uid,
+            "date": date,
+            "session_id": payload.session_id,
+        }
+
     @app.put("/api/sessions/{session_uid}/review")
     def put_review(session_uid: str, payload: ReviewUpsertIn) -> Dict[str, Any]:
+        _validate_session_uid(session_uid)
         s = index.get(session_uid)
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -260,8 +503,50 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         )
         return {"review": rec.__dict__}
 
+    @app.post("/api/sessions/{session_uid}/artifacts")
+    async def post_artifact(
+        session_uid: str,
+        request: Request,
+        rel_path: str = Query(..., description="Relative path under the session dir, e.g. evidence/helmet_done_01.mp4"),
+    ) -> Dict[str, Any]:
+        _validate_session_uid(session_uid)
+        s = index.get(session_uid)
+        if s is None:
+            # Allow for eventual consistency (client may upload fast after upsert).
+            index.refresh()
+            s = index.get(session_uid)
+        if s is None:
+            raise HTTPException(status_code=404, detail="Session not found (upsert first)")
+
+        rel = _safe_rel_path(rel_path)
+        base = s.paths.session_dir.resolve()
+        target = (s.paths.session_dir / rel).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Invalid rel_path") from e
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        with tmp.open("wb") as f:
+            async for chunk in request.stream():
+                if chunk:
+                    f.write(chunk)
+        tmp.replace(target)
+
+        # Refresh index so evidence/thumbnail manifests show immediately.
+        index.refresh()
+
+        rel_url = str(rel).replace("\\", "/")
+        return {
+            "status": "ok",
+            "rel_path": rel_url,
+            "url": f"/media/{session_uid}/{rel_url}",
+        }
+
     @app.get("/media/{session_uid}/{rel_path:path}", include_in_schema=False)
     def media(session_uid: str, rel_path: str) -> FileResponse:
+        _validate_session_uid(session_uid)
         s = index.get(session_uid)
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")

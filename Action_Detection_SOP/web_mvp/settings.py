@@ -12,4 +12,5 @@ class WebMvpSettings:
     ui_dir: Path
     admin_password: Optional[str] = None
     auto_rescan_seconds: float = 0.0
-
+    auto_approve_done_enabled: bool = True
+    auto_approve_min_duration_s: float = 8.0

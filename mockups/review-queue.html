@@ -75,7 +75,7 @@
           <div class="filters">
             <span class="hint">Site: Subang</span>
             <span class="hint">Camera: cam_01</span>
-            <span class="hint">Queue length: 14</span>
+            <span class="hint" id="queue-length-hint">Queue length: 14</span>
           </div>
         </header>
 
@@ -89,7 +89,7 @@
           </div>
           <div class="mode-tags">
             <span class="pill brand">unknown helmet</span>
-            <span class="pill">pending 14</span>
+            <span class="pill" id="queue-pending-pill">pending 14</span>
             <span class="pill ink">SLA target &lt; 10m</span>
           </div>
         </section>
@@ -97,19 +97,19 @@
         <section class="queue-status-grid">
           <article class="queue-status-card">
             <div class="label">Pending</div>
-            <div class="value">14</div>
+            <div class="value" id="queue-stat-pending">14</div>
           </article>
           <article class="queue-status-card yes">
             <div class="label">Diterima</div>
-            <div class="value">88</div>
+            <div class="value" id="queue-stat-approved">88</div>
           </article>
           <article class="queue-status-card no">
             <div class="label">Ditolak</div>
-            <div class="value">21</div>
+            <div class="value" id="queue-stat-rejected">21</div>
           </article>
           <article class="queue-status-card">
             <div class="label">Manual unknown</div>
-            <div class="value">6</div>
+            <div class="value" id="queue-stat-unknown">6</div>
           </article>
         </section>
 
@@ -225,6 +225,10 @@
                 <div class="row">
                   <span class="key">Human Review</span>
                   <span class="val" id="selected-human-status">PENDING</span>
+                </div>
+                <div class="row">
+                  <span class="key">Review Source</span>
+                  <span class="val" id="selected-review-source">PENDING</span>
                 </div>
                 <div class="row">
                   <span class="key">Final</span>

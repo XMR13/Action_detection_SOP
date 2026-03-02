@@ -115,7 +115,7 @@
             </span>
           </div>
           <div class="mode-tags">
-            <span class="pill">pending 14</span>
+            <span class="pill" id="banner-pending-pill">pending 14</span>
             <span class="pill ink">avg review 3.1 min</span>
             <span class="pill brand">target &lt; 10 min</span>
           </div>
@@ -129,7 +129,7 @@
                 <span class="kpi-accent ink">S</span>
               </div>
               <div class="kpi-value" id="kpi-total-sessions">126</div>
-              <div class="kpi-hint">+9 vs. yesterday</div>
+              <div class="kpi-hint" id="kpi-total-hint">+9 vs. yesterday</div>
             </div>
           </article>
           <article class="card">
@@ -139,7 +139,7 @@
                 <span class="kpi-accent brand">Q</span>
               </div>
               <div class="kpi-value" id="kpi-pending">14</div>
-              <div class="kpi-hint">4 urgent sessions from cam_01</div>
+              <div class="kpi-hint" id="kpi-pending-hint">4 urgent sessions from cam_01</div>
             </div>
           </article>
           <article class="card">
@@ -148,8 +148,8 @@
                 <span class="kpi-label">Helmet (CHECKED)</span>
                 <span class="kpi-accent yes">Y</span>
               </div>
-              <div class="kpi-value">101</div>
-              <div class="kpi-hint">80.1% across reviewed sessions</div>
+              <div class="kpi-value" id="kpi-helmet-checked">101</div>
+              <div class="kpi-hint" id="kpi-helmet-checked-hint">80.1% across reviewed sessions</div>
             </div>
           </article>
           <article class="card">
@@ -158,8 +158,8 @@
                 <span class="kpi-label">persentase sesi <br> yang tidak terdeteksi</span>
                 <span class="kpi-accent dir-b">U</span>
               </div>
-              <div class="kpi-value">7.1%</div>
-              <div class="kpi-hint">Mostly glare during 14:00-15:00</div>
+              <div class="kpi-value" id="kpi-unknown-rate">7.1%</div>
+              <div class="kpi-hint" id="kpi-unknown-rate-hint">Mostly glare during 14:00-15:00</div>
             </div>
           </article>
           <article class="card">
@@ -168,8 +168,8 @@
                 <span class="kpi-label">Pengecekan manual</span>
                 <span class="kpi-accent no">M</span>
               </div>
-              <div class="kpi-value">3</div>
-              <div class="kpi-hint">2 NO, 1 UNKNOWN</div>
+              <div class="kpi-value" id="kpi-manual-review">3</div>
+              <div class="kpi-hint" id="kpi-manual-review-hint">2 NO, 1 UNKNOWN</div>
             </div>
           </article>
         </section>
@@ -212,9 +212,9 @@
                 <div class="trend-x-title">Shift time</div>
               </div>
               <div class="trend-value-strip">
-                <span class="pill">done peak 46</span>
-                <span class="pill">unknown spike 15:00</span>
-                <span class="pill brand">review queue stable</span>
+                <span class="pill" id="trend-strip-done">done peak 46</span>
+                <span class="pill" id="trend-strip-unknown">unknown spike 15:00</span>
+                <span class="pill brand" id="trend-strip-review">review queue stable</span>
               </div>
             </div>
           </article>
@@ -228,19 +228,19 @@
             <div class="queue-status-grid compact-grid">
               <div class="queue-status-card">
                 <div class="label">Perlu review manual</div>
-                <div class="value">3</div>
+                <div class="value" id="dashboard-compact-manual-needed">3</div>
               </div>
               <div class="queue-status-card yes">
                 <div class="label">Diterima</div>
-                <div class="value">88</div>
+                <div class="value" id="dashboard-compact-approved">88</div>
               </div>
               <div class="queue-status-card no">
                 <div class="label">Machine NO</div>
-                <div class="value">21</div>
+                <div class="value" id="dashboard-compact-machine-no">21</div>
               </div>
               <div class="queue-status-card">
                 <div class="label">Menunggu review</div>
-                <div class="value">14</div>
+                <div class="value" id="dashboard-compact-pending">14</div>
               </div>
             </div>
             <div class="queue-next-strip">
@@ -283,54 +283,9 @@
                   <th scope="col">Action</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="dashboard-latest-sessions-body">
                 <tr>
-                  <td>
-                    <div class="session-cell">
-                      <span class="thumb" aria-hidden="true"></span>
-                      <div>
-                        <strong>IKS-C01-014</strong>
-                        <div class="table-sub">cam_01 | shift A</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>16:12:08</td>
-                  <td><span class="pill yes">ROI done</span> <span class="pill dir-b">helmet unknown</span></td>
-                  <td><span class="pill">pending</span></td>
-                  <td>Glare on top edge.</td>
-                  <td><a class="btn btn-compact primary action-inspect" href="session-detail.html">Inspect</a></td>
-                </tr>
-                <tr>
-                  <td>
-                    <div class="session-cell">
-                      <span class="thumb" aria-hidden="true"></span>
-                      <div>
-                        <strong>IKS-C01-013</strong>
-                        <div class="table-sub">cam_01 | shift A</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>16:03:42</td>
-                  <td><span class="pill yes">ROI done</span> <span class="pill yes">helmet done</span></td>
-                  <td><span class="pill ok">approved</span></td>
-                  <td>Auto accepted.</td>
-                  <td><a class="btn btn-compact" href="session-detail.html">Open</a></td>
-                </tr>
-                <tr>
-                  <td>
-                    <div class="session-cell">
-                      <span class="thumb" aria-hidden="true"></span>
-                      <div>
-                        <strong>IKS-C01-012</strong>
-                        <div class="table-sub">cam_01 | shift A</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>15:58:11</td>
-                  <td><span class="pill yes">ROI done</span> <span class="pill no">helmet not done</span></td>
-                  <td><span class="pill no">overridden</span></td>
-                  <td>Operator confirmed missing helmet.</td>
-                  <td><a class="btn btn-compact" href="session-detail.html">Open</a></td>
+                  <td colspan="6"><span class="pill pending">Loading sessions...</span></td>
                 </tr>
               </tbody>
             </table>

@@ -29,6 +29,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--db-path", type=Path, default=None)
     parser.add_argument("--ui-dir", type=Path, default=(Path.cwd() / "mockups"))
     parser.add_argument("--admin-password", default=os.environ.get("SOP_ADMIN_PASSWORD"))
+    parser.add_argument(
+        "--disable-auto-approve-done",
+        action="store_true",
+        help="Disable auto-qualifying low-risk DONE sessions; require manual review for all sessions.",
+    )
+    parser.add_argument(
+        "--auto-approve-min-duration-s",
+        type=float,
+        default=float(os.environ.get("SOP_AUTO_APPROVE_MIN_DURATION_S", "8.0")),
+        help="Minimum session duration (seconds) before DONE can be auto-qualified.",
+    )
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (dev only).")
     args = parser.parse_args(argv)
 
@@ -41,6 +52,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         db_path=db_path,
         ui_dir=ui_dir,
         admin_password=args.admin_password,
+        auto_approve_done_enabled=not bool(args.disable_auto_approve_done),
+        auto_approve_min_duration_s=float(args.auto_approve_min_duration_s),
     )
     app = create_app(settings)
     uvicorn.run(app, host=str(args.host), port=int(args.port), reload=bool(args.reload))
@@ -49,4 +62,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

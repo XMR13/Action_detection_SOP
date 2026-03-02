@@ -1498,6 +1498,12 @@ form.is-submitting .btn {
   color: #7c2d12;
 }
 
+.pill.auto {
+  background: rgba(3, 105, 161, 0.14);
+  border-color: rgba(3, 105, 161, 0.26);
+  color: #075985;
+}
+
 form.filters {
   width: 100%;
 }
@@ -2488,6 +2494,12 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.queue-review-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .detail-decision-form {

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,8 @@ def session_result_to_dict(r: SessionResult) -> Dict[str, Any]:
     payload["operator_present"] = str(r.operator_present.value)
     payload["roi_dwell"] = str(r.roi_dwell.value)
     payload["helmet"] = str(r.helmet.value)
+    # Stable primary key used by the website/uploader for idempotency across retries and file moves.
+    payload.setdefault("session_uid", uuid.uuid4().hex)
     return payload
 
 

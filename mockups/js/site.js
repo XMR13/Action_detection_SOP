@@ -38,6 +38,20 @@
     return "pending";
   };
 
+  const displayReviewSource = (raw) => {
+    const v = String(raw || "PENDING").toUpperCase();
+    if (v === "AUTO") return "AUTO";
+    if (v === "MANUAL") return "MANUAL";
+    return "PENDING";
+  };
+
+  const pillClassForReviewSource = (raw) => {
+    const v = String(raw || "PENDING").toUpperCase();
+    if (v === "AUTO") return "auto";
+    if (v === "MANUAL") return "ink";
+    return "pending";
+  };
+
   const formatHmsFromIso = (iso) => {
     if (!iso) return "-";
     const d = new Date(iso);
@@ -81,6 +95,7 @@
   const selectedSessionUid = document.getElementById("selected-session-uid");
   const selectedMachineStatus = document.getElementById("selected-machine-status");
   const selectedHumanStatus = document.getElementById("selected-human-status");
+  const selectedReviewSource = document.getElementById("selected-review-source");
   const selectedFinalStatus = document.getElementById("selected-final-status");
   const selectedEvidence = document.getElementById("selected-evidence");
   const selectedSessionSla = document.getElementById("selected-session-sla");
@@ -92,11 +107,12 @@
       return;
     }
 
-    const { sessionId, sessionUid, shift, machine, human, final, evidence, sla } = row.dataset;
+    const { sessionId, sessionUid, shift, machine, human, reviewSource, final, evidence, sla } = row.dataset;
     const resolvedSessionId = sessionId || link.textContent?.trim() || "UNKNOWN";
     const resolvedShift = shift || "-";
     const resolvedMachine = machine || "-";
     const resolvedHuman = human || "-";
+    const resolvedReviewSource = reviewSource || "-";
     const resolvedFinal = final || "-";
     const resolvedEvidence = evidence || "-";
     const resolvedSessionUid = sessionUid || "-";
@@ -119,6 +135,9 @@
     }
     if (selectedHumanStatus) {
       selectedHumanStatus.textContent = resolvedHuman;
+    }
+    if (selectedReviewSource) {
+      selectedReviewSource.textContent = resolvedReviewSource;
     }
     if (selectedFinalStatus) {
       selectedFinalStatus.textContent = resolvedFinal;
@@ -325,6 +344,42 @@
       return;
     }
 
+    // Sync summary counters on the queue page (topbar + cards).
+    try {
+      const stats = await apiFetchJson("/api/stats");
+      const pending = stats && stats.pending != null ? Number(stats.pending) : null;
+      const approved = stats && stats.approved != null ? Number(stats.approved) : null;
+      const rejected = stats && stats.rejected != null ? Number(stats.rejected) : null;
+      const unknown = stats && stats.unknown != null ? Number(stats.unknown) : null;
+
+      const queueLengthHint = document.getElementById("queue-length-hint");
+      if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
+        queueLengthHint.textContent = `Queue length: ${pending}`;
+      }
+      const pendingPill = document.getElementById("queue-pending-pill");
+      if (pendingPill && pending != null && !Number.isNaN(pending)) {
+        pendingPill.textContent = `pending ${pending}`;
+      }
+      const pendingNode = document.getElementById("queue-stat-pending");
+      if (pendingNode && pending != null && !Number.isNaN(pending)) {
+        pendingNode.textContent = String(pending);
+      }
+      const approvedNode = document.getElementById("queue-stat-approved");
+      if (approvedNode && approved != null && !Number.isNaN(approved)) {
+        approvedNode.textContent = String(approved);
+      }
+      const rejectedNode = document.getElementById("queue-stat-rejected");
+      if (rejectedNode && rejected != null && !Number.isNaN(rejected)) {
+        rejectedNode.textContent = String(rejected);
+      }
+      const unknownNode = document.getElementById("queue-stat-unknown");
+      if (unknownNode && unknown != null && !Number.isNaN(unknown)) {
+        unknownNode.textContent = String(unknown);
+      }
+    } catch (err) {
+      // ignore stats failures; queue list still loads
+    }
+
     let payload;
     try {
       payload = await apiFetchJson("/api/sessions");
@@ -345,6 +400,7 @@
         const sid = String(s.session_id || uid || "-");
         const machine = String(s.machine_helmet || "UNKNOWN");
         const review = String(s.review_status || "PENDING");
+        const reviewSource = String(s.review_source || "PENDING");
         const final = String(s.final_helmet || machine);
         const start = formatHmsFromIso(s.start_time_iso);
         const dur = formatDuration(s.duration_s);
@@ -368,6 +424,7 @@
             data-shift="-"
             data-machine="${displayStepStatus(machine)}"
             data-human="${displayReviewStatus(review)}"
+            data-review-source="${displayReviewSource(reviewSource)}"
             data-final="${displayStepStatus(final)}"
             data-evidence="${evidenceLabel}"
             data-sla="${sla}"
@@ -379,7 +436,7 @@
             <td>${start}</td>
             <td>${dur}</td>
             <td><span class="pill ${pillClassForStepStatus(machine)}">${displayStepStatus(machine)}</span></td>
-            <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
+            <td><div class="queue-review-cell"><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span><span class="pill ${pillClassForReviewSource(reviewSource)}">${displayReviewSource(reviewSource)}</span></div></td>
             <td><span class="pill ${pillClassForStepStatus(final)}">${displayStepStatus(final)}</span></td>
             <td>
               <div class="queue-evidence-cell">
@@ -439,9 +496,13 @@
     }
 
     const machine = String(payload.machine_helmet || "UNKNOWN");
-    const review = payload.review && payload.review.review_status ? String(payload.review.review_status) : "PENDING";
+    const review = String(payload.review_status || (payload.review && payload.review.review_status) || "PENDING");
+    const reviewSource = String(payload.review_source || "PENDING");
+    const autoReason = payload.auto_review_reason ? String(payload.auto_review_reason) : "";
     const machinePill = document.getElementById("detail-machine-status");
     const reviewPill = document.getElementById("detail-review-status");
+    const reviewSourcePill = document.getElementById("detail-review-source");
+    const autoReasonNode = document.getElementById("detail-auto-review-reason");
     if (machinePill) {
       machinePill.className = `pill ${pillClassForStepStatus(machine)}`;
       machinePill.textContent = `machine ${displayStepStatus(machine)}`;
@@ -449,6 +510,21 @@
     if (reviewPill) {
       reviewPill.className = `pill ${pillClassForReviewStatus(review)}`;
       reviewPill.textContent = `review ${displayReviewStatus(review)}`;
+    }
+    if (reviewSourcePill) {
+      reviewSourcePill.className = `pill ${pillClassForReviewSource(reviewSource)}`;
+      reviewSourcePill.textContent = `source ${displayReviewSource(reviewSource)}`;
+    }
+    if (autoReasonNode) {
+      if (reviewSource.toUpperCase() === "AUTO" && autoReason) {
+        autoReasonNode.textContent = `Auto decision policy: ${autoReason}`;
+      } else if (reviewSource.toUpperCase() === "PENDING" && autoReason) {
+        autoReasonNode.textContent = `Pending policy reason: ${autoReason}`;
+      } else if (reviewSource.toUpperCase() === "MANUAL") {
+        autoReasonNode.textContent = "Manual review submitted.";
+      } else {
+        autoReasonNode.textContent = "Auto decision policy: -";
+      }
     }
 
     const noteBox = document.getElementById("review-note");
@@ -563,6 +639,13 @@
             reviewPill.className = `pill ${pillClassForReviewStatus(reviewStatus)}`;
             reviewPill.textContent = `review ${displayReviewStatus(reviewStatus)}`;
           }
+          if (reviewSourcePill) {
+            reviewSourcePill.className = `pill ${pillClassForReviewSource("MANUAL")}`;
+            reviewSourcePill.textContent = "source MANUAL";
+          }
+          if (autoReasonNode) {
+            autoReasonNode.textContent = "Manual review submitted.";
+          }
         } catch (err) {
           alert("Failed to save review");
         }
@@ -615,6 +698,122 @@
       const s = await apiFetchJson("/api/stats");
       if (totalNode) totalNode.textContent = String(s.total_sessions ?? "-");
       if (pendingNode) pendingNode.textContent = String(s.pending ?? "-");
+
+      const totalHint = document.getElementById("kpi-total-hint");
+      if (totalHint) {
+        totalHint.textContent = `approved ${String(s.approved ?? 0)} | rejected ${String(s.rejected ?? 0)}`;
+      }
+
+      const pendingHint = document.getElementById("kpi-pending-hint");
+      if (pendingHint) {
+        const reviewed = Number(s.reviewed ?? 0);
+        const total = Number(s.total_sessions ?? 0);
+        const completionPct = Number(s.review_completion_pct ?? 0);
+        pendingHint.textContent =
+          total > 0
+            ? `${reviewed}/${total} decided (${completionPct.toFixed(1)}%)`
+            : "No sessions yet";
+      }
+
+      const bannerPending = document.getElementById("banner-pending-pill");
+      if (bannerPending) bannerPending.textContent = `pending ${String(s.pending ?? "-")}`;
+
+      const helmetCheckedNode = document.getElementById("kpi-helmet-checked");
+      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.final_helmet_done ?? "-");
+      const helmetCheckedHint = document.getElementById("kpi-helmet-checked-hint");
+      if (helmetCheckedHint) {
+        const pct = Number(s.reviewed_final_done_pct ?? 0);
+        helmetCheckedHint.textContent = `${pct.toFixed(1)}% DONE across reviewed sessions`;
+      }
+
+      const unknownRateNode = document.getElementById("kpi-unknown-rate");
+      if (unknownRateNode) {
+        const pct = Number(s.final_unknown_pct ?? 0);
+        unknownRateNode.textContent = `${pct.toFixed(1)}%`;
+      }
+      const unknownRateHint = document.getElementById("kpi-unknown-rate-hint");
+      if (unknownRateHint) {
+        unknownRateHint.textContent = `${String(s.final_helmet_unknown ?? 0)} UNKNOWN from final helmet status`;
+      }
+
+      const manualReviewNode = document.getElementById("kpi-manual-review");
+      if (manualReviewNode) manualReviewNode.textContent = String(s.human_reviewed ?? s.reviewed ?? "-");
+      const manualReviewHint = document.getElementById("kpi-manual-review-hint");
+      if (manualReviewHint) {
+        manualReviewHint.textContent = `${String(s.manual_helmet_overrides ?? 0)} helmet overrides`;
+      }
+
+      const compactManualNeeded = document.getElementById("dashboard-compact-manual-needed");
+      if (compactManualNeeded) compactManualNeeded.textContent = String(s.final_helmet_unknown ?? "-");
+      const compactApproved = document.getElementById("dashboard-compact-approved");
+      if (compactApproved) compactApproved.textContent = String(s.approved ?? "-");
+      const compactMachineNo = document.getElementById("dashboard-compact-machine-no");
+      if (compactMachineNo) compactMachineNo.textContent = String(s.machine_helmet_not_done ?? "-");
+      const compactPending = document.getElementById("dashboard-compact-pending");
+      if (compactPending) compactPending.textContent = String(s.pending ?? "-");
+
+      const trendDone = document.getElementById("trend-strip-done");
+      if (trendDone) {
+        trendDone.textContent = `done ${String(s.final_helmet_done ?? 0)}`;
+      }
+      const trendUnknown = document.getElementById("trend-strip-unknown");
+      if (trendUnknown) {
+        const unknownPct = Number(s.final_unknown_pct ?? 0);
+        trendUnknown.textContent = `unknown ${String(s.final_helmet_unknown ?? 0)} (${unknownPct.toFixed(1)}%)`;
+      }
+      const trendReview = document.getElementById("trend-strip-review");
+      if (trendReview) {
+        const completionPct = Number(s.review_completion_pct ?? 0);
+        trendReview.textContent = `reviewed ${String(s.reviewed ?? 0)}/${String(s.total_sessions ?? 0)} (${completionPct.toFixed(1)}%)`;
+      }
+
+      const latestBody = document.getElementById("dashboard-latest-sessions-body");
+      if (latestBody instanceof HTMLTableSectionElement) {
+        try {
+          const latestPayload = await apiFetchJson("/api/sessions?limit=3");
+          const latestSessions = Array.isArray(latestPayload.sessions) ? latestPayload.sessions : [];
+          if (latestSessions.length === 0) {
+            latestBody.innerHTML = `<tr><td colspan="6"><span class="pill">No sessions found</span></td></tr>`;
+          } else {
+            latestBody.innerHTML = latestSessions
+              .map((session) => {
+                const uid = String(session.session_uid || "");
+                const sid = String(session.session_id || uid || "-");
+                const start = formatHmsFromIso(session.start_time_iso);
+                const roi = String(session.machine_roi_dwell || "UNKNOWN");
+                const helmet = String(session.final_helmet || session.machine_helmet || "UNKNOWN");
+                const review = String(session.review_status || "PENDING");
+                const remark =
+                  Number(session.clip_count || 0) > 0
+                    ? `${String(session.clip_count)} clip(s) attached`
+                    : session.has_thumbnail
+                    ? "Thumbnail available"
+                    : "No evidence attached";
+                return `
+                  <tr>
+                    <td>
+                      <div class="session-cell">
+                        <span class="thumb" aria-hidden="true"></span>
+                        <div>
+                          <strong>${sid}</strong>
+                          <div class="table-sub">${uid}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>${start}</td>
+                    <td><span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(helmet)}">helmet ${displayStepStatus(helmet)}</span></td>
+                    <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
+                    <td>${remark}</td>
+                    <td><a class="btn btn-compact action-inspect" href="session-detail.html#${encodeURIComponent(uid)}">Inspect</a></td>
+                  </tr>
+                `;
+              })
+              .join("");
+          }
+        } catch (err) {
+          latestBody.innerHTML = `<tr><td colspan="6"><span class="pill no">Failed to load sessions</span></td></tr>`;
+        }
+      }
     } catch (err) {
       // ignore
     }

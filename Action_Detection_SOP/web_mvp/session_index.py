@@ -45,6 +45,8 @@ def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
 
     # Primary layout from run_sop_mvp:
     # <out_dir>/sessions/<date>/session_<id>/
+    # Ingestion layout (web-first):
+    # <data_dir>/sessions/<date>/<session_uid>/
     direct_sessions_root = data_dir / "sessions"
     direct_sessions_root_resolved: Optional[Path] = None
     if direct_sessions_root.exists() and direct_sessions_root.is_dir():
@@ -53,9 +55,11 @@ def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
             if not date_dir.is_dir():
                 continue
             date = date_dir.name
-            for session_dir in sorted(date_dir.glob("session_*")):
-                if session_dir.is_dir():
-                    out.append((date, session_dir, data_dir))
+            for child in sorted(date_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.name.startswith("session_") or (child / "checklist.json").exists():
+                    out.append((date, child, data_dir))
 
     # Also support nested copied run-output folders:
     # <data_dir>/<any_parent>/sessions/<date>/session_<id>/
@@ -70,9 +74,11 @@ def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
             if not date_dir.is_dir():
                 continue
             date = date_dir.name
-            for session_dir in sorted(date_dir.glob("session_*")):
-                if session_dir.is_dir():
-                    out.append((date, session_dir, run_root))
+            for child in sorted(date_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.name.startswith("session_") or (child / "checklist.json").exists():
+                    out.append((date, child, run_root))
 
     # Deduplicate by absolute session path in case two globs resolve to same dir.
     unique: Dict[str, Tuple[str, Path, Path]] = {}
@@ -128,13 +134,26 @@ class SessionIndex:
         for date, session_dir, run_root in _iter_session_dirs(self._data_dir):
             checklist_path = session_dir / "checklist.json"
             checklist = _safe_read_json(checklist_path)
-            session_id = str(checklist.get("session_id") or session_dir.name.replace("session_", ""))
-            session_uid = build_session_uid(
-                data_dir=self._data_dir,
-                run_root=run_root,
-                date=date,
-                session_id=session_id,
-            )
+            if "session_id" in checklist:
+                session_id = str(checklist.get("session_id") or "")
+            else:
+                session_id = ""
+            if not session_id:
+                if session_dir.name.startswith("session_"):
+                    session_id = session_dir.name.replace("session_", "")
+                else:
+                    # In ingestion layout, folder name is usually session_uid; session_id should be in checklist.
+                    session_id = session_dir.name
+            declared_uid = checklist.get("session_uid")
+            if isinstance(declared_uid, str) and declared_uid.strip():
+                session_uid = declared_uid.strip()
+            else:
+                session_uid = build_session_uid(
+                    data_dir=self._data_dir,
+                    run_root=run_root,
+                    date=date,
+                    session_id=session_id,
+                )
             paths = SessionPaths(
                 session_dir=session_dir,
                 checklist_json=checklist_path,
