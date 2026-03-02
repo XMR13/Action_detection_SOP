@@ -2473,6 +2473,16 @@ textarea {
   flex-wrap: wrap;
 }
 
+.detail-evidence-strip button.pill {
+  cursor: pointer;
+}
+
+.detail-evidence-strip button.pill.active {
+  background: rgba(232, 24, 32, 0.11);
+  border-color: rgba(232, 24, 32, 0.22);
+  color: #881015;
+}
+
 .detail-key-events {
   margin-top: 2px;
 }

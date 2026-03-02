@@ -42,7 +42,7 @@ def main() -> int:
     src.add_argument("--video", default=None, help="Path to an input video file.")
     src.add_argument("--webcam", type=int, default=None, help="Webcam index (e.g., 0).")
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to a YOLO model (.onnx/.engine/.pt).")
-    parser.add_argument("--metadata", default="Models/metadata_PPE.yaml", help="Path to class metadata (names mapping).")
+    parser.add_argument("--metadata", default="configs/metadata.yaml", help="Path to class metadata (names mapping).")
     parser.add_argument(
         "--input-max-side",
         type=int,

@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="css/site.css" />
+    <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-event-detail">
     <a class="skip-link" href="#main-content">Skip to Main Content</a>
@@ -15,7 +16,7 @@
       <aside class="sidebar">
         <div class="sidebar-brand">
           <div class="brand-visual">
-            <img class="brand-logo" src="assets/indah-kiat-logo.png" alt="Indah Kiat logo" width="406" height="124" fetchpriority="high" />
+            <img class="brand-logo" src="assets/images.png" alt="Site logo" width="406" height="124" fetchpriority="high" />
           </div>
           <div>
             <h1>Roll Wrap SOP Review</h1>
@@ -115,7 +116,7 @@
                   <h3>Evidence Player</h3>
                   <p class="caption">Primary clip context and key moments for this session.</p>
                 </div>
-                <span class="pill brand">clip available</span>
+                <span class="pill brand" id="detail-evidence-state">clip available</span>
               </div>
 
               <div class="big-thumb detail-thumb detail-player">
@@ -127,7 +128,7 @@
                 </div>
               </div>
 
-              <div class="detail-evidence-strip">
+              <div class="detail-evidence-strip" id="detail-evidence-strip">
                 <span class="pill">entry frame +0.0s</span>
                 <span class="pill dir-b">confidence drop +3.4s</span>
                 <span class="pill">glare peak +8.1s</span>

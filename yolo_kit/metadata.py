@@ -5,7 +5,7 @@ from typing import Dict
 
 def load_class_names(metadata_path: str) -> Dict[int, str]:
     """
-    Load class names from the project's lightweight `Models/metadata.yaml` format.
+    Load class names from the project's lightweight metadata YAML format (e.g. `configs/metadata.yaml`).
 
     The repo currently stores a simple mapping:
 
@@ -42,4 +42,3 @@ def load_class_names(metadata_path: str) -> Dict[int, str]:
             names[int(left)] = right
 
     return names
-

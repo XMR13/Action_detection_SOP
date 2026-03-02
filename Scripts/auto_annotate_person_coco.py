@@ -110,7 +110,7 @@ def _parse_args() -> ExportConfig:
     parser.add_argument("--model", default="Models/yolo10s-PPE.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument(
         "--metadata",
-        default="Models/metadata_PPE.yaml",
+        default="configs/metadata_PPE.yaml",
         help="Path to class metadata yaml (names mapping). Set empty to skip name resolution.",
     )
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 import re
 from dataclasses import dataclass
 from datetime import datetime, date as Date
+import hashlib
+
+import cv2
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -44,6 +49,11 @@ def _machine_roi_status(session: SessionArtifact) -> str:
     return str(roi) if isinstance(roi, str) and roi else "UNKNOWN"
 
 
+def _machine_operator_status(session: SessionArtifact) -> str:
+    operator = session.checklist.get("operator_present")
+    return str(operator) if isinstance(operator, str) and operator else "UNKNOWN"
+
+
 def _normalize_step_status(value: Any) -> str:
     if not isinstance(value, str):
         return "UNKNOWN"
@@ -51,6 +61,60 @@ def _normalize_step_status(value: Any) -> str:
     if v in {"DONE", "NOT_DONE", "UNKNOWN"}:
         return v
     return "UNKNOWN"
+
+
+def _sop_status_from_steps(*, operator_present: str, roi_dwell: str, helmet: str) -> str:
+    steps = [
+        _normalize_step_status(operator_present),
+        _normalize_step_status(roi_dwell),
+        _normalize_step_status(helmet),
+    ]
+    if any(step == "NOT_DONE" for step in steps):
+        return "NOT_DONE"
+    if all(step == "DONE" for step in steps):
+        return "DONE"
+    return "UNKNOWN"
+
+
+def _final_step_status(*, machine_status: str, review: Optional[ReviewRecord], step_key: str) -> str:
+    final_status = _normalize_step_status(machine_status)
+    if review is None or not isinstance(review.overrides, dict):
+        return final_status
+    override = review.overrides.get(step_key)
+    if isinstance(override, str) and override:
+        return _normalize_step_status(override)
+    return final_status
+
+
+def _machine_sop_status(session: SessionArtifact) -> str:
+    return _sop_status_from_steps(
+        operator_present=_machine_operator_status(session),
+        roi_dwell=_machine_roi_status(session),
+        helmet=_machine_helmet_status(session),
+    )
+
+
+def _final_sop_status(*, session: SessionArtifact, review: Optional[ReviewRecord]) -> str:
+    final_operator = _final_step_status(
+        machine_status=_machine_operator_status(session),
+        review=review,
+        step_key="operator_present",
+    )
+    final_roi = _final_step_status(
+        machine_status=_machine_roi_status(session),
+        review=review,
+        step_key="roi_dwell",
+    )
+    final_helmet = _final_step_status(
+        machine_status=_machine_helmet_status(session),
+        review=review,
+        step_key="helmet",
+    )
+    return _sop_status_from_steps(
+        operator_present=final_operator,
+        roi_dwell=final_roi,
+        helmet=final_helmet,
+    )
 
 
 @dataclass(frozen=True)
@@ -158,6 +222,107 @@ def _safe_session_dir(data_dir: Path, session: SessionArtifact, rel_path: str) -
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid media path") from e
     return target
+
+
+def _safe_cache_file_name(rel_path: str, src_path: Path) -> str:
+    src_stat = src_path.stat()
+    digest_src = f"{rel_path}|{src_path.name}|{src_stat.st_size}|{src_stat.st_mtime_ns}"
+    digest = hashlib.sha1(digest_src.encode("utf-8"), usedforsecurity=False).hexdigest()[:20]
+    return f"{digest}.mp4"
+
+
+def _try_transcode_with_ffmpeg(*, src_path: Path, dst_path: Path) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(src_path),
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-movflags",
+        "+faststart",
+        str(dst_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, check=False)
+    except Exception:
+        return False
+    if proc.returncode != 0:
+        return False
+    return dst_path.exists() and dst_path.stat().st_size > 0
+
+
+def _try_transcode_with_opencv(*, src_path: Path, dst_path: Path) -> bool:
+    cap = cv2.VideoCapture(str(src_path))
+    if not cap.isOpened():
+        return False
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        if fps <= 0:
+            fps = 10.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if width <= 0 or height <= 0:
+            ok, frame0 = cap.read()
+            if not ok or frame0 is None:
+                return False
+            height, width = frame0.shape[:2]
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+        for fourcc_tag in ("avc1", "H264", "X264"):
+            if dst_path.exists():
+                dst_path.unlink(missing_ok=True)
+            fourcc = cv2.VideoWriter_fourcc(*fourcc_tag)
+            writer = cv2.VideoWriter(str(dst_path), fourcc, fps, (width, height))
+            if not writer.isOpened():
+                continue
+            wrote = 0
+            try:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        break
+                    writer.write(frame)
+                    wrote += 1
+            finally:
+                writer.release()
+            if wrote > 0 and dst_path.exists() and dst_path.stat().st_size > 0:
+                return True
+        return False
+    finally:
+        cap.release()
+
+
+def _ensure_browser_playback_path(*, settings: WebMvpSettings, session_uid: str, rel_path: str, src_path: Path) -> Path:
+    # Cache transcodes by source path + source mtime/size so stale results are auto-rotated.
+    cache_dir = settings.data_dir / "_web_cache" / "transcoded" / session_uid
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_name = _safe_cache_file_name(rel_path=rel_path, src_path=src_path)
+    cached_path = cache_dir / cached_name
+    if cached_path.exists() and cached_path.stat().st_size > 0:
+        return cached_path
+
+    tmp = cached_path.with_suffix(".tmp.mp4")
+    tmp.unlink(missing_ok=True)
+
+    ok = _try_transcode_with_ffmpeg(src_path=src_path, dst_path=tmp)
+    if not ok:
+        ok = _try_transcode_with_opencv(src_path=src_path, dst_path=tmp)
+    if ok and tmp.exists() and tmp.stat().st_size > 0:
+        tmp.replace(cached_path)
+        return cached_path
+
+    tmp.unlink(missing_ok=True)
+    # Fallback to original when transcode tools/codecs are unavailable.
+    return src_path
 
 
 def _safe_rel_path(rel_path: str) -> Path:
@@ -499,12 +664,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             duration_s = max(0.0, end_s - start_s)
             start_ts = _parse_iso_ts(start_iso) or _parse_iso_ts(end_iso)
 
-            machine = _machine_helmet_status(s)
-            final = machine
-            if r is not None:
-                override = r.overrides.get("helmet")
-                if isinstance(override, str) and override:
-                    final = override
+            machine_helmet = _normalize_step_status(_machine_helmet_status(s))
+            machine_sop = _machine_sop_status(s)
+            final_helmet = _final_step_status(machine_status=machine_helmet, review=r, step_key="helmet")
+            final_sop = _final_sop_status(session=s, review=r)
 
             out.append(
                 {
@@ -514,11 +677,13 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "start_time_iso": start_iso,
                     "end_time_iso": end_iso,
                     "duration_s": duration_s,
-                    "machine_helmet": machine,
+                    "machine_helmet": machine_helmet,
+                    "machine_sop": machine_sop,
                     "machine_roi_dwell": _machine_roi_status(s),
                     "review_status": rs,
                     "review_source": eff.source,
-                    "final_helmet": final,
+                    "final_helmet": final_helmet,
+                    "final_sop": final_sop,
                     "has_thumbnail": s.paths.thumbnail_jpg.exists(),
                     "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if s.paths.thumbnail_jpg.exists() else None,
                     "clip_count": _clip_count(s),
@@ -534,7 +699,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         elif sort == "MACHINE_UNKNOWN_FIRST":
             out.sort(
                 key=lambda x: (
-                    0 if str(x.get("machine_helmet") or "").upper() == "UNKNOWN" else 1,
+                    0 if str(x.get("machine_sop") or "").upper() == "UNKNOWN" else 1,
                     -float(x.get("_sort_start_ts") or 0.0),
                     str(x.get("session_uid") or ""),
                 )
@@ -568,12 +733,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         r = get_review(settings.db_path, session_uid)
         eff = _effective_review_for_session(session=s, review=r, settings=settings)
-        machine_helmet = _machine_helmet_status(s)
-        final_helmet = machine_helmet
-        if r is not None:
-            override = r.overrides.get("helmet")
-            if isinstance(override, str) and override:
-                final_helmet = override
+        machine_helmet = _normalize_step_status(_machine_helmet_status(s))
+        machine_sop = _machine_sop_status(s)
+        final_helmet = _final_step_status(machine_status=machine_helmet, review=r, step_key="helmet")
+        final_sop = _final_sop_status(session=s, review=r)
 
         clips: List[Dict[str, Any]] = []
         if isinstance(s.evidence.get("clips"), list):
@@ -588,11 +751,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     {
                         **clip,
                         "url": f"/media/{s.session_uid}/{rel_file}",
+                        "playback_url": f"/media-playback/{s.session_uid}/{rel_file}",
                     }
                 )
 
         artifacts: List[Dict[str, str]] = []
-        for rel in ("checklist.json", "run_config.json", "thumbnail.jpg", "evidence.json"):
+        for rel in ("checklist.json", "run_config.json", "thumbnail.jpg", "evidence.json", "annotated.mp4"):
             p = s.paths.session_dir / rel
             if p.exists():
                 artifacts.append({"name": rel, "url": f"/media/{s.session_uid}/{rel}"})
@@ -601,14 +765,18 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 rel = str(mp4.relative_to(s.paths.session_dir))
                 artifacts.append({"name": rel, "url": f"/media/{s.session_uid}/{rel}"})
 
+        annotated_path = s.paths.session_dir / "annotated.mp4"
+        has_annotated = annotated_path.exists()
         return {
             "session_uid": s.session_uid,
             "date": s.date,
             "session_id": s.session_id,
             "checklist": s.checklist,
             "machine_helmet": machine_helmet,
+            "machine_sop": machine_sop,
             "machine_roi_dwell": _machine_roi_status(s),
             "final_helmet": final_helmet,
+            "final_sop": final_sop,
             "review_status": eff.status,
             "review_source": eff.source,
             "auto_review_reason": eff.auto_reason,
@@ -616,6 +784,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "clips": clips,
             "has_thumbnail": s.paths.thumbnail_jpg.exists(),
             "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if s.paths.thumbnail_jpg.exists() else None,
+            "has_annotated": has_annotated,
+            "annotated_url": f"/media/{s.session_uid}/annotated.mp4" if has_annotated else None,
+            "annotated_playback_url": f"/media-playback/{s.session_uid}/annotated.mp4" if has_annotated else None,
             "artifacts": artifacts,
         }
 
@@ -710,5 +881,27 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         if not target.exists() or not target.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         return FileResponse(str(target))
+
+    @app.get("/media-playback/{session_uid}/{rel_path:path}", include_in_schema=False)
+    def media_playback(session_uid: str, rel_path: str) -> FileResponse:
+        _validate_session_uid(session_uid)
+        s = index.get(session_uid)
+        if s is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        target = _safe_session_dir(settings.data_dir, s, rel_path)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        normalized_rel = rel_path.replace("\\", "/")
+        if target.suffix.lower() != ".mp4":
+            return FileResponse(str(target))
+
+        playback = _ensure_browser_playback_path(
+            settings=settings,
+            session_uid=session_uid,
+            rel_path=normalized_rel,
+            src_path=target,
+        )
+        return FileResponse(str(playback))
 
     return app

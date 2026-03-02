@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional SOP timing profile JSON (admin-tuned). CLI timing flags override values in this profile.",
     )
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
-    parser.add_argument("--metadata", default="Models/metadata.yaml", help="Class metadata yaml (names mapping).")
+    parser.add_argument("--metadata", default="configs/metadata.yaml", help="Class metadata yaml (names mapping).")
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
     parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
     parser.add_argument(

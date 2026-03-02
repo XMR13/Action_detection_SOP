@@ -39,8 +39,8 @@
 
   const displayReviewStatus = (raw) => {
     const v = String(raw || "PENDING").toUpperCase();
-    if (v === "QUALIFIED") return "APPROVED";
-    if (v === "NOT_QUALIFIED") return "REJECTED";
+    if (v === "QUALIFIED") return "QUALIFIED";
+    if (v === "NOT_QUALIFIED") return "NOT QUALIFIED";
     return "PENDING";
   };
 
@@ -745,10 +745,10 @@
       .map((s, index) => {
         const uid = String(s.session_uid || "");
         const sid = String(s.session_id || uid || "-");
-        const machine = String(s.machine_helmet || "UNKNOWN");
+        const machine = String(s.machine_sop || s.machine_helmet || "UNKNOWN");
         const review = String(s.review_status || "PENDING");
         const reviewSource = String(s.review_source || "PENDING");
-        const final = String(s.final_helmet || machine);
+        const final = String(s.final_sop || s.final_helmet || machine);
         const date = String(s.date || "-");
         const start = formatHmsFromIso(s.start_time_iso);
         const dur = formatDuration(s.duration_s);
@@ -915,7 +915,7 @@
       }
     }
 
-    const machine = String(payload.machine_helmet || "UNKNOWN");
+    const machine = String(payload.machine_sop || payload.machine_helmet || "UNKNOWN");
     const review = String(payload.review_status || (payload.review && payload.review.review_status) || "PENDING");
     const reviewSource = String(payload.review_source || "PENDING");
     const autoReason = payload.auto_review_reason ? String(payload.auto_review_reason) : "";
@@ -959,6 +959,8 @@
     }
 
     const player = document.querySelector(".detail-player");
+    const evidenceStrip = document.getElementById("detail-evidence-strip");
+    const evidenceState = document.getElementById("detail-evidence-state");
     if (player instanceof HTMLElement) {
       const renderThumbnail = () => {
         if (payload.thumbnail_url) {
@@ -969,18 +971,73 @@
         player.innerHTML = '<div class="frame-overlay"><span class="pill">no clip</span></div>';
       };
 
-      const clips = Array.isArray(payload.clips) ? payload.clips : [];
-      if (clips.length > 0 && clips[0].url) {
-        const clipUrl = String(clips[0].url);
+      const clipsRaw = Array.isArray(payload.clips) ? payload.clips : [];
+      const clips = clipsRaw
+        .filter((clip) => clip && clip.url)
+        .map((clip) => {
+          const directUrl = String(clip.url);
+          const playbackUrl = clip.playback_url ? String(clip.playback_url) : directUrl;
+          return {
+            ...clip,
+            url: directUrl,
+            playback_url: playbackUrl,
+          };
+        });
+      const annotatedUrl = payload.annotated_url ? String(payload.annotated_url) : "";
+      const annotatedPlaybackUrl = payload.annotated_playback_url ? String(payload.annotated_playback_url) : annotatedUrl;
+      const hasAnnotated = Boolean(annotatedUrl);
+      const finalSopStatus = String(payload.final_sop || payload.machine_sop || payload.final_helmet || payload.machine_helmet || "UNKNOWN").toUpperCase();
+      const preferAnnotated = hasAnnotated && finalSopStatus === "UNKNOWN";
+
+      const setEvidenceState = () => {
+        if (!(evidenceState instanceof HTMLElement)) return;
+        if (preferAnnotated) {
+          evidenceState.className = "pill dir-b";
+          evidenceState.textContent = "unknown: full annotated session";
+          return;
+        }
+        if (clips.length > 0) {
+          evidenceState.className = "pill brand";
+          evidenceState.textContent = `${clips.length} clip${clips.length === 1 ? "" : "s"} available`;
+          return;
+        }
+        if (hasAnnotated) {
+          evidenceState.className = "pill brand";
+          evidenceState.textContent = "annotated full session";
+          return;
+        }
+        if (payload.thumbnail_url) {
+          evidenceState.className = "pill dir-b";
+          evidenceState.textContent = "thumbnail only";
+          return;
+        }
+        evidenceState.className = "pill no";
+        evidenceState.textContent = "no evidence";
+      };
+
+      const setActiveClipPill = (activeKey) => {
+        if (!(evidenceStrip instanceof HTMLElement)) return;
+        const pills = evidenceStrip.querySelectorAll("button[data-clip-key]");
+        pills.forEach((pill) => {
+          const key = pill.getAttribute("data-clip-key") || "";
+          if (key === activeKey) {
+            pill.classList.add("active");
+          } else {
+            pill.classList.remove("active");
+          }
+        });
+      };
+
+      const renderVideoClip = (playbackUrl, directUrl) => {
         player.innerHTML =
           '<video id="detail-video" controls preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"></video><div class="frame-overlay"><a id="detail-clip-link" class="pill" target="_blank" rel="noreferrer">open clip file</a></div>';
         const video = document.getElementById("detail-video");
         const clipLink = document.getElementById("detail-clip-link");
         if (clipLink instanceof HTMLAnchorElement) {
-          clipLink.href = clipUrl;
+          clipLink.href = directUrl;
         }
         if (video instanceof HTMLVideoElement) {
-          video.src = clipUrl;
+          video.src = playbackUrl;
           video.addEventListener(
             "error",
             () => {
@@ -990,6 +1047,68 @@
             { once: true }
           );
         }
+      };
+
+      const renderEvidenceStrip = () => {
+        if (!(evidenceStrip instanceof HTMLElement)) return;
+        evidenceStrip.innerHTML = "";
+
+        if (clips.length > 0) {
+          clips.forEach((clip, idx) => {
+            const clipNameRaw = clip && clip.name ? String(clip.name) : `clip_${idx + 1}`;
+            const clipName = clipNameRaw.replaceAll("_", " ");
+            const eventS = Number(clip && clip.event_time_s);
+            const timeTag = Number.isFinite(eventS) ? ` +${eventS.toFixed(1)}s` : "";
+            const clipKey = `clip-${idx}`;
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "pill detail-clip-pill";
+            btn.setAttribute("data-clip-key", clipKey);
+            btn.textContent = `${clipName}${timeTag}`;
+            btn.addEventListener("click", () => {
+              renderVideoClip(String(clip.playback_url || clip.url), String(clip.url));
+              setActiveClipPill(clipKey);
+            });
+            evidenceStrip.appendChild(btn);
+          });
+        } else {
+          const noClipPill = document.createElement("span");
+          noClipPill.className = "pill";
+          noClipPill.textContent = "no clip events";
+          evidenceStrip.appendChild(noClipPill);
+        }
+
+        if (hasAnnotated) {
+          const annotatedBtn = document.createElement("button");
+          annotatedBtn.type = "button";
+          annotatedBtn.className = "pill detail-clip-pill";
+          annotatedBtn.setAttribute("data-clip-key", "annotated");
+          annotatedBtn.textContent = "annotated full session";
+          annotatedBtn.addEventListener("click", () => {
+            renderVideoClip(annotatedPlaybackUrl || annotatedUrl, annotatedUrl);
+            setActiveClipPill("annotated");
+          });
+          evidenceStrip.appendChild(annotatedBtn);
+        }
+
+        const artifactsLink = document.createElement("a");
+        artifactsLink.className = "pill";
+        artifactsLink.href = "#artifacts";
+        artifactsLink.textContent = "open artifacts";
+        evidenceStrip.appendChild(artifactsLink);
+      };
+
+      setEvidenceState();
+      renderEvidenceStrip();
+      if (preferAnnotated) {
+        renderVideoClip(annotatedPlaybackUrl || annotatedUrl, annotatedUrl);
+        setActiveClipPill("annotated");
+      } else if (clips.length > 0) {
+        renderVideoClip(String(clips[0].playback_url || clips[0].url), String(clips[0].url));
+        setActiveClipPill("clip-0");
+      } else if (hasAnnotated) {
+        renderVideoClip(annotatedPlaybackUrl || annotatedUrl, annotatedUrl);
+        setActiveClipPill("annotated");
       } else {
         renderThumbnail();
       }

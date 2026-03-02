@@ -20,7 +20,7 @@ def main():
         post_cfg=YoloPostConfig(conf_threshold=0.15, iou_threshold=0.35)
     )
 
-    class_names = load_class_names("Models/metadata.yaml")
+    class_names = load_class_names("configs/metadata.yaml")
 
     # deteksi
     detections = pipeline(gambar)

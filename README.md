@@ -24,7 +24,8 @@ si untuk **object detection YOLO-style** (preprocess → inference backend → p
 ## Repository Layout (Current)
 
 - `yolo_kit/` — utilitas runtime deteksi (letterbox, decode+NMS, dan backend inference: ONNX Runtime / TensorRT / TorchScript).
-- `Models/` — model artifacts (contoh `.onnx`) dan `metadata.yaml` (mapping class id → name).
+- `Models/` — model artifacts (contoh `.onnx`).
+- `configs/metadata*.yaml` — class mapping (class id → name) untuk inference/runtime.
 - `Media/` — sample media untuk demo.
 - `testing_basic_detect.py` — demo sederhana untuk menjalankan deteksi pada sebuah image.
 - `Action_Detection_SOP/` — placeholder package untuk logic SOP/action (akan diperluas).
@@ -124,11 +125,12 @@ Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
    - CLI tetap bisa override nilai config jika dibutuhkan.
 
 4) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
-   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_model.onnx --metadata Models/metadata.yaml --save-video`
+   - (COCO/general) `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_model.onnx --metadata configs/metadata.yaml --save-video`
+   - (PPE: person+helmet) `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_ppe_model.onnx --metadata configs/metadata_PPE.yaml --save-video`
 
 Catatan penting:
 
-- Model + `metadata.yaml` harus punya class **helmet** (repo saat ini memakai COCO metadata contoh, jadi kamu perlu metadata/model yang sesuai untuk PPE).
+- Model + metadata harus punya class **helmet** (repo menyediakan COCO mapping di `configs/metadata.yaml`, jadi untuk PPE pakai `configs/metadata_PPE.yaml` + model PPE yang sesuai).
 
 ## Website MVP (FastAPI + SQLite)
 
