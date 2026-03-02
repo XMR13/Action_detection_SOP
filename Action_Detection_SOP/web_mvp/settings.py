@@ -10,6 +10,7 @@ class WebMvpSettings:
     data_dir: Path
     db_path: Path
     ui_dir: Path
+    admin_username: str = "admin"
     admin_password: Optional[str] = None
     auto_rescan_seconds: float = 0.0
     auto_approve_done_enabled: bool = True

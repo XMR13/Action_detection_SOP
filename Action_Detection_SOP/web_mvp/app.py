@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 import re
 from dataclasses import dataclass
+from datetime import datetime, date as Date
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import BasicAuthConfig, BasicAuthMiddleware
+from .auth import BasicAuthConfig, BasicAuthMiddleware, issue_session_token
 from .review_store import ReviewRecord, get_review, get_reviews_by_uid, init_db, upsert_review
 from .session_index import SessionArtifact, SessionIndex
 from .settings import WebMvpSettings
@@ -20,6 +21,17 @@ from .settings import WebMvpSettings
 def _display_status(value: str) -> str:
     # Render "NOT_DONE" as "NOT DONE" to match UI labels.
     return value.replace("_", " ").upper() if value else "-"
+
+def _parse_iso_ts(value: Any) -> float:
+    if not isinstance(value, str) or not value:
+        return 0.0
+    v = value.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(v).timestamp()
+    except Exception:
+        return 0.0
 
 
 def _machine_helmet_status(session: SessionArtifact) -> str:
@@ -200,6 +212,17 @@ def _validate_date_ymd(date: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid date (expected YYYY-MM-DD)")
 
 
+def _parse_date_ymd(date_raw: str) -> Optional[Date]:
+    if not isinstance(date_raw, str):
+        return None
+    if not _DATE_RE.match(date_raw):
+        return None
+    try:
+        return datetime.strptime(date_raw, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
 def _validate_token(value: str, *, label: str) -> None:
     if not value or not _SAFE_TOKEN_RE.match(value):
         raise HTTPException(status_code=400, detail=f"Invalid {label}")
@@ -214,14 +237,68 @@ def _validate_session_id(session_id: str) -> None:
     _validate_token(session_id, label="session_id")
 
 
+def _resolve_date_window(
+    *,
+    date: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> tuple[Optional[Date], Optional[Date], Optional[str], Optional[str]]:
+    if date and (date_from or date_to):
+        raise HTTPException(status_code=400, detail="Use either `date` or `date_from/date_to`, not both")
+    if date:
+        _validate_date_ymd(date)
+        d = _parse_date_ymd(date)
+        if d is None:
+            raise HTTPException(status_code=400, detail="Invalid date (expected YYYY-MM-DD)")
+        return d, d, date, date
+    if date_from:
+        _validate_date_ymd(date_from)
+    if date_to:
+        _validate_date_ymd(date_to)
+    from_d = _parse_date_ymd(date_from) if date_from else None
+    to_d = _parse_date_ymd(date_to) if date_to else None
+    if date_from and from_d is None:
+        raise HTTPException(status_code=400, detail="Invalid `date_from` (expected YYYY-MM-DD)")
+    if date_to and to_d is None:
+        raise HTTPException(status_code=400, detail="Invalid `date_to` (expected YYYY-MM-DD)")
+    if from_d and to_d and from_d > to_d:
+        raise HTTPException(status_code=400, detail="Invalid date range (`date_from` > `date_to`)")
+    return from_d, to_d, date_from, date_to
+
+
+def _filter_sessions_by_date_window(
+    sessions: List[SessionArtifact],
+    *,
+    date: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> tuple[List[SessionArtifact], Optional[str], Optional[str]]:
+    lower, upper, lower_raw, upper_raw = _resolve_date_window(date=date, date_from=date_from, date_to=date_to)
+    if lower or upper:
+        filtered: List[SessionArtifact] = []
+        for session in sessions:
+            session_date = _parse_date_ymd(session.date)
+            if session_date is None:
+                # Ignore invalid folder date when explicit date filtering is requested.
+                continue
+            if lower and session_date < lower:
+                continue
+            if upper and session_date > upper:
+                continue
+            filtered.append(session)
+        sessions = filtered
+    return sessions, lower_raw, upper_raw
+
+
 def create_app(settings: WebMvpSettings) -> FastAPI:
     init_db(settings.db_path)
     index = SessionIndex(data_dir=settings.data_dir)
 
     app = FastAPI(title="SOP Review MVP", version="0.1.0")
+    auth_cfg = BasicAuthConfig(username=settings.admin_username, password=settings.admin_password)
     app.add_middleware(
         BasicAuthMiddleware,
-        cfg=BasicAuthConfig(password=settings.admin_password),
+        cfg=auth_cfg,
     )
 
     ui_dir = settings.ui_dir
@@ -238,6 +315,35 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     @app.get("/api/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    class LoginIn(BaseModel):
+        username: str = Field(...)
+        password: str = Field(...)
+
+    @app.post("/api/auth/login")
+    def login(payload: LoginIn) -> JSONResponse:
+        if not settings.admin_password:
+            raise HTTPException(status_code=400, detail="Auth disabled (no admin password configured)")
+        if payload.username != settings.admin_username or payload.password != settings.admin_password:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        token = issue_session_token(cfg=auth_cfg, username=settings.admin_username)
+        resp = JSONResponse({"status": "ok"})
+        resp.set_cookie(
+            key=auth_cfg.cookie_name,
+            value=token,
+            max_age=int(auth_cfg.cookie_max_age_s),
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return resp
+
+    @app.post("/api/auth/logout")
+    def logout() -> JSONResponse:
+        resp = JSONResponse({"status": "ok"})
+        resp.delete_cookie(key=auth_cfg.cookie_name, path="/")
+        return resp
 
     @app.post("/api/admin/rescan")
     def rescan() -> Dict[str, str]:
@@ -260,8 +366,19 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         }
 
     @app.get("/api/stats")
-    def stats() -> Dict[str, Any]:
+    def stats(
+        *,
+        date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
         sessions = index.list()
+        sessions, applied_date_from, applied_date_to = _filter_sessions_by_date_window(
+            sessions,
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+        )
         reviews = get_reviews_by_uid(settings.db_path, (s.session_uid for s in sessions))
         pending = 0
         approved = 0
@@ -345,18 +462,27 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "final_helmet_unknown": final_unknown,
             "final_unknown_pct": final_unknown_pct,
             "reviewed_final_done_pct": reviewed_final_done_pct,
+            "date_from": applied_date_from,
+            "date_to": applied_date_to,
         }
 
     @app.get("/api/sessions")
     def list_sessions(
         *,
         date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
         limit: int = Query(default=200, ge=1, le=2000),
     ) -> Dict[str, Any]:
         sessions = index.list()
-        if date:
-            sessions = [s for s in sessions if s.date == date]
+        sessions, applied_date_from, applied_date_to = _filter_sessions_by_date_window(
+            sessions,
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+        )
         reviews = get_reviews_by_uid(settings.db_path, (s.session_uid for s in sessions))
         out: List[Dict[str, Any]] = []
         for s in sessions:
@@ -371,6 +497,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             start_s = float(s.checklist.get("start_time_s") or 0.0)
             end_s = float(s.checklist.get("end_time_s") or 0.0)
             duration_s = max(0.0, end_s - start_s)
+            start_ts = _parse_iso_ts(start_iso) or _parse_iso_ts(end_iso)
 
             machine = _machine_helmet_status(s)
             final = machine
@@ -398,11 +525,40 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "first_clip_url": (
                         f"/media/{s.session_uid}/{_first_clip_rel_file(s)}" if _first_clip_rel_file(s) else None
                     ),
+                    "_sort_start_ts": start_ts,
                 }
             )
-            if len(out) >= limit:
-                break
-        return {"sessions": out, "last_scan_utc": index.last_scan_utc}
+
+        if sort == "OLDEST":
+            out.sort(key=lambda x: (float(x.get("_sort_start_ts") or 0.0), str(x.get("session_uid") or "")))
+        elif sort == "MACHINE_UNKNOWN_FIRST":
+            out.sort(
+                key=lambda x: (
+                    0 if str(x.get("machine_helmet") or "").upper() == "UNKNOWN" else 1,
+                    -float(x.get("_sort_start_ts") or 0.0),
+                    str(x.get("session_uid") or ""),
+                )
+            )
+        elif sort == "PENDING_FIRST":
+            out.sort(
+                key=lambda x: (
+                    0 if str(x.get("review_status") or "").upper() == "PENDING" else 1,
+                    -float(x.get("_sort_start_ts") or 0.0),
+                    str(x.get("session_uid") or ""),
+                )
+            )
+        else:
+            out.sort(key=lambda x: (-float(x.get("_sort_start_ts") or 0.0), str(x.get("session_uid") or "")))
+
+        out = out[:limit]
+        for row in out:
+            row.pop("_sort_start_ts", None)
+        return {
+            "sessions": out,
+            "last_scan_utc": index.last_scan_utc,
+            "date_from": applied_date_from,
+            "date_to": applied_date_to,
+        }
 
     @app.get("/api/sessions/{session_uid}")
     def get_session(session_uid: str) -> Dict[str, Any]:

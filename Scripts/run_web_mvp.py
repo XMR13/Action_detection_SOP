@@ -28,6 +28,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--data-dir", type=Path, default=_default_data_dir())
     parser.add_argument("--db-path", type=Path, default=None)
     parser.add_argument("--ui-dir", type=Path, default=(Path.cwd() / "mockups"))
+    parser.add_argument("--admin-username", default=os.environ.get("SOP_ADMIN_USERNAME", "admin"))
     parser.add_argument("--admin-password", default=os.environ.get("SOP_ADMIN_PASSWORD"))
     parser.add_argument(
         "--disable-auto-approve-done",
@@ -51,6 +52,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         data_dir=data_dir,
         db_path=db_path,
         ui_dir=ui_dir,
+        admin_username=str(args.admin_username),
         admin_password=args.admin_password,
         auto_approve_done_enabled=not bool(args.disable_auto_approve_done),
         auto_approve_min_duration_s=float(args.auto_approve_min_duration_s),

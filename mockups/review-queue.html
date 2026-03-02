@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="css/site.css" />
   </head>
-  <body class="page-review-queue">
+  <body class="page-review-queue is-hydrating">
     <a class="skip-link" href="#main-content">Skip to Main Content</a>
     <div class="grain" aria-hidden="true"></div>
     <div class="app">
@@ -75,7 +75,24 @@
           <div class="filters">
             <span class="hint">Site: Subang</span>
             <span class="hint">Camera: cam_01</span>
-            <span class="hint" id="queue-length-hint">Queue length: 14</span>
+            <span class="hint" id="queue-length-hint">Queue length: --</span>
+            <div class="field">
+              <label for="queue-date-from">Date from</label>
+              <input id="queue-date-from" name="queue-date-from" type="date" />
+            </div>
+            <div class="field">
+              <label for="queue-date-to">Date to</label>
+              <input id="queue-date-to" name="queue-date-to" type="date" />
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="queue-date-apply" type="button">Apply</button>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="queue-date-clear" type="button">Clear</button>
+            </div>
+            <span class="hint" id="queue-active-date-slice">Date: all</span>
           </div>
         </header>
 
@@ -89,7 +106,7 @@
           </div>
           <div class="mode-tags">
             <span class="pill brand">unknown helmet</span>
-            <span class="pill" id="queue-pending-pill">pending 14</span>
+            <span class="pill" id="queue-pending-pill">pending --</span>
             <span class="pill ink">SLA target &lt; 10m</span>
           </div>
         </section>
@@ -97,19 +114,19 @@
         <section class="queue-status-grid">
           <article class="queue-status-card">
             <div class="label">Pending</div>
-            <div class="value" id="queue-stat-pending">14</div>
+            <div class="value" id="queue-stat-pending">--</div>
           </article>
           <article class="queue-status-card yes">
             <div class="label">Diterima</div>
-            <div class="value" id="queue-stat-approved">88</div>
+            <div class="value" id="queue-stat-approved">--</div>
           </article>
           <article class="queue-status-card no">
             <div class="label">Ditolak</div>
-            <div class="value" id="queue-stat-rejected">21</div>
+            <div class="value" id="queue-stat-rejected">--</div>
           </article>
           <article class="queue-status-card">
             <div class="label">Manual unknown</div>
-            <div class="value" id="queue-stat-unknown">6</div>
+            <div class="value" id="queue-stat-unknown">--</div>
           </article>
         </section>
 
@@ -120,16 +137,17 @@
                 <h3>Sessions Table</h3>
                 <p class="caption"> Event hasil pengecekan, hasil review ditangani sebagai berikut.</p>
               </div>
-              <a class="pill" href="session-detail.html">Open Selected Detail</a>
+              <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
             </div>
 
             <form class="filters queue-table-filters" aria-label="Queue table filters">
               <div class="field">
                 <label for="queue-status">Status</label>
                 <select id="queue-status" name="queue-status">
-                  <option>Pending review</option>
-                  <option>All statuses</option>
-                  <option>Rejected only</option>
+                  <option value="PENDING" selected>Pending review</option>
+                  <option value="ALL">All statuses</option>
+                  <option value="NOT_QUALIFIED">Rejected only</option>
+                  <option value="QUALIFIED">Approved only</option>
                 </select>
               </div>
               <div class="field">
@@ -143,17 +161,18 @@
               <div class="field">
                 <label for="queue-evidence">Evidence</label>
                 <select id="queue-evidence" name="queue-evidence">
-                  <option>Clip + thumbnail</option>
-                  <option>Clip only</option>
-                  <option>Thumbnail only</option>
+                  <option value="ANY" selected>Any evidence</option>
+                  <option value="CLIP_THUMB">Clip + thumbnail</option>
+                  <option value="CLIP_ONLY">Clip only</option>
+                  <option value="THUMB_ONLY">Thumbnail only</option>
                 </select>
               </div>
               <div class="field">
                 <label for="queue-sort">Sort by</label>
                 <select id="queue-sort" name="queue-sort">
-                  <option>SLA age (highest first)</option>
-                  <option>Newest first</option>
-                  <option>Machine UNKNOWN first</option>
+                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
+                  <option value="NEWEST">Newest first</option>
+                  <option value="MACHINE_UNKNOWN_FIRST">Machine UNKNOWN first</option>
                 </select>
               </div>
             </form>
@@ -162,6 +181,7 @@
               <table class="table queue-table" aria-label="Review queue sessions">
                 <colgroup>
                   <col class="queue-col-session" />
+                  <col class="queue-col-date" />
                   <col class="queue-col-start" />
                   <col class="queue-col-duration" />
                   <col class="queue-col-machine" />
@@ -174,6 +194,7 @@
                 <thead>
                   <tr>
                     <th scope="col">Session</th>
+                    <th scope="col">Date</th>
                     <th scope="col">Start</th>
                     <th scope="col">Dur</th>
                     <th scope="col">AI Result</th>
@@ -186,7 +207,7 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td colspan="9">
+                    <td colspan="10">
                       <span class="pill pending">Loading sessions...</span>
                     </td>
                   </tr>
@@ -208,35 +229,39 @@
               <div class="queue-next-strip">
                 <div class="queue-next-copy">
                   <span class="head">Current selection</span>
-                  <span class="body" id="selected-session-label">IKS-C01-014 | Shift A | Machine UNKNOWN</span>
+                  <span class="body" id="selected-session-label">Loading selection...</span>
                 </div>
-                <span class="pill no" id="selected-session-sla">SLA 12m</span>
+                <span class="pill no" id="selected-session-sla">SLA --</span>
               </div>
 
               <div class="meta queue-facts">
                 <div class="row">
                   <span class="key">Session UID</span>
-                  <span class="val" id="selected-session-uid">iks-subang-c01-20260227-014</span>
+                  <span class="val" id="selected-session-uid">-</span>
+                </div>
+                <div class="row">
+                  <span class="key">Session Date</span>
+                  <span class="val" id="selected-session-date">-</span>
                 </div>
                 <div class="row">
                   <span class="key">AI Result</span>
-                  <span class="val" id="selected-machine-status">UNKNOWN</span>
+                  <span class="val" id="selected-machine-status">-</span>
                 </div>
                 <div class="row">
                   <span class="key">Human Review</span>
-                  <span class="val" id="selected-human-status">PENDING</span>
+                  <span class="val" id="selected-human-status">-</span>
                 </div>
                 <div class="row">
                   <span class="key">Review Source</span>
-                  <span class="val" id="selected-review-source">PENDING</span>
+                  <span class="val" id="selected-review-source">-</span>
                 </div>
                 <div class="row">
                   <span class="key">Final</span>
-                  <span class="val" id="selected-final-status">UNKNOWN</span>
+                  <span class="val" id="selected-final-status">-</span>
                 </div>
                 <div class="row">
                   <span class="key">Evidence</span>
-                  <span class="val" id="selected-evidence">thumbnail + clip</span>
+                  <span class="val" id="selected-evidence">-</span>
                 </div>
               </div>
 

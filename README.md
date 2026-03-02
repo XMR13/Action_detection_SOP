@@ -134,12 +134,18 @@ Catatan penting:
 
 Untuk draft website yang bisa jalan cepat di server on-prem (AI box), repo ini menyediakan backend MVP berbasis Python.
 
-- Set password admin (Basic Auth): `SOP_ADMIN_PASSWORD=your_password`
+- Set admin credentials:
+  - `SOP_ADMIN_USERNAME=admin` (default: `admin`)
+  - `SOP_ADMIN_PASSWORD=your_password`
 - Jalankan: `uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data`
 - Akses: `http://<AI_BOX_IP>:8000/` (UI di `/ui/*`, API di `/api/*`)
 - Auto-approve low-risk DONE (default aktif):
   - minimum durasi default: `--auto-approve-min-duration-s 8.0`
   - nonaktifkan kalau mau 100% manual review: `--disable-auto-approve-done`
+
+Auth UX:
+- Reviewer login via `/ui/login.html` (sets HTTP-only cookie for `/api/*` and `/media/*`).
+- Scripts/uploader use HTTP Basic Auth (`SOP_ADMIN_USERNAME` / `SOP_ADMIN_PASSWORD`).
 
 Upload (Jetson → web server) via API:
 - Jalankan uploader: `python3 -m Scripts.sop_uploader --server http://<AI_BOX_IP>:8000 --data-dir data`
@@ -150,3 +156,6 @@ Upload (Jetson → web server) via API:
 Catatan mode pemakaian:
 - Kalau semua masih di 1 box: cukup jalankan `run_web_mvp` dan biarkan SOP runner menulis ke folder `data/` yang sama.
 - Kalau Jetson dan web server beda mesin: gunakan `sop_uploader` (tidak perlu shared folder/manual copy).
+
+API contract reference:
+- `docs/web_mvp_api_contract.md`

@@ -62,7 +62,7 @@
             <h2>Session Detail</h2>
             <p>Evidence-first review for one machine session.</p>
             <div class="detail-crumb">
-              <a href="review-queue.html#iks-c01-014">Review Queue</a>
+              <a id="detail-queue-link" href="review-queue.html">Review Queue</a>
               <span>/</span>
               <span id="detail-session-id">-</span>
             </div>
@@ -71,6 +71,24 @@
             <span class="hint">Site: Subang</span>
             <span class="hint">Camera: cam_01</span>
             <span class="hint" id="detail-session-uid-hint">UID: -</span>
+            <span class="hint" id="detail-session-date-hint">Session date: -</span>
+            <div class="field">
+              <label for="detail-date-from">Date from</label>
+              <input id="detail-date-from" name="detail-date-from" type="date" />
+            </div>
+            <div class="field">
+              <label for="detail-date-to">Date to</label>
+              <input id="detail-date-to" name="detail-date-to" type="date" />
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="detail-date-apply" type="button">Apply</button>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="detail-date-clear" type="button">Clear</button>
+            </div>
+            <span class="hint" id="detail-active-date-slice">Date: all</span>
           </div>
         </header>
 
@@ -174,19 +192,23 @@
                 <div class="meta">
                   <div class="row">
                     <span class="key">Session ID</span>
-                    <span class="val">IKS-C01-014</span>
+                    <span class="val" id="detail-meta-session-id">-</span>
                   </div>
                   <div class="row">
                     <span class="key">Session UID</span>
-                    <span class="val">iks-subang-c01-20260227-014</span>
+                    <span class="val" id="detail-meta-session-uid">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Session date</span>
+                    <span class="val" id="detail-meta-session-date">-</span>
                   </div>
                   <div class="row">
                     <span class="key">Start time</span>
-                    <span class="val">2026-02-27 16:12:08</span>
+                    <span class="val" id="detail-meta-start-time">-</span>
                   </div>
                   <div class="row">
                     <span class="key">Duration</span>
-                    <span class="val">10.8 seconds</span>
+                    <span class="val" id="detail-meta-duration">-</span>
                   </div>
                   <div class="row">
                     <span class="key">Model version</span>
@@ -282,8 +304,8 @@
                 </div>
 
                 <div class="detail-nav-row">
-                  <a class="btn" href="review-queue.html#iks-c01-014">Back to Queue</a>
-                  <a class="btn primary" href="session-detail.html#iks-c01-016">Next Pending</a>
+                  <a class="btn" id="detail-back-link" href="review-queue.html">Back to Queue</a>
+                  <a class="btn primary" id="detail-next-link" href="review-queue.html">Next Pending</a>
                 </div>
 
                 <div class="queue-help">

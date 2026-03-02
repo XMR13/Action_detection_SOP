@@ -60,9 +60,9 @@
             </p>
           </div>
 
-          <form class="login-form" data-disable-on-submit>
-            <div class="validation-summary login-preview-note" role="alert" aria-live="polite">
-              <p>Temporary preview only. This button goes directly to Dashboard until login logic is implemented.</p>
+          <form class="login-form" id="login-form">
+            <div class="validation-summary login-preview-note" id="login-status" role="alert" aria-live="polite">
+              <p>Sign in required to access sessions and evidence.</p>
             </div>
 
             <div class="login-field">
@@ -80,7 +80,7 @@
               <a class="login-inline-link" href="review-queue.html">Preview review flow</a>
             </div>
 
-            <a class="btn primary login-submit" href="index.html">Open Dashboard</a>
+            <button class="btn primary login-submit" type="submit">Sign In</button>
 
             <div class="login-foot">
               <span class="hint">Reviewer access only</span>
@@ -91,5 +91,6 @@
         </div>
       </section>
     </main>
+    <script src="js/site.js"></script>
   </body>
 </html>

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="css/site.css" />
   </head>
-  <body class="page-dashboard">
+  <body class="page-dashboard is-hydrating">
     <a class="skip-link" href="#main-content">Skip to Main Content</a>
     <div class="grain" aria-hidden="true"></div>
     <div class="app">
@@ -98,10 +98,27 @@
             <div class="field">
               <label for="range">Date range</label>
               <select id="range" name="range">
-                <option>Today</option>
-                <option>Last 7 days</option>
-                <option>This month</option>
+                <option value="CUSTOM">Custom</option>
+                <option value="TODAY">Today</option>
+                <option value="LAST_7_DAYS">Last 7 days</option>
+                <option value="LAST_30_DAYS">Last 30 days</option>
               </select>
+            </div>
+            <div class="field">
+              <label for="date-from">Date from</label>
+              <input id="date-from" name="date-from" type="date" />
+            </div>
+            <div class="field">
+              <label for="date-to">Date to</label>
+              <input id="date-to" name="date-to" type="date" />
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="date-apply" type="button">Apply</button>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="date-clear" type="button">Clear</button>
             </div>
           </div>
         </header>
@@ -115,9 +132,10 @@
             </span>
           </div>
           <div class="mode-tags">
-            <span class="pill" id="banner-pending-pill">pending 14</span>
+            <span class="pill" id="banner-pending-pill">pending --</span>
             <span class="pill ink">avg review 3.1 min</span>
             <span class="pill brand">target &lt; 10 min</span>
+            <span class="pill" id="dashboard-active-date-slice">date: all</span>
           </div>
         </section>
 
@@ -128,8 +146,8 @@
                 <span class="kpi-label">Sesi yang dideteksi</span>
                 <span class="kpi-accent ink">S</span>
               </div>
-              <div class="kpi-value" id="kpi-total-sessions">126</div>
-              <div class="kpi-hint" id="kpi-total-hint">+9 vs. yesterday</div>
+              <div class="kpi-value" id="kpi-total-sessions">--</div>
+              <div class="kpi-hint" id="kpi-total-hint">Loading stats...</div>
             </div>
           </article>
           <article class="card">
@@ -138,8 +156,8 @@
                 <span class="kpi-label">Review pending</span>
                 <span class="kpi-accent brand">Q</span>
               </div>
-              <div class="kpi-value" id="kpi-pending">14</div>
-              <div class="kpi-hint" id="kpi-pending-hint">4 urgent sessions from cam_01</div>
+              <div class="kpi-value" id="kpi-pending">--</div>
+              <div class="kpi-hint" id="kpi-pending-hint">Loading stats...</div>
             </div>
           </article>
           <article class="card">
@@ -148,8 +166,8 @@
                 <span class="kpi-label">Helmet (CHECKED)</span>
                 <span class="kpi-accent yes">Y</span>
               </div>
-              <div class="kpi-value" id="kpi-helmet-checked">101</div>
-              <div class="kpi-hint" id="kpi-helmet-checked-hint">80.1% across reviewed sessions</div>
+              <div class="kpi-value" id="kpi-helmet-checked">--</div>
+              <div class="kpi-hint" id="kpi-helmet-checked-hint">Loading stats...</div>
             </div>
           </article>
           <article class="card">
@@ -158,8 +176,8 @@
                 <span class="kpi-label">persentase sesi <br> yang tidak terdeteksi</span>
                 <span class="kpi-accent dir-b">U</span>
               </div>
-              <div class="kpi-value" id="kpi-unknown-rate">7.1%</div>
-              <div class="kpi-hint" id="kpi-unknown-rate-hint">Mostly glare during 14:00-15:00</div>
+              <div class="kpi-value" id="kpi-unknown-rate">--</div>
+              <div class="kpi-hint" id="kpi-unknown-rate-hint">Loading stats...</div>
             </div>
           </article>
           <article class="card">
@@ -168,8 +186,8 @@
                 <span class="kpi-label">Pengecekan manual</span>
                 <span class="kpi-accent no">M</span>
               </div>
-              <div class="kpi-value" id="kpi-manual-review">3</div>
-              <div class="kpi-hint" id="kpi-manual-review-hint">2 NO, 1 UNKNOWN</div>
+              <div class="kpi-value" id="kpi-manual-review">--</div>
+              <div class="kpi-hint" id="kpi-manual-review-hint">Loading stats...</div>
             </div>
           </article>
         </section>
@@ -212,9 +230,9 @@
                 <div class="trend-x-title">Shift time</div>
               </div>
               <div class="trend-value-strip">
-                <span class="pill" id="trend-strip-done">done peak 46</span>
-                <span class="pill" id="trend-strip-unknown">unknown spike 15:00</span>
-                <span class="pill brand" id="trend-strip-review">review queue stable</span>
+                <span class="pill" id="trend-strip-done">done peak --</span>
+                <span class="pill" id="trend-strip-unknown">unknown spike --</span>
+                <span class="pill brand" id="trend-strip-review">review loading...</span>
               </div>
             </div>
           </article>
@@ -228,25 +246,25 @@
             <div class="queue-status-grid compact-grid">
               <div class="queue-status-card">
                 <div class="label">Perlu review manual</div>
-                <div class="value" id="dashboard-compact-manual-needed">3</div>
+                <div class="value" id="dashboard-compact-manual-needed">--</div>
               </div>
               <div class="queue-status-card yes">
                 <div class="label">Diterima</div>
-                <div class="value" id="dashboard-compact-approved">88</div>
+                <div class="value" id="dashboard-compact-approved">--</div>
               </div>
               <div class="queue-status-card no">
                 <div class="label">Machine NO</div>
-                <div class="value" id="dashboard-compact-machine-no">21</div>
+                <div class="value" id="dashboard-compact-machine-no">--</div>
               </div>
               <div class="queue-status-card">
                 <div class="label">Menunggu review</div>
-                <div class="value" id="dashboard-compact-pending">14</div>
+                <div class="value" id="dashboard-compact-pending">--</div>
               </div>
             </div>
             <div class="queue-next-strip">
               <div class="queue-next-copy">
                 <span class="head">Sesi selanjutnya</span>
-                <span class="body">IKS-C01-2026-02-27-014 | UNKNOWN helmet verdict</span>
+                <span class="body">Loading next session...</span>
               </div>
               <a class="btn primary" href="review-queue.html">Open Queue</a>
             </div>
