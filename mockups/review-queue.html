@@ -19,52 +19,51 @@
             <img class="brand-logo" src="assets/images.png" alt="Site logo" width="406" height="124" fetchpriority="high" />
           </div>
           <div>
-            <h1>Roll Wrap SOP Review</h1>
+            <h1>Roll Wrapping 3 SOP Review</h1>
             <p class="sub">Review hasil pengecekan otomatis.</p>
-            <p class="brand-path">mockups/review-queue.html</p>
           </div>
         </div>
 
-        <nav class="nav" aria-label="Primary">
-          <a href="index.html">
-            <strong>Dashboard</strong>
-            <span class="pill">overview</span>
-          </a>
-          <a class="active" href="review-queue.html" aria-current="page">
-            <strong>Review Queue</strong>
-            <span class="pill brand">active</span>
-          </a>
-          <a href="session-detail.html">
-            <strong>Session Detail</strong>
-            <span class="pill">audit trail</span>
-          </a>
-          <a href="setup.html">
-            <strong>Setup</strong>
-            <span class="pill ink">config</span>
-          </a>
-          <a class="nav-logout" href="login.html">
-            <strong>Log Out</strong>
-            <span class="pill no">exit</span>
-          </a>
-        </nav>
+	        <nav class="nav" aria-label="Primary">
+	          <a href="index.html">
+	            <strong>Dashboard</strong>
+	            <span class="pill">overview</span>
+	          </a>
+	          <a class="active" href="review-queue.html" aria-current="page">
+	            <strong>Review Queue</strong>
+	            <span class="pill brand">active</span>
+	          </a>
+	          <a href="session-detail.html">
+	            <strong>Session Detail</strong>
+	            <span class="pill">audit trail</span>
+	          </a>
+	          <a href="setup.html">
+	            <strong>Setup</strong>
+	            <span class="pill ink">config</span>
+	          </a>
+	          <a class="nav-logout" href="login.html">
+	            <strong>Log Out</strong>
+	            <span class="pill no">exit</span>
+	          </a>
+	        </nav>
 
-        <section class="panel sidebar-note">
-          <h3>Queue principles</h3>
-          <div class="timeline compact">
-            <div class="tl-item">
-              <span class="t">Table-first triage</span>
-              <span class="d">Reviewers can sort and scan sessions quickly before opening details.</span>
-            </div>
-            <div class="tl-item">
-              <span class="t">Decision in detail page</span>
-              <span class="d">Approve/reject/unknown only after evidence is inspected in Session Detail.</span>
-            </div>
-            <div class="tl-item">
-              <span class="t">Audit-safe</span>
-              <span class="d">Comments and overrides are attached to the machine result, not replacing it.</span>
-            </div>
-          </div>
-        </section>
+	        <section class="panel sidebar-note">
+	          <h3>Queue principles</h3>
+	          <div class="timeline compact">
+	            <div class="tl-item">
+	              <span class="t">Table-first triage</span>
+	              <span class="d">Reviewers can sort and scan sessions quickly before opening details.</span>
+	            </div>
+	            <div class="tl-item">
+	              <span class="t">Decision in detail page</span>
+	              <span class="d">Approve/reject/unknown only after evidence is inspected in Session Detail.</span>
+	            </div>
+	            <div class="tl-item">
+	              <span class="t">Audit-safe</span>
+	              <span class="d">Comments and overrides are attached to the machine result, not replacing it.</span>
+	            </div>
+	          </div>
+	        </section>
       </aside>
 
       <main class="content" id="main-content">
@@ -73,18 +72,16 @@
             <h2>Review Queue</h2>
             <p>List pengecekan hasil SOP otomatis, lakuan review manual jika perlu.</p>
           </div>
-          <div class="filters">
-            <span class="hint">Site: Subang</span>
-            <span class="hint">Camera: cam_01</span>
-            <span class="hint" id="queue-length-hint">Queue length: --</span>
-            <div class="field">
-              <label for="queue-date-from">Date from</label>
-              <input id="queue-date-from" name="queue-date-from" type="date" />
-            </div>
-            <div class="field">
-              <label for="queue-date-to">Date to</label>
-              <input id="queue-date-to" name="queue-date-to" type="date" />
-            </div>
+	          <div class="filters">
+	            <span class="hint" id="queue-length-hint">Queue length: --</span>
+	            <div class="field">
+	              <label for="queue-date-from">Date from</label>
+	              <input id="queue-date-from" name="queue-date-from" type="date" />
+	            </div>
+	            <div class="field">
+	              <label for="queue-date-to">Date to</label>
+	              <input id="queue-date-to" name="queue-date-to" type="date" />
+	            </div>
             <div class="field">
               <label>&nbsp;</label>
               <button class="btn" id="queue-date-apply" type="button">Apply</button>
@@ -93,27 +90,27 @@
               <label>&nbsp;</label>
               <button class="btn" id="queue-date-clear" type="button">Clear</button>
             </div>
-            <span class="hint" id="queue-active-date-slice">Date: all</span>
-          </div>
-        </header>
+	            <span class="hint" id="queue-active-date-slice">Date: all</span>
+	          </div>
+	        </header>
 
         <section class="mode-banner queue">
           <div class="mode-copy">
-            <span class="mode-eyebrow">REVIEW MODE</span>
+	            <span class="mode-eyebrow">REVIEW MODE</span>
             <span class="mode-title">Queue is triage only. Final decision happens in Session Detail with evidence.</span>
             <span class="mode-desc">
               Gunakan tabel ini untuk mempriotaskan hasil review, buka panel detail untuk mengecek bukti cuplikan sebelumn menentukan keptutusan.
             </span>
           </div>
-          <div class="mode-tags">
-            <span class="pill brand">unknown helmet</span>
-            <span class="pill" id="queue-pending-pill">pending --</span>
-            <span class="pill ink">SLA target &lt; 10m</span>
-          </div>
-        </section>
+	          <div class="mode-tags">
+	            <span class="pill brand">unknown helmet</span>
+	            <span class="pill" id="queue-pending-pill">pending --</span>
+	            <span class="pill ink">SLA target &lt; 10m</span>
+	          </div>
+	        </section>
 
         <section class="queue-status-grid">
-          <article class="queue-status-card">
+	          <article class="queue-status-card">
             <div class="label">Pending</div>
             <div class="value" id="queue-stat-pending">--</div>
           </article>
@@ -125,61 +122,53 @@
             <div class="label">Ditolak</div>
             <div class="value" id="queue-stat-rejected">--</div>
           </article>
-          <article class="queue-status-card">
-            <div class="label">Manual unknown</div>
-            <div class="value" id="queue-stat-unknown">--</div>
-          </article>
-        </section>
+	          <article class="queue-status-card">
+	            <div class="label">Manual unknown</div>
+	            <div class="value" id="queue-stat-unknown">--</div>
+	          </article>
+	        </section>
 
         <section class="queue-table-stage">
           <article class="panel queue-table-panel">
-            <div class="section-head">
-              <div>
-                <h3>Sessions Table</h3>
-                <p class="caption"> Event hasil pengecekan, hasil review ditangani sebagai berikut.</p>
-              </div>
-              <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
-            </div>
+	            <div class="section-head">
+	              <div>
+	                <h3>Sessions Table</h3>
+	                <p class="caption"> Event hasil pengecekan, hasil review ditangani sebagai berikut.</p>
+	              </div>
+	              <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
+	            </div>
 
-            <form class="filters queue-table-filters" aria-label="Queue table filters">
+	            <form class="filters queue-table-filters" aria-label="Queue table filters">
               <div class="field">
-                <label for="queue-status">Status</label>
-                <select id="queue-status" name="queue-status">
-                  <option value="PENDING" selected>Pending review</option>
-                  <option value="ALL">All statuses</option>
-                  <option value="NOT_QUALIFIED">Rejected only</option>
-                  <option value="QUALIFIED">Approved only</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="queue-shift">Shift</label>
-                <select id="queue-shift" name="queue-shift">
-                  <option>All shifts</option>
-                  <option>Shift A</option>
-                  <option>Shift B</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="queue-evidence">Evidence</label>
-                <select id="queue-evidence" name="queue-evidence">
-                  <option value="ANY" selected>Any evidence</option>
-                  <option value="CLIP_THUMB">Clip + thumbnail</option>
-                  <option value="CLIP_ONLY">Clip only</option>
-                  <option value="THUMB_ONLY">Thumbnail only</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="queue-sort">Sort by</label>
-                <select id="queue-sort" name="queue-sort">
-                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
-                  <option value="NEWEST">Newest first</option>
-                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
-                </select>
-              </div>
-            </form>
+	                <label for="queue-status">Status</label>
+	                <select id="queue-status" name="queue-status">
+	                  <option value="PENDING" selected>Pending review</option>
+	                  <option value="ALL">All statuses</option>
+	                  <option value="NOT_QUALIFIED">Rejected only</option>
+	                  <option value="QUALIFIED">Approved only</option>
+	                </select>
+	              </div>
+	              <div class="field">
+	                <label for="queue-evidence">Evidence</label>
+	                <select id="queue-evidence" name="queue-evidence">
+	                  <option value="ANY" selected>Any evidence</option>
+	                  <option value="CLIP_THUMB">Clip + thumbnail</option>
+	                  <option value="CLIP_ONLY">Clip only</option>
+	                  <option value="THUMB_ONLY">Thumbnail only</option>
+	                </select>
+	              </div>
+	              <div class="field">
+	                <label for="queue-sort">Sort by</label>
+	                <select id="queue-sort" name="queue-sort">
+	                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
+	                  <option value="NEWEST">Newest first</option>
+	                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
+	                </select>
+	              </div>
+	            </form>
 
             <div class="table-scroll">
-              <table class="table queue-table" aria-label="Review queue sessions">
+	              <table class="table queue-table" aria-label="Review queue sessions">
                 <colgroup>
                   <col class="queue-col-session" />
                   <col class="queue-col-date" />
@@ -194,18 +183,18 @@
                 </colgroup>
                 <thead>
                   <tr>
-                    <th scope="col">Session</th>
-                    <th scope="col">Date</th>
-                    <th scope="col">Start</th>
-                    <th scope="col">Dur</th>
-                    <th scope="col">AI SOP</th>
-                    <th scope="col">Human<br>review</th>
-                    <th scope="col">Final</th>
-                    <th scope="col">Evidence</th>
-                    <th scope="col">SLA</th>
-                    <th scope="col">Action</th>
-                  </tr>
-                </thead>
+	                    <th scope="col">Session</th>
+	                    <th scope="col">Date</th>
+	                    <th scope="col">Start</th>
+	                    <th scope="col">Dur</th>
+	                    <th scope="col">AI SOP</th>
+	                    <th scope="col">Human<br>review</th>
+	                    <th scope="col">Final</th>
+	                    <th scope="col">Evidence</th>
+	                    <th scope="col">SLA</th>
+	                    <th scope="col">Action</th>
+	                  </tr>
+	                </thead>
                 <tbody>
                   <tr>
                     <td colspan="10">
@@ -217,59 +206,59 @@
             </div>
           </article>
 
-          <article class="panel queue-review-dock" aria-live="polite">
-            <div class="section-head">
-              <div>
-                <h3>Selection Dock</h3>
-                <p class="caption">Quick context for selected row. Open detail page to review evidence and decide.</p>
-              </div>
-              <a class="pill" id="selected-detail-link" href="session-detail.html">Open Session Detail</a>
-            </div>
+	          <article class="panel queue-review-dock" aria-live="polite">
+	            <div class="section-head">
+	              <div>
+	                <h3>Selection Dock</h3>
+	                <p class="caption">Quick context for selected row. Open detail page to review evidence and decide.</p>
+	              </div>
+	              <a class="pill" id="selected-detail-link" href="session-detail.html">Open Session Detail</a>
+	            </div>
 
             <div class="queue-review-context">
-              <div class="queue-next-strip">
-                <div class="queue-next-copy">
-                  <span class="head">Current selection</span>
-                  <span class="body" id="selected-session-label">Loading selection...</span>
-                </div>
+	              <div class="queue-next-strip">
+	                <div class="queue-next-copy">
+	                  <span class="head">Current selection</span>
+	                  <span class="body" id="selected-session-label">Loading selection...</span>
+	                </div>
                 <span class="pill no" id="selected-session-sla">SLA --</span>
               </div>
 
-              <div class="meta queue-facts">
-                <div class="row">
-                  <span class="key">Session UID</span>
-                  <span class="val" id="selected-session-uid">-</span>
-                </div>
-                <div class="row">
-                  <span class="key">Session Date</span>
-                  <span class="val" id="selected-session-date">-</span>
-                </div>
+	              <div class="meta queue-facts">
+	                <div class="row">
+	                  <span class="key">Session UID</span>
+	                  <span class="val" id="selected-session-uid">-</span>
+	                </div>
+	                <div class="row">
+	                  <span class="key">Session Date</span>
+	                  <span class="val" id="selected-session-date">-</span>
+	                </div>
                 <div class="row">
                   <span class="key">AI SOP</span>
                   <span class="val" id="selected-machine-status">-</span>
                 </div>
-                <div class="row">
-                  <span class="key">Human Review</span>
-                  <span class="val" id="selected-human-status">-</span>
-                </div>
-                <div class="row">
-                  <span class="key">Review Source</span>
-                  <span class="val" id="selected-review-source">-</span>
-                </div>
+	                <div class="row">
+	                  <span class="key">Human Review</span>
+	                  <span class="val" id="selected-human-status">-</span>
+	                </div>
+	                <div class="row">
+	                  <span class="key">Review Source</span>
+	                  <span class="val" id="selected-review-source">-</span>
+	                </div>
                 <div class="row">
                   <span class="key">Final</span>
                   <span class="val" id="selected-final-status">-</span>
                 </div>
-                <div class="row">
-                  <span class="key">Evidence</span>
-                  <span class="val" id="selected-evidence">-</span>
-                </div>
-              </div>
+	                <div class="row">
+	                  <span class="key">Evidence</span>
+	                  <span class="val" id="selected-evidence">-</span>
+	                </div>
+	              </div>
 
-              <div class="queue-help">
-                <span class="hint"><span class="kbd">J</span>/<span class="kbd">K</span> move queue</span>
-                <span class="hint">Open detail to review clip and decide</span>
-              </div>
+	              <div class="queue-help">
+	                <span class="hint"><span class="kbd">J</span>/<span class="kbd">K</span> move queue</span>
+	                <span class="hint">Open detail to review clip and decide</span>
+	              </div>
             </div>
           </article>
         </section>

@@ -675,11 +675,11 @@
 
       const queueLengthHint = document.getElementById("queue-length-hint");
       if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
-        queueLengthHint.textContent = `Queue length: ${pending}`;
+        queueLengthHint.textContent = `Jumlah antrian: ${pending}`;
       }
       const pendingPill = document.getElementById("queue-pending-pill");
       if (pendingPill && pending != null && !Number.isNaN(pending)) {
-        pendingPill.textContent = `pending ${pending}`;
+        pendingPill.textContent = `menunggu ${pending}`;
       }
       const pendingNode = document.getElementById("queue-stat-pending");
       if (pendingNode && pending != null && !Number.isNaN(pending)) {
@@ -758,7 +758,7 @@
           ? `/media/${encodeURIComponent(uid)}/thumbnail.jpg`
           : "";
         const evidenceLabel =
-          s.clip_count > 0 ? (s.has_thumbnail ? "thumb + clip" : "clip") : s.has_thumbnail ? "thumbnail" : "-";
+          s.clip_count > 0 ? (s.has_thumbnail ? "thumbnail + klip" : "klip") : s.has_thumbnail ? "thumbnail" : "-";
         const evidenceBadge = s.clip_count > 0 ? `<span class="queue-evidence-badge" title="${s.clip_count} clip(s)">▶</span>` : "";
         const sla = review === "PENDING" ? "-" : "reviewed";
 
@@ -829,7 +829,7 @@
       }
       const playerEmpty = document.querySelector(".detail-player");
       if (playerEmpty instanceof HTMLElement) {
-        playerEmpty.innerHTML = '<div class="frame-overlay"><span class="pill">no session found</span></div>';
+        playerEmpty.innerHTML = '<div class="frame-overlay"><span class="pill">tidak ada sesi</span></div>';
       }
       return;
     }
@@ -968,7 +968,7 @@
           player.innerHTML = `<img alt="thumbnail" src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" />`;
           return;
         }
-        player.innerHTML = '<div class="frame-overlay"><span class="pill">no clip</span></div>';
+        player.innerHTML = '<div class="frame-overlay"><span class="pill">tanpa bukti</span></div>';
       };
 
       const clipsRaw = Array.isArray(payload.clips) ? payload.clips : [];
@@ -993,26 +993,26 @@
         if (!(evidenceState instanceof HTMLElement)) return;
         if (preferAnnotated) {
           evidenceState.className = "pill dir-b";
-          evidenceState.textContent = "unknown: full annotated session";
+          evidenceState.textContent = "unknown: video anotasi penuh";
           return;
         }
         if (clips.length > 0) {
           evidenceState.className = "pill brand";
-          evidenceState.textContent = `${clips.length} clip${clips.length === 1 ? "" : "s"} available`;
+          evidenceState.textContent = `${clips.length} klip tersedia`;
           return;
         }
         if (hasAnnotated) {
           evidenceState.className = "pill brand";
-          evidenceState.textContent = "annotated full session";
+          evidenceState.textContent = "video anotasi penuh";
           return;
         }
         if (payload.thumbnail_url) {
           evidenceState.className = "pill dir-b";
-          evidenceState.textContent = "thumbnail only";
+          evidenceState.textContent = "thumbnail saja";
           return;
         }
         evidenceState.className = "pill no";
-        evidenceState.textContent = "no evidence";
+        evidenceState.textContent = "tidak ada bukti";
       };
 
       const setActiveClipPill = (activeKey) => {
@@ -1030,7 +1030,7 @@
 
       const renderVideoClip = (playbackUrl, directUrl) => {
         player.innerHTML =
-          '<video id="detail-video" controls preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"></video><div class="frame-overlay"><a id="detail-clip-link" class="pill" target="_blank" rel="noreferrer">open clip file</a></div>';
+          '<video id="detail-video" controls preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"></video><div class="frame-overlay"><a id="detail-clip-link" class="pill" target="_blank" rel="noreferrer">buka file klip</a></div>';
         const video = document.getElementById("detail-video");
         const clipLink = document.getElementById("detail-clip-link");
         if (clipLink instanceof HTMLAnchorElement) {
@@ -1074,7 +1074,7 @@
         } else {
           const noClipPill = document.createElement("span");
           noClipPill.className = "pill";
-          noClipPill.textContent = "no clip events";
+          noClipPill.textContent = "tidak ada event klip";
           evidenceStrip.appendChild(noClipPill);
         }
 
@@ -1083,7 +1083,7 @@
           annotatedBtn.type = "button";
           annotatedBtn.className = "pill detail-clip-pill";
           annotatedBtn.setAttribute("data-clip-key", "annotated");
-          annotatedBtn.textContent = "annotated full session";
+          annotatedBtn.textContent = "video anotasi penuh";
           annotatedBtn.addEventListener("click", () => {
             renderVideoClip(annotatedPlaybackUrl || annotatedUrl, annotatedUrl);
             setActiveClipPill("annotated");
@@ -1094,7 +1094,7 @@
         const artifactsLink = document.createElement("a");
         artifactsLink.className = "pill";
         artifactsLink.href = "#artifacts";
-        artifactsLink.textContent = "open artifacts";
+        artifactsLink.textContent = "buka artefak";
         evidenceStrip.appendChild(artifactsLink);
       };
 
@@ -1119,9 +1119,9 @@
       const checklist = payload.checklist;
       const overrides = payload.review && payload.review.overrides ? payload.review.overrides : {};
       const steps = [
-        { key: "operator_present", label: "Operator present in ROI" },
-        { key: "roi_dwell", label: "ROI dwell" },
-        { key: "helmet", label: "Helmet compliance" },
+        { key: "operator_present", label: "Operator berada di ROI" },
+        { key: "roi_dwell", label: "Durasi berada di ROI" },
+        { key: "helmet", label: "Kepatuhan helm" },
       ];
       checklistWrap.innerHTML = steps
         .map((step) => {
@@ -1153,7 +1153,7 @@
           return `
             <a class="artifact-item" href="${safeUrl}" target="_blank" rel="noreferrer">
               <strong>${name}</strong>
-              <span>Open artifact</span>
+              <span>Buka artefak</span>
             </a>
           `;
         })
@@ -1202,22 +1202,71 @@
 
   const populateSetup = async () => {
     const dataDir = document.getElementById("admin-data-dir");
+    const dbPath = document.getElementById("admin-db-path");
     const lastScan = document.getElementById("admin-last-scan");
     const sessionCount = document.getElementById("admin-session-count");
     const rescanBtn = document.getElementById("admin-rescan");
+    const autoApproveEnabled = document.getElementById("admin-auto-approve-enabled");
+    const autoApproveMinDuration = document.getElementById("admin-auto-approve-min-duration");
+
+    const diskFree = document.getElementById("admin-disk-free");
+    const diskTotal = document.getElementById("admin-disk-total");
+    const clipCount = document.getElementById("admin-clip-count");
+    const thumbCount = document.getElementById("admin-thumb-count");
+    const annotatedCount = document.getElementById("admin-annotated-count");
+    const storageRefreshBtn = document.getElementById("admin-storage-refresh");
+    const storageTestBtn = document.getElementById("admin-storage-test");
+    const storageTestStatus = document.getElementById("admin-storage-test-status");
+
+    const formatBytes = (bytes) => {
+      const b = Number(bytes || 0);
+      if (!Number.isFinite(b) || b <= 0) return "-";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let v = b;
+      let u = 0;
+      while (v >= 1024 && u < units.length - 1) {
+        v /= 1024;
+        u += 1;
+      }
+      return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
+    };
 
     const refresh = async () => {
       try {
         const cfg = await apiFetchJson("/api/config");
         if (dataDir) dataDir.textContent = String(cfg.data_dir || "-");
+        if (dbPath) dbPath.textContent = String(cfg.db_path || "-");
         if (lastScan) lastScan.textContent = String(cfg.last_scan_utc || "-");
         if (sessionCount) sessionCount.textContent = String(cfg.session_count ?? "-");
+        if (autoApproveEnabled) {
+          const on = Boolean(cfg.auto_approve_done_enabled);
+          autoApproveEnabled.className = `pill ${on ? "yes" : "no"}`;
+          autoApproveEnabled.textContent = on ? "enabled" : "disabled";
+        }
+        if (autoApproveMinDuration) {
+          const v = Number(cfg.auto_approve_min_duration_s);
+          autoApproveMinDuration.textContent = Number.isFinite(v) ? `${v.toFixed(1)} s` : "-";
+        }
       } catch (err) {
         if (dataDir) dataDir.textContent = "Failed to load";
       }
     };
 
+    const refreshStorage = async () => {
+      try {
+        const s = await apiFetchJson("/api/admin/storage");
+        if (diskFree) diskFree.textContent = formatBytes(s.disk_free_bytes);
+        if (diskTotal) diskTotal.textContent = formatBytes(s.disk_total_bytes);
+        if (clipCount) clipCount.textContent = String(s.clip_count ?? "-");
+        if (thumbCount) thumbCount.textContent = String(s.thumbnail_count ?? "-");
+        if (annotatedCount) annotatedCount.textContent = String(s.annotated_count ?? "-");
+      } catch (err) {
+        if (diskFree) diskFree.textContent = "Failed to load";
+      }
+    };
+
     await refresh();
+    await refreshStorage();
 
     if (rescanBtn instanceof HTMLButtonElement) {
       rescanBtn.addEventListener("click", async () => {
@@ -1226,10 +1275,46 @@
           const res = await apiFetchJson("/api/admin/rescan", { method: "POST" });
           if (lastScan) lastScan.textContent = String(res.last_scan_utc || "-");
           if (sessionCount) sessionCount.textContent = String(res.session_count ?? "-");
+          await refreshStorage();
         } catch (err) {
-          alert("Rescan failed");
+          alert("Rescan gagal");
         } finally {
           rescanBtn.removeAttribute("disabled");
+        }
+      });
+    }
+
+    if (storageRefreshBtn instanceof HTMLButtonElement) {
+      storageRefreshBtn.addEventListener("click", async () => {
+        storageRefreshBtn.setAttribute("disabled", "disabled");
+        try {
+          await refreshStorage();
+        } finally {
+          storageRefreshBtn.removeAttribute("disabled");
+        }
+      });
+    }
+
+    if (storageTestBtn instanceof HTMLButtonElement) {
+      storageTestBtn.addEventListener("click", async () => {
+        storageTestBtn.setAttribute("disabled", "disabled");
+        if (storageTestStatus) {
+          storageTestStatus.className = "caption";
+          storageTestStatus.textContent = "Testing storage write access...";
+        }
+        try {
+          await apiFetchJson("/api/admin/storage/test", { method: "POST" });
+          if (storageTestStatus) {
+            storageTestStatus.className = "caption";
+            storageTestStatus.textContent = "Storage test: OK.";
+          }
+        } catch (err) {
+          if (storageTestStatus) {
+            storageTestStatus.className = "caption";
+            storageTestStatus.textContent = "Storage test failed. Check server logs and data directory permissions.";
+          }
+        } finally {
+          storageTestBtn.removeAttribute("disabled");
         }
       });
     }
@@ -1254,7 +1339,7 @@
 
       const totalHint = document.getElementById("kpi-total-hint");
       if (totalHint) {
-        totalHint.textContent = `approved ${String(s.approved ?? 0)} | rejected ${String(s.rejected ?? 0)}`;
+        totalHint.textContent = `lolos ${String(s.approved ?? 0)} | tidak lolos ${String(s.rejected ?? 0)}`;
       }
 
       const pendingHint = document.getElementById("kpi-pending-hint");
@@ -1265,80 +1350,89 @@
         pendingHint.textContent =
           total > 0
             ? `${reviewed}/${total} decided (${completionPct.toFixed(1)}%)`
-            : "No sessions yet";
+            : "Belum ada sesi";
       }
 
       const bannerPending = document.getElementById("banner-pending-pill");
       if (bannerPending) bannerPending.textContent = `pending ${String(s.pending ?? "-")}`;
 
       const helmetCheckedNode = document.getElementById("kpi-helmet-checked");
-      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.final_helmet_done ?? "-");
+      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.final_sop_done ?? "-");
       const helmetCheckedHint = document.getElementById("kpi-helmet-checked-hint");
       if (helmetCheckedHint) {
-        const pct = Number(s.reviewed_final_done_pct ?? 0);
+        const pct = Number(s.reviewed_final_sop_done_pct ?? 0);
         helmetCheckedHint.textContent = `${pct.toFixed(1)}% DONE across reviewed sessions`;
       }
 
       const unknownRateNode = document.getElementById("kpi-unknown-rate");
       if (unknownRateNode) {
-        const pct = Number(s.final_unknown_pct ?? 0);
+        const pct = Number(s.final_sop_unknown_pct ?? 0);
         unknownRateNode.textContent = `${pct.toFixed(1)}%`;
       }
       const unknownRateHint = document.getElementById("kpi-unknown-rate-hint");
       if (unknownRateHint) {
-        unknownRateHint.textContent = `${String(s.final_helmet_unknown ?? 0)} UNKNOWN from final helmet status`;
+        unknownRateHint.textContent = `${String(s.final_sop_unknown ?? 0)} UNKNOWN from final SOP status`;
       }
 
       const manualReviewNode = document.getElementById("kpi-manual-review");
       if (manualReviewNode) manualReviewNode.textContent = String(s.human_reviewed ?? s.reviewed ?? "-");
       const manualReviewHint = document.getElementById("kpi-manual-review-hint");
       if (manualReviewHint) {
-        manualReviewHint.textContent = `${String(s.manual_helmet_overrides ?? 0)} helmet overrides`;
+        manualReviewHint.textContent = `${String(s.manual_overrides ?? 0)} manual overrides`;
       }
 
       const compactManualNeeded = document.getElementById("dashboard-compact-manual-needed");
-      if (compactManualNeeded) compactManualNeeded.textContent = String(s.final_helmet_unknown ?? "-");
+      if (compactManualNeeded) compactManualNeeded.textContent = String(s.final_sop_unknown ?? "-");
       const compactApproved = document.getElementById("dashboard-compact-approved");
       if (compactApproved) compactApproved.textContent = String(s.approved ?? "-");
       const compactMachineNo = document.getElementById("dashboard-compact-machine-no");
-      if (compactMachineNo) compactMachineNo.textContent = String(s.machine_helmet_not_done ?? "-");
+      if (compactMachineNo) compactMachineNo.textContent = String(s.machine_sop_not_done ?? "-");
       const compactPending = document.getElementById("dashboard-compact-pending");
       if (compactPending) compactPending.textContent = String(s.pending ?? "-");
 
       const trendDone = document.getElementById("trend-strip-done");
       if (trendDone) {
-        trendDone.textContent = `done ${String(s.final_helmet_done ?? 0)}`;
+        trendDone.textContent = `DONE ${String(s.machine_sop_done ?? 0)}`;
       }
       const trendUnknown = document.getElementById("trend-strip-unknown");
       if (trendUnknown) {
-        const unknownPct = Number(s.final_unknown_pct ?? 0);
-        trendUnknown.textContent = `unknown ${String(s.final_helmet_unknown ?? 0)} (${unknownPct.toFixed(1)}%)`;
+        const unknownPct = Number(s.final_sop_unknown_pct ?? 0);
+        trendUnknown.textContent = `UNKNOWN ${String(s.machine_sop_unknown ?? 0)} (${unknownPct.toFixed(1)}%)`;
       }
-      const trendReview = document.getElementById("trend-strip-review");
-      if (trendReview) {
-        const completionPct = Number(s.review_completion_pct ?? 0);
-        trendReview.textContent = `reviewed ${String(s.reviewed ?? 0)}/${String(s.total_sessions ?? 0)} (${completionPct.toFixed(1)}%)`;
-      }
+      const trendNotDone = document.getElementById("trend-strip-not-done");
+      if (trendNotDone) trendNotDone.textContent = `NOT DONE ${String(s.machine_sop_not_done ?? 0)}`;
 
       const renderDashboardTrend = async () => {
         const svg = document.querySelector(".trend-svg");
         if (!(svg instanceof SVGSVGElement)) return;
 
+        const trendSlice = document.getElementById("trend-active-slice");
+        const trendXTitle = document.getElementById("trend-x-title");
+
         const donePath = svg.querySelector("path.trend-line.dir-a");
         const unknownPath = svg.querySelector("path.trend-line.dir-b");
+        const notDonePath = svg.querySelector("path.trend-line.no");
         const doneDot = svg.querySelector("circle.trend-focus-dot.dir-a");
         const unknownDot = svg.querySelector("circle.trend-focus-dot.dir-b");
+        const notDoneDot = svg.querySelector("circle.trend-focus-dot.no");
         const gridValues = Array.from(svg.querySelectorAll("text.trend-grid-value"));
+        const axisLabels = Array.from(svg.querySelectorAll("text.trend-axis-label"));
 
-        if (!(donePath instanceof SVGPathElement) || !(unknownPath instanceof SVGPathElement)) return;
+        if (
+          !(donePath instanceof SVGPathElement) ||
+          !(unknownPath instanceof SVGPathElement) ||
+          !(notDonePath instanceof SVGPathElement)
+        ) {
+          return;
+        }
 
         const slice = readDateSliceFromUrl();
 
         let listPayload;
+        let listUrl = "";
         try {
-          let url = "";
           if (slice.from || slice.to) {
-            url = withDateApiQuery("/api/sessions?limit=2000&sort=OLDEST");
+            listUrl = withDateApiQuery("/api/sessions?limit=2000&sort=OLDEST");
           } else {
             let activeDate = null;
             try {
@@ -1350,55 +1444,138 @@
             } catch (err) {
               // ignore
             }
-            url = activeDate
+            listUrl = activeDate
               ? `/api/sessions?limit=2000&sort=OLDEST&date=${encodeURIComponent(activeDate)}`
               : "/api/sessions?limit=2000&sort=OLDEST";
           }
-          listPayload = await apiFetchJson(url);
+          listPayload = await apiFetchJson(listUrl);
         } catch (err) {
           return;
         }
 
         const sessions = Array.isArray(listPayload.sessions) ? listPayload.sessions : [];
-        const shiftStartHour = 6;
-        const shiftEndHour = 18;
-        const binCount = shiftEndHour - shiftStartHour + 1; // inclusive hours
-        const done = Array(binCount).fill(0);
-        const unknown = Array(binCount).fill(0);
 
-        sessions.forEach((row) => {
-          const iso = row && row.start_time_iso ? String(row.start_time_iso) : row && row.end_time_iso ? String(row.end_time_iso) : "";
-          if (!iso) return;
-          const dt = new Date(iso);
-          if (Number.isNaN(dt.getTime())) return;
-          const h = dt.getHours();
-          if (h < shiftStartHour || h > shiftEndHour) return;
-          const idx = h - shiftStartHour;
+        const useHourly =
+          (slice.from && slice.to && slice.from === slice.to) ||
+          (!slice.from && !slice.to && typeof listUrl === "string" && listUrl.includes("date="));
 
-          const status = String(row.final_helmet || row.machine_helmet || "UNKNOWN").toUpperCase();
-          if (status === "DONE") done[idx] += 1;
-          else if (status === "UNKNOWN") unknown[idx] += 1;
-        });
+        if (trendXTitle instanceof HTMLElement) {
+          trendXTitle.textContent = useHourly ? "Time (local)" : "Date";
+        }
 
-        const maxVal = Math.max(1, ...done, ...unknown);
+        if (trendSlice instanceof HTMLElement) {
+          if (useHourly) {
+            let activeDate = "";
+            if (slice.from && slice.to && slice.from === slice.to) {
+              activeDate = slice.from;
+            } else {
+              try {
+                const u = new URL(listUrl, window.location.href);
+                activeDate = String(u.searchParams.get("date") || "");
+              } catch (err) {
+                // ignore
+              }
+            }
+            if (!activeDate && sessions.length > 0 && sessions[0] && sessions[0].date) {
+              activeDate = String(sessions[0].date || "");
+            }
+            trendSlice.textContent = activeDate ? `Date: ${activeDate}` : "Date: (auto)";
+          } else {
+            // Keep this aligned with the rest of the dashboard date filter.
+            trendSlice.textContent = dateSliceLabel();
+          }
+        }
+
+        let labels = [];
+        let done = [];
+        let unknown = [];
+        let notDone = [];
+
+        if (useHourly) {
+          labels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+          done = Array(24).fill(0);
+          unknown = Array(24).fill(0);
+          notDone = Array(24).fill(0);
+          sessions.forEach((row) => {
+            const iso =
+              row && row.start_time_iso ? String(row.start_time_iso) : row && row.end_time_iso ? String(row.end_time_iso) : "";
+            if (!iso) return;
+            const dt = new Date(iso);
+            if (Number.isNaN(dt.getTime())) return;
+            const idx = dt.getHours();
+            if (idx < 0 || idx >= 24) return;
+            const status = String(row.machine_sop || row.final_sop || row.final_helmet || row.machine_helmet || "UNKNOWN").toUpperCase();
+            if (status === "DONE") done[idx] += 1;
+            else if (status === "NOT_DONE") notDone[idx] += 1;
+            else unknown[idx] += 1;
+          });
+        } else {
+          // Daily buckets across the filtered sessions window.
+          const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
+
+          if (slice.from && slice.to && ymdRe.test(slice.from) && ymdRe.test(slice.to) && slice.from <= slice.to) {
+            const out = [];
+            const start = new Date(`${slice.from}T00:00:00`);
+            const end = new Date(`${slice.to}T00:00:00`);
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+              const d = new Date(start.getTime());
+              while (d.getTime() <= end.getTime() && out.length < 370) {
+                out.push(toYmdLocal(d));
+                d.setDate(d.getDate() + 1);
+              }
+            }
+            labels = out.length ? out : [slice.from];
+          } else {
+            const dates = Array.from(
+              new Set(
+                sessions
+                  .map((row) => (row && row.date ? String(row.date) : ""))
+                  .filter((v) => v && ymdRe.test(v))
+              )
+            ).sort();
+
+            labels = dates.length ? dates : [slice.from || slice.to || "-"];
+          }
+          done = Array(labels.length).fill(0);
+          unknown = Array(labels.length).fill(0);
+          notDone = Array(labels.length).fill(0);
+          const idxByDate = new Map(labels.map((d, i) => [d, i]));
+
+          sessions.forEach((row) => {
+            const d = row && row.date ? String(row.date) : "";
+            const idx = idxByDate.get(d);
+            if (idx == null) return;
+            const status = String(row.machine_sop || row.final_sop || row.final_helmet || row.machine_helmet || "UNKNOWN").toUpperCase();
+            if (status === "DONE") done[idx] += 1;
+            else if (status === "NOT_DONE") notDone[idx] += 1;
+            else unknown[idx] += 1;
+          });
+        }
+
+        const maxVal = Math.max(1, ...done, ...unknown, ...notDone);
         const view = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : { x: 0, y: 0, width: 760, height: 190 };
         const xMin = 60;
         const xMax = 720;
         const yTop = 26;
         const yBottom = 152;
+        const binCount = labels.length;
         const xStep = binCount > 1 ? (xMax - xMin) / (binCount - 1) : 0;
         const yScale = (v) => yBottom - (Math.max(0, Number(v || 0)) / maxVal) * (yBottom - yTop);
 
         const ptsDone = done.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
         const ptsUnknown = unknown.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
+        const ptsNotDone = notDone.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
 
         const doneD = buildSmoothPath(ptsDone);
         const unknownD = buildSmoothPath(ptsUnknown);
+        const notDoneD = buildSmoothPath(ptsNotDone);
         donePath.setAttribute("d", doneD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
         unknownPath.setAttribute("d", unknownD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
+        notDonePath.setAttribute("d", notDoneD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
 
         const lastDone = ptsDone[ptsDone.length - 1];
         const lastUnknown = ptsUnknown[ptsUnknown.length - 1];
+        const lastNotDone = ptsNotDone[ptsNotDone.length - 1];
         if (doneDot instanceof SVGCircleElement) {
           doneDot.setAttribute("cx", String(lastDone.x.toFixed(1)));
           doneDot.setAttribute("cy", String(lastDone.y.toFixed(1)));
@@ -1406,6 +1583,10 @@
         if (unknownDot instanceof SVGCircleElement) {
           unknownDot.setAttribute("cx", String(lastUnknown.x.toFixed(1)));
           unknownDot.setAttribute("cy", String(lastUnknown.y.toFixed(1)));
+        }
+        if (notDoneDot instanceof SVGCircleElement) {
+          notDoneDot.setAttribute("cx", String(lastNotDone.x.toFixed(1)));
+          notDoneDot.setAttribute("cy", String(lastNotDone.y.toFixed(1)));
         }
 
         // Update y-axis grid labels to match current scale.
@@ -1432,15 +1613,34 @@
 
         const donePeak = peak(done);
         const unknownPeak = peak(unknown);
-        const doneAt = new Date();
-        doneAt.setHours(shiftStartHour + donePeak.idx, 0, 0, 0);
-        const unknownAt = new Date();
-        unknownAt.setHours(shiftStartHour + unknownPeak.idx, 0, 0, 0);
+        const notDonePeak = peak(notDone);
 
         const trendDone = document.getElementById("trend-strip-done");
-        if (trendDone) trendDone.textContent = `done peak ${Math.max(0, donePeak.val)} @ ${formatHmLocal(doneAt)}`;
+        if (trendDone) trendDone.textContent = `peak DONE ${Math.max(0, donePeak.val)} @ ${labels[donePeak.idx] || "-"}`;
         const trendUnknown = document.getElementById("trend-strip-unknown");
-        if (trendUnknown) trendUnknown.textContent = `unknown spike ${Math.max(0, unknownPeak.val)} @ ${formatHmLocal(unknownAt)}`;
+        if (trendUnknown) trendUnknown.textContent = `peak UNKNOWN ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
+        const trendNotDone = document.getElementById("trend-strip-not-done");
+        if (trendNotDone) trendNotDone.textContent = `peak NOT DONE ${Math.max(0, notDonePeak.val)} @ ${labels[notDonePeak.idx] || "-"}`;
+
+        if (axisLabels.length >= 5 && labels.length >= 2) {
+          if (useHourly) {
+            const idxs = [0, 6, 12, 18, 23];
+            idxs.forEach((idx, i) => {
+              const node = axisLabels[i];
+              if (node) node.textContent = labels[Math.min(labels.length - 1, Math.max(0, idx))] || "";
+            });
+          } else {
+            const n = labels.length;
+            const idxs = [0, Math.floor((n - 1) * 0.25), Math.floor((n - 1) * 0.5), Math.floor((n - 1) * 0.75), n - 1];
+            idxs.forEach((idx, i) => {
+              const node = axisLabels[i];
+              if (!node) return;
+              const raw = labels[idx] || "";
+              // Shorten YYYY-MM-DD to MM-DD for readability.
+              node.textContent = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(5) : raw;
+            });
+          }
+        }
       };
 
       await renderDashboardTrend();
@@ -1459,7 +1659,7 @@
                 const sid = String(session.session_id || uid || "-");
                 const start = formatHmsFromIso(session.start_time_iso);
                 const roi = String(session.machine_roi_dwell || "UNKNOWN");
-                const helmet = String(session.final_helmet || session.machine_helmet || "UNKNOWN");
+                const sop = String(session.final_sop || session.machine_sop || "UNKNOWN");
                 const review = String(session.review_status || "PENDING");
                 const remark =
                   Number(session.clip_count || 0) > 0
@@ -1479,7 +1679,7 @@
                       </div>
                     </td>
                     <td>${start}</td>
-                    <td><span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(helmet)}">helmet ${displayStepStatus(helmet)}</span></td>
+                    <td><span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(sop)}">SOP ${displayStepStatus(sop)}</span></td>
                     <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
                     <td>${remark}</td>
                     <td><a class="btn btn-compact action-inspect" href="${buildUiHrefWithDate("session-detail.html", encodeURIComponent(uid))}">Inspect</a></td>
@@ -1515,8 +1715,7 @@
     const statusSel = document.getElementById("queue-status");
     const evidenceSel = document.getElementById("queue-evidence");
     const sortSel = document.getElementById("queue-sort");
-    const shiftSel = document.getElementById("queue-shift");
-    [statusSel, evidenceSel, sortSel, shiftSel].forEach((node) => {
+    [statusSel, evidenceSel, sortSel].forEach((node) => {
       if (node instanceof HTMLSelectElement) {
         node.addEventListener("change", () => {
           populateQueue();

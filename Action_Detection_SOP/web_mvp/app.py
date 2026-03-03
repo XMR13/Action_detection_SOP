@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, date as Date
 import hashlib
+import uuid
 
 import cv2
 
@@ -519,6 +520,38 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "session_count": str(len(index.list())),
         }
 
+    @app.get("/api/admin/storage")
+    def storage() -> Dict[str, Any]:
+        sessions = index.list()
+        disk = shutil.disk_usage(settings.data_dir)
+        clip_count = sum(_clip_count(s) for s in sessions)
+        thumb_count = sum(1 for s in sessions if s.paths.thumbnail_jpg.exists())
+        annotated_count = sum(1 for s in sessions if (s.paths.session_dir / "annotated.mp4").exists())
+        return {
+            "status": "ok",
+            "data_dir": str(settings.data_dir),
+            "db_path": str(settings.db_path),
+            "last_scan_utc": index.last_scan_utc,
+            "session_count": len(sessions),
+            "clip_count": clip_count,
+            "thumbnail_count": thumb_count,
+            "annotated_count": annotated_count,
+            "disk_total_bytes": int(disk.total),
+            "disk_used_bytes": int(disk.used),
+            "disk_free_bytes": int(disk.free),
+        }
+
+    @app.post("/api/admin/storage/test")
+    def storage_test() -> Dict[str, Any]:
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        marker = settings.data_dir / f".sop_storage_test_{uuid.uuid4().hex}.tmp"
+        try:
+            marker.write_bytes(b"ok\n")
+            marker.unlink(missing_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Storage test failed: {e}") from e
+        return {"status": "ok"}
+
     @app.get("/api/config")
     def config() -> Dict[str, Any]:
         return {
@@ -561,6 +594,13 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         final_not_done = 0
         final_unknown = 0
 
+        machine_sop_done = 0
+        machine_sop_not_done = 0
+        machine_sop_unknown = 0
+        final_sop_done = 0
+        final_sop_not_done = 0
+        final_sop_unknown = 0
+
         for s in sessions:
             r = reviews.get(s.session_uid)
             eff = _effective_review_for_session(session=s, review=r, settings=settings)
@@ -602,10 +642,28 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             else:
                 final_unknown += 1
 
+            machine_sop = _normalize_step_status(_machine_sop_status(s))
+            if machine_sop == "DONE":
+                machine_sop_done += 1
+            elif machine_sop == "NOT_DONE":
+                machine_sop_not_done += 1
+            else:
+                machine_sop_unknown += 1
+
+            final_sop = _normalize_step_status(_final_sop_status(session=s, review=r))
+            if final_sop == "DONE":
+                final_sop_done += 1
+            elif final_sop == "NOT_DONE":
+                final_sop_not_done += 1
+            else:
+                final_sop_unknown += 1
+
         total = len(sessions)
         review_completion_pct = (float(decided) * 100.0 / float(total)) if total > 0 else 0.0
         final_unknown_pct = (float(final_unknown) * 100.0 / float(total)) if total > 0 else 0.0
         reviewed_final_done_pct = (float(final_done) * 100.0 / float(decided)) if decided > 0 else 0.0
+        final_sop_unknown_pct = (float(final_sop_unknown) * 100.0 / float(total)) if total > 0 else 0.0
+        reviewed_final_sop_done_pct = (float(final_sop_done) * 100.0 / float(decided)) if decided > 0 else 0.0
         return {
             "total_sessions": total,
             "pending": pending,
@@ -627,6 +685,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "final_helmet_unknown": final_unknown,
             "final_unknown_pct": final_unknown_pct,
             "reviewed_final_done_pct": reviewed_final_done_pct,
+            "machine_sop_done": machine_sop_done,
+            "machine_sop_not_done": machine_sop_not_done,
+            "machine_sop_unknown": machine_sop_unknown,
+            "final_sop_done": final_sop_done,
+            "final_sop_not_done": final_sop_not_done,
+            "final_sop_unknown": final_sop_unknown,
+            "final_sop_unknown_pct": final_sop_unknown_pct,
+            "reviewed_final_sop_done_pct": reviewed_final_sop_done_pct,
             "date_from": applied_date_from,
             "date_to": applied_date_to,
         }

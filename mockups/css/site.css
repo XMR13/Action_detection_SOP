@@ -544,6 +544,10 @@ input[type="text"] {
   color: #0369a1;
 }
 
+.trend-key-line.no {
+  color: #b91c1c;
+}
+
 .trend-chart-wrap {
   margin-top: 8px;
   border: 1px solid rgba(45, 55, 72, 0.14);
@@ -609,6 +613,10 @@ input[type="text"] {
   stroke: #0369a1;
 }
 
+.trend-line.no {
+  stroke: #b91c1c;
+}
+
 .trend-point {
   stroke: #ffffff;
   stroke-width: 1.2;
@@ -640,6 +648,10 @@ input[type="text"] {
 
 .trend-focus-dot.dir-b {
   fill: #0369a1;
+}
+
+.trend-focus-dot.no {
+  fill: #b91c1c;
 }
 
 .trend-empty {

@@ -22,7 +22,6 @@
           <div>
             <h1>Roll Wrapping 3 SOP Review</h1>
             <p class="sub">Dashbord untuk mengecek hasil auto check SOP Roll wrapping</p>
-            <p class="brand-path">mockups/index.html</p>
           </div>
         </div>
 
@@ -84,20 +83,6 @@
 
           <div class="filters" aria-label="Filters">
             <div class="field">
-              <label for="site">Site</label>
-              <select id="site" name="site">
-                <option>Subang</option>
-                <option>Serang</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="camera">Camera</label>
-              <select id="camera" name="camera">
-                <option>cam_17 | Roll wrapping</option>
-                <option>cam_18 | staging</option>
-              </select>
-            </div>
-            <div class="field">
               <label for="range">Date range</label>
               <select id="range" name="range">
                 <option value="CUSTOM">Custom</option>
@@ -149,7 +134,7 @@
                 <span class="kpi-accent ink">S</span>
               </div>
               <div class="kpi-value" id="kpi-total-sessions">--</div>
-              <div class="kpi-hint" id="kpi-total-hint">Loading stats...</div>
+              <div class="kpi-hint" id="kpi-total-hint">Memuat statistik...</div>
             </div>
           </article>
           <article class="card">
@@ -159,27 +144,27 @@
                 <span class="kpi-accent brand">Q</span>
               </div>
               <div class="kpi-value" id="kpi-pending">--</div>
-              <div class="kpi-hint" id="kpi-pending-hint">Loading stats...</div>
+              <div class="kpi-hint" id="kpi-pending-hint">Memuat statistik...</div>
             </div>
           </article>
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-                <span class="kpi-label">Helmet (CHECKED)</span>
+	                <span class="kpi-label">SOP (DONE)</span>
                 <span class="kpi-accent yes">Y</span>
               </div>
               <div class="kpi-value" id="kpi-helmet-checked">--</div>
-              <div class="kpi-hint" id="kpi-helmet-checked-hint">Loading stats...</div>
+              <div class="kpi-hint" id="kpi-helmet-checked-hint">Memuat statistik...</div>
             </div>
           </article>
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-                <span class="kpi-label">persentase sesi <br> yang tidak terdeteksi</span>
+	                <span class="kpi-label">persentase sesi <br> yang tidak terdeteksi</span>
                 <span class="kpi-accent dir-b">U</span>
               </div>
               <div class="kpi-value" id="kpi-unknown-rate">--</div>
-              <div class="kpi-hint" id="kpi-unknown-rate-hint">Loading stats...</div>
+              <div class="kpi-hint" id="kpi-unknown-rate-hint">Memuat statistik...</div>
             </div>
           </article>
           <article class="card">
@@ -189,7 +174,7 @@
                 <span class="kpi-accent no">M</span>
               </div>
               <div class="kpi-value" id="kpi-manual-review">--</div>
-              <div class="kpi-hint" id="kpi-manual-review-hint">Loading stats...</div>
+              <div class="kpi-hint" id="kpi-manual-review-hint">Memuat statistik...</div>
             </div>
           </article>
         </section>
@@ -206,9 +191,11 @@
                 <p class="trend-meaning">
                   <b>Tend line Auto Check SOP sesuai</b> range date yang dipilih
                 </p>
+                <p class="caption" id="trend-active-slice">Date: all</p>
                 <div class="trend-meta-pills">
                   <span class="trend-key"><span class="trend-key-line dir-a"></span>DONE</span>
                   <span class="trend-key"><span class="trend-key-line dir-b"></span>UNKNOWN</span>
+                  <span class="trend-key"><span class="trend-key-line no"></span>NOT DONE</span>
                 </div>
               </div>
               <div class="trend-chart-wrap">
@@ -221,20 +208,22 @@
                   <text class="trend-grid-value" x="42" y="145">10</text>
                   <path class="trend-line dir-a" d="M60 138 C140 128, 180 114, 240 118 S360 102, 420 88 S560 64, 720 72"></path>
                   <path class="trend-line dir-b" d="M60 152 C130 149, 180 142, 240 138 S360 128, 420 132 S560 121, 720 126"></path>
+                  <path class="trend-line no" d="M60 152 L720 152"></path>
                   <circle class="trend-focus-dot dir-a" cx="720" cy="72" r="4.5"></circle>
                   <circle class="trend-focus-dot dir-b" cx="720" cy="126" r="4.5"></circle>
+                  <circle class="trend-focus-dot no" cx="720" cy="152" r="4.5"></circle>
                   <text class="trend-axis-label" x="100" y="176">06:00</text>
                   <text class="trend-axis-label" x="240" y="176">09:00</text>
                   <text class="trend-axis-label" x="380" y="176">12:00</text>
                   <text class="trend-axis-label" x="520" y="176">15:00</text>
                   <text class="trend-axis-label" x="660" y="176">18:00</text>
                 </svg>
-                <div class="trend-x-title">Shift time</div>
+                <div class="trend-x-title" id="trend-x-title">Time (local)</div>
               </div>
               <div class="trend-value-strip">
-                <span class="pill" id="trend-strip-done">done peak --</span>
-                <span class="pill" id="trend-strip-unknown">unknown spike --</span>
-                <span class="pill brand" id="trend-strip-review">review loading...</span>
+                <span class="pill" id="trend-strip-done">selesai --</span>
+                <span class="pill" id="trend-strip-unknown">tidak diketahui --</span>
+                <span class="pill no" id="trend-strip-not-done">tidak selesai --</span>
               </div>
             </div>
           </article>
@@ -266,9 +255,9 @@
             <div class="queue-next-strip">
               <div class="queue-next-copy">
                 <span class="head">Sesi selanjutnya</span>
-                <span class="body">Loading next session...</span>
+                <span class="body">Memuat sesi berikutnya...</span>
               </div>
-              <a class="btn primary" href="review-queue.html">Open Queue</a>
+              <a class="btn primary" href="review-queue.html">Buka Antrian</a>
             </div>
             <div class="timeline compact">
               <div class="tl-item">
@@ -305,9 +294,9 @@
               </thead>
               <tbody id="dashboard-latest-sessions-body">
                 <tr>
-                  <td colspan="6"><span class="pill pending">Loading sessions...</span></td>
-                </tr>
-              </tbody>
+	                  <td colspan="6"><span class="pill pending">Memuat sesi...</span></td>
+	                </tr>
+	              </tbody>
             </table>
           </div>
         </section>

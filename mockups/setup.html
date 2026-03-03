@@ -19,9 +19,8 @@
             <img class="brand-logo" src="assets/images.png" alt="Site logo" width="406" height="124" fetchpriority="high" />
           </div>
           <div>
-            <h1>Roll Wrap SOP Review</h1>
+            <h1>Roll Wrapping 3 SOP Review</h1>
             <p class="sub">Mengubah konfigurasi untuk setup yang ada.</p>
-            <p class="brand-path">mockups/setup.html</p>
           </div>
         </div>
 
@@ -69,88 +68,97 @@
           </div>
         </header>
 
-        <section class="mode-banner">
-          <div class="mode-copy">
+	        <section class="mode-banner">
+	          <div class="mode-copy">
             <span class="mode-eyebrow">MINIMAL ADMIN</span>
             <span class="mode-title">Only expose settings that directly affect review trust and ingest stability.</span>
             <span class="mode-desc">
               Training, model packaging, and Jetson-side runtime tuning stay outside this website UI.
             </span>
           </div>
-          <div class="mode-tags">
-            <span class="pill">site defaults</span>
-            <span class="pill ink">camera mapping</span>
-            <span class="pill brand">retention policy</span>
-          </div>
-        </section>
-
-        <section class="config-grid">
-          <article class="panel config-card">
-            <h3>Site & Camera Defaults</h3>
-            <div class="meta">
-              <div class="row">
-                <span class="key">Default site</span>
-                <span class="val">Subang</span>
-              </div>
-              <div class="row">
-                <span class="key">Primary lane camera</span>
-                <span class="val">cam_01 / wrapping-lane</span>
-              </div>
-              <div class="row">
-                <span class="key">Timezone</span>
-                <span class="val">Asia/Jakarta</span>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button class="btn">Edit Mapping</button>
-              <button class="btn">Add Camera</button>
-            </div>
-          </article>
-
-          <article class="panel config-card">
-            <h3>Aturan Review  <i>(policy)</i></h3>
-            <div class="checklist">
-              <div class="step-card">
-                <div class="step-head">
-                  <strong>Auto-accept machine DONE</strong>
-                  <span class="pill yes">enabled</span>
-                </div>
-                <p>Only when confidence and evidence policy both pass the configured threshold.</p>
-              </div>
-              <div class="step-card">
-                <div class="step-head">
-                  <strong>Force manual review on UNKNOWN</strong>
-                  <span class="pill brand">required</span>
-                </div>
-                <p>Protects against false DONE in poor visibility conditions.</p>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button class="btn primary">Edit Review Rules</button>
-            </div>
-          </article>
-
-          <article class="panel config-card">
-            <h3>Bukti path penyimpanan</h3>
-            <div class="meta">
-              <div class="row">
-                <span class="key">Server path</span>
-                <span class="val">evidence/subang/cam_01/2026-02-27/</span>
-              </div>
-              <div class="row">
-                <span class="key">Thumbnail retention</span>
-                <span class="val">90 days</span>
-              </div>
-              <div class="row">
-                <span class="key">Clip retention</span>
-                <span class="val">30 days</span>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button class="btn">Open Retention Policy</button>
-              <button class="btn">Test Storage</button>
-            </div>
-          </article>
+		          <div class="mode-tags">
+		            <span class="pill">status</span>
+		            <span class="pill ink">policy</span>
+		            <span class="pill brand">storage</span>
+		          </div>
+	        </section>
+	
+	        <section class="config-grid">
+	          <article class="panel config-card">
+	            <h3>Server Status</h3>
+	            <div class="meta">
+	              <div class="row">
+	                <span class="key">Data dir</span>
+	                <span class="val" id="admin-data-dir">-</span>
+	              </div>
+	              <div class="row">
+	                <span class="key">DB path</span>
+	                <span class="val" id="admin-db-path">-</span>
+	              </div>
+	              <div class="row">
+		                <span class="key">Last scan (UTC)</span>
+	                <span class="val" id="admin-last-scan">-</span>
+	              </div>
+	              <div class="row">
+		                <span class="key">Indexed sessions</span>
+	                <span class="val" id="admin-session-count">-</span>
+	              </div>
+	            </div>
+	            <div class="btn-row">
+		              <button class="btn primary" id="admin-rescan" type="button">Rescan</button>
+	            </div>
+	          </article>
+	
+	          <article class="panel config-card">
+	            <h3>Review Policy</h3>
+	            <div class="checklist">
+	              <div class="step-card">
+	                <div class="step-head">
+		                  <strong>Auto-qualify low-risk DONE</strong>
+	                  <span class="pill" id="admin-auto-approve-enabled">-</span>
+	                </div>
+		                <p>Conservative auto-qualify that never replaces manual review.</p>
+	              </div>
+	              <div class="step-card">
+	                <div class="step-head">
+	                  <strong>Minimum duration for auto-qualify</strong>
+	                  <span class="pill ink" id="admin-auto-approve-min-duration">-</span>
+	                </div>
+	                <p>To change these values, restart the web service with different flags/env vars.</p>
+	              </div>
+	            </div>
+	          </article>
+	
+	          <article class="panel config-card">
+	            <h3>Storage & Evidence</h3>
+	            <div class="meta">
+	              <div class="row">
+	                <span class="key">Disk free</span>
+	                <span class="val" id="admin-disk-free">-</span>
+	              </div>
+	              <div class="row">
+	                <span class="key">Disk total</span>
+	                <span class="val" id="admin-disk-total">-</span>
+	              </div>
+	              <div class="row">
+	                <span class="key">Evidence clips</span>
+	                <span class="val" id="admin-clip-count">-</span>
+	              </div>
+	              <div class="row">
+	                <span class="key">Thumbnails</span>
+	                <span class="val" id="admin-thumb-count">-</span>
+	              </div>
+	              <div class="row">
+	                <span class="key">Annotated videos</span>
+	                <span class="val" id="admin-annotated-count">-</span>
+	              </div>
+	            </div>
+	            <div class="btn-row">
+	              <button class="btn" id="admin-storage-refresh" type="button">Refresh</button>
+	              <button class="btn" id="admin-storage-test" type="button">Test Storage</button>
+	            </div>
+	            <p class="caption" id="admin-storage-test-status"></p>
+	          </article>
 
           <article class="panel config-card">
             <h3>Roles & Handoff</h3>
@@ -159,10 +167,10 @@
                 <span class="t">Reviewer</span>
                 <span class="d">Can comment and override session outcomes.</span>
               </div>
-              <div class="tl-item">
-                <span class="t">Supervisor</span>
-                <span class="d">Can change policy settings and export reports.</span>
-              </div>
+	              <div class="tl-item">
+	                <span class="t">Supervisor</span>
+	                <span class="d">Can adjust policy and export reports.</span>
+	              </div>
               <div class="tl-item">
                 <span class="t">Service account</span>
                 <span class="d">Used by Jetson uploader for idempotent session ingest.</span>
@@ -170,28 +178,11 @@
             </div>
           </article>
 
-          <article class="panel config-card">
-            <h3>Ingest (Manual)</h3>
-            <p class="caption">Copy `data/` to this server, then rescan to refresh the queue.</p>
-            <div class="meta">
-              <div class="row">
-                <span class="key">Data dir</span>
-                <span class="val" id="admin-data-dir">-</span>
-              </div>
-              <div class="row">
-                <span class="key">Last scan (UTC)</span>
-                <span class="val" id="admin-last-scan">-</span>
-              </div>
-              <div class="row">
-                <span class="key">Session count</span>
-                <span class="val" id="admin-session-count">-</span>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button class="btn primary" id="admin-rescan" type="button">Rescan Now</button>
-            </div>
-          </article>
-        </section>
+	          <article class="panel config-card">
+	            <h3>Ingest (Manual)</h3>
+	            <p class="caption">Copy the latest `data/sessions/` folder to this server, then hit Rescan to index it into the queue.</p>
+	          </article>
+	        </section>
       </main>
     </div>
     <script src="js/site.js"></script>
