@@ -2313,6 +2313,20 @@ textarea {
   align-content: start;
 }
 
+.queue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.queue-pagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .queue-review-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

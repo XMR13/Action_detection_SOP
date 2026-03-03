@@ -407,6 +407,49 @@
   const selectedSessionSla = document.getElementById("selected-session-sla");
   const selectedDetailLink = document.getElementById("selected-detail-link");
   const queueOpenSelected = document.getElementById("queue-open-selected");
+  let queuePage = 1;
+  let queuePageSize = 20;
+
+  const queuePaginationMeta = document.getElementById("queue-page-meta");
+  const queuePaginationIndicator = document.getElementById("queue-page-indicator");
+  const queuePagePrevBtn = document.getElementById("queue-page-prev");
+  const queuePageNextBtn = document.getElementById("queue-page-next");
+
+  const readQueuePageSize = () => {
+    const node = document.getElementById("queue-page-size");
+    const raw = node instanceof HTMLSelectElement ? Number(node.value) : Number.NaN;
+    if (raw === 10 || raw === 20) return raw;
+    return 20;
+  };
+
+  const resetQueuePage = () => {
+    queuePage = 1;
+  };
+
+  const syncQueuePaginationUi = ({ total, page, pageSize, totalPages, hasPrev, hasNext }) => {
+    const safeTotal = Math.max(0, Number(total || 0));
+    const safePage = Math.max(1, Number(page || 1));
+    const safePageSize = Math.max(1, Number(pageSize || 15));
+    const safePages = Math.max(0, Number(totalPages || 0));
+    const from = safeTotal > 0 ? (safePage - 1) * safePageSize + 1 : 0;
+    const to = safeTotal > 0 ? Math.min(safeTotal, safePage * safePageSize) : 0;
+
+    if (queuePaginationMeta) {
+      queuePaginationMeta.textContent = safeTotal > 0 ? `Showing ${from}-${to} of ${safeTotal}` : "Showing 0";
+    }
+    if (queuePaginationIndicator) {
+      queuePaginationIndicator.textContent = safePages > 0 ? `Page ${safePage}/${safePages}` : "Page 0/0";
+    }
+
+    if (queuePagePrevBtn instanceof HTMLButtonElement) {
+      queuePagePrevBtn.disabled = !hasPrev;
+      queuePagePrevBtn.setAttribute("aria-disabled", hasPrev ? "false" : "true");
+    }
+    if (queuePageNextBtn instanceof HTMLButtonElement) {
+      queuePageNextBtn.disabled = !hasNext;
+      queuePageNextBtn.setAttribute("aria-disabled", hasNext ? "false" : "true");
+    }
+  };
 
   const syncReviewDock = (link) => {
     const row = link.closest("tr");
@@ -704,12 +747,18 @@
     const statusSel = document.getElementById("queue-status");
     const evidenceSel = document.getElementById("queue-evidence");
     const sortSel = document.getElementById("queue-sort");
+    const pageSizeSel = document.getElementById("queue-page-size");
 
     const reviewStatus = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
-    const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "") : "";
+    const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "ANY") : "ANY";
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
+    queuePageSize = pageSizeSel instanceof HTMLSelectElement ? readQueuePageSize() : queuePageSize;
 
-    let url = withDateApiQuery(`/api/sessions?limit=200&sort=${encodeURIComponent(sort || "NEWEST")}`);
+    let url = withDateApiQuery(
+      `/api/sessions?page=${encodeURIComponent(String(queuePage))}&page_size=${encodeURIComponent(
+        String(queuePageSize)
+      )}&sort=${encodeURIComponent(sort || "NEWEST")}&evidence=${encodeURIComponent(evidenceFilter || "ANY")}`
+    );
     if (reviewStatus && reviewStatus !== "ALL") {
       url += `&review_status=${encodeURIComponent(reviewStatus)}`;
     }
@@ -718,6 +767,7 @@
     try {
       payload = await apiFetchJson(url);
     } catch (err) {
+      syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
       tbody.innerHTML = `<tr><td colspan="10"><span class="pill no">Failed to load sessions</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
@@ -726,13 +776,21 @@
     }
 
     let sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
-    if (evidenceFilter === "CLIP_THUMB") {
-      sessions = sessions.filter((s) => Number(s.clip_count || 0) > 0 && Boolean(s.has_thumbnail));
-    } else if (evidenceFilter === "CLIP_ONLY") {
-      sessions = sessions.filter((s) => Number(s.clip_count || 0) > 0 && !Boolean(s.has_thumbnail));
-    } else if (evidenceFilter === "THUMB_ONLY") {
-      sessions = sessions.filter((s) => Number(s.clip_count || 0) <= 0 && Boolean(s.has_thumbnail));
+    const serverTotalPages = Number(payload.total_pages || 0);
+    if (serverTotalPages > 0 && queuePage > serverTotalPages) {
+      queuePage = serverTotalPages;
+      await populateQueue();
+      return;
     }
+    syncQueuePaginationUi({
+      total: Number(payload.total || sessions.length),
+      page: Number(payload.page || queuePage),
+      pageSize: Number(payload.page_size || queuePageSize),
+      totalPages: serverTotalPages,
+      hasPrev: Boolean(payload.has_prev),
+      hasNext: Boolean(payload.has_next),
+    });
+
     if (sessions.length === 0) {
       tbody.innerHTML = `<tr><td colspan="10"><span class="pill">No sessions found</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
@@ -1791,18 +1849,37 @@
       applyId: "queue-date-apply",
       clearId: "queue-date-clear",
       labelId: "queue-active-date-slice",
-      onChange: () => populateQueue(),
+      onChange: () => {
+        resetQueuePage();
+        populateQueue();
+      },
     });
     const statusSel = document.getElementById("queue-status");
     const evidenceSel = document.getElementById("queue-evidence");
     const sortSel = document.getElementById("queue-sort");
-    [statusSel, evidenceSel, sortSel].forEach((node) => {
+    const pageSizeSel = document.getElementById("queue-page-size");
+    [statusSel, evidenceSel, sortSel, pageSizeSel].forEach((node) => {
       if (node instanceof HTMLSelectElement) {
         node.addEventListener("change", () => {
+          resetQueuePage();
           populateQueue();
         });
       }
     });
+    if (queuePagePrevBtn instanceof HTMLButtonElement) {
+      queuePagePrevBtn.addEventListener("click", () => {
+        if (queuePage <= 1) return;
+        queuePage -= 1;
+        populateQueue();
+      });
+    }
+    if (queuePageNextBtn instanceof HTMLButtonElement) {
+      queuePageNextBtn.addEventListener("click", () => {
+        queuePage += 1;
+        populateQueue();
+      });
+    }
+    queuePageSize = readQueuePageSize();
     populateQueue();
   }
   if (body && body.classList.contains("page-event-detail")) {

@@ -166,6 +166,13 @@
 	                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
 	                </select>
 	              </div>
+	              <div class="field">
+	                <label for="queue-page-size">Rows per page</label>
+	                <select id="queue-page-size" name="queue-page-size">
+	                  <option value="15" selected>20</option>
+	                  <option value="10">10</option>
+	                </select>
+	              </div>
 	            </form>
 
             <div class="table-scroll">
@@ -204,6 +211,14 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div class="queue-pagination" aria-label="Queue pagination">
+              <span class="hint" id="queue-page-meta">Showing --</span>
+              <div class="queue-pagination-actions">
+                <button class="btn btn-compact" id="queue-page-prev" type="button">Prev</button>
+                <span class="pill ink" id="queue-page-indicator">Page --/--</span>
+                <button class="btn btn-compact" id="queue-page-next" type="button">Next</button>
+              </div>
             </div>
           </article>
 

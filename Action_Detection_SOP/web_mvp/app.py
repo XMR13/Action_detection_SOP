@@ -24,6 +24,11 @@ from .review_store import ReviewRecord, get_review, get_reviews_by_uid, init_db,
 from .session_index import SessionArtifact, SessionIndex
 from .settings import WebMvpSettings
 
+API_CONTRACT_VERSION = "2026-03-03.v1"
+_REVIEW_OVERRIDE_KEYS = {"operator_present", "roi_dwell", "helmet"}
+_STEP_STATUS_VALUES = {"DONE", "NOT_DONE", "UNKNOWN"}
+_MAX_REVIEW_NOTE_LEN = 4000
+
 
 def _display_status(value: str) -> str:
     # Render "NOT_DONE" as "NOT DONE" to match UI labels.
@@ -279,6 +284,17 @@ def _first_clip_rel_file(session: SessionArtifact) -> Optional[str]:
     return rel_file.replace("\\", "/")
 
 
+def _matches_evidence_filter(*, clip_count: int, has_thumbnail: bool, evidence_filter: str) -> bool:
+    mode = str(evidence_filter or "ANY").upper()
+    if mode == "CLIP_THUMB":
+        return clip_count > 0 and has_thumbnail
+    if mode == "CLIP_ONLY":
+        return clip_count > 0 and not has_thumbnail
+    if mode == "THUMB_ONLY":
+        return clip_count <= 0 and has_thumbnail
+    return True
+
+
 def _safe_session_dir(data_dir: Path, session: SessionArtifact, rel_path: str) -> Path:
     base = session.paths.session_dir.resolve()
     target = (session.paths.session_dir / rel_path).resolve()
@@ -442,6 +458,8 @@ _SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 def _validate_date_ymd(date: str) -> None:
     if not _DATE_RE.match(date):
         raise HTTPException(status_code=400, detail="Invalid date (expected YYYY-MM-DD)")
+    if _parse_date_ymd(date) is None:
+        raise HTTPException(status_code=400, detail="Invalid date (calendar day out of range)")
 
 
 def _parse_date_ymd(date_raw: str) -> Optional[Date]:
@@ -467,6 +485,28 @@ def _validate_session_uid(session_uid: str) -> None:
 
 def _validate_session_id(session_id: str) -> None:
     _validate_token(session_id, label="session_id")
+
+
+def _validate_review_note(review_note: str) -> None:
+    if len(review_note) > _MAX_REVIEW_NOTE_LEN:
+        raise HTTPException(status_code=400, detail=f"review_note too long (max {_MAX_REVIEW_NOTE_LEN})")
+
+
+def _validate_review_overrides(raw: Dict[str, Any]) -> Dict[str, str]:
+    validated: Dict[str, str] = {}
+    for key, value in raw.items():
+        if key not in _REVIEW_OVERRIDE_KEYS:
+            allowed = ", ".join(sorted(_REVIEW_OVERRIDE_KEYS))
+            raise HTTPException(status_code=400, detail=f"Invalid override key `{key}` (allowed: {allowed})")
+        if not isinstance(value, str):
+            raise HTTPException(status_code=400, detail=f"Invalid override value type for `{key}`")
+        normalized = _normalize_step_status(value)
+        if normalized not in _STEP_STATUS_VALUES:
+            raise HTTPException(status_code=400, detail=f"Invalid override value for `{key}`")
+        if normalized == "UNKNOWN" and value.strip().upper() != "UNKNOWN":
+            raise HTTPException(status_code=400, detail=f"Invalid override value for `{key}`")
+        validated[key] = normalized
+    return validated
 
 
 def _resolve_date_window(
@@ -585,7 +625,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> Dict[str, str]:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "api_contract_version": API_CONTRACT_VERSION,
+        }
 
     class LoginIn(BaseModel):
         username: str = Field(...)
@@ -668,6 +711,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),
             "auto_approve_done_enabled": settings.auto_approve_done_enabled,
             "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
+            "api_contract_version": API_CONTRACT_VERSION,
         }
 
     @app.get("/api/stats")
@@ -811,7 +855,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
+        page: int = Query(default=1, ge=1),
+        page_size: Optional[int] = Query(default=None, ge=1, le=2000),
         limit: int = Query(default=200, ge=1, le=2000),
     ) -> Dict[str, Any]:
         sessions = index.list()
@@ -828,6 +875,15 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             eff = _effective_review_for_session(session=s, review=r, settings=settings)
             rs = eff.status
             if review_status and rs != review_status:
+                continue
+
+            has_thumbnail = s.paths.thumbnail_jpg.exists()
+            clip_count = _clip_count(s)
+            if not _matches_evidence_filter(
+                clip_count=clip_count,
+                has_thumbnail=has_thumbnail,
+                evidence_filter=evidence,
+            ):
                 continue
 
             start_iso = s.checklist.get("start_time_iso")
@@ -857,9 +913,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "review_source": eff.source,
                     "final_helmet": final_helmet,
                     "final_sop": final_sop,
-                    "has_thumbnail": s.paths.thumbnail_jpg.exists(),
-                    "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if s.paths.thumbnail_jpg.exists() else None,
-                    "clip_count": _clip_count(s),
+                    "has_thumbnail": has_thumbnail,
+                    "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if has_thumbnail else None,
+                    "clip_count": clip_count,
                     "first_clip_url": (
                         f"/media/{s.session_uid}/{_first_clip_rel_file(s)}" if _first_clip_rel_file(s) else None
                     ),
@@ -888,14 +944,29 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         else:
             out.sort(key=lambda x: (-float(x.get("_sort_start_ts") or 0.0), str(x.get("session_uid") or "")))
 
-        out = out[:limit]
-        for row in out:
+        effective_page_size = int(page_size) if page_size is not None else int(limit)
+        total = len(out)
+        start_idx = (int(page) - 1) * effective_page_size
+        end_idx = start_idx + effective_page_size
+        page_rows = out[start_idx:end_idx]
+        total_pages = ((total + effective_page_size - 1) // effective_page_size) if total > 0 else 0
+        has_prev = total > 0 and page > 1
+        has_next = end_idx < total
+
+        for row in page_rows:
             row.pop("_sort_start_ts", None)
         return {
-            "sessions": out,
+            "sessions": page_rows,
             "last_scan_utc": index.last_scan_utc,
             "date_from": applied_date_from,
             "date_to": applied_date_to,
+            "evidence": evidence,
+            "total": total,
+            "page": int(page),
+            "page_size": effective_page_size,
+            "total_pages": total_pages,
+            "has_prev": has_prev,
+            "has_next": has_next,
         }
 
     @app.get("/api/sessions/{session_uid}")
@@ -971,6 +1042,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date = _storage_date(payload)
         _validate_session_uid(session_uid)
         _validate_session_id(payload.session_id)
+        if payload.start_date:
+            _validate_date_ymd(payload.start_date)
+        if payload.end_date:
+            _validate_date_ymd(payload.end_date)
         _validate_date_ymd(date)
 
         # In ingestion mode, store by UID to avoid collisions across devices/runs.
@@ -994,12 +1069,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         s = index.get(session_uid)
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
+        _validate_review_note(payload.review_note)
+        validated_overrides = _validate_review_overrides(payload.overrides)
         rec = upsert_review(
             db_path=settings.db_path,
             session_uid=session_uid,
             review_status=payload.review_status,
             review_note=payload.review_note,
-            overrides=payload.overrides,
+            overrides=validated_overrides,
         )
         return {"review": rec.__dict__}
 
