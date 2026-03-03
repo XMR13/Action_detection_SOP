@@ -31,6 +31,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--admin-username", default=os.environ.get("SOP_ADMIN_USERNAME", "admin"))
     parser.add_argument("--admin-password", default=os.environ.get("SOP_ADMIN_PASSWORD"))
     parser.add_argument(
+        "--auto-rescan-seconds",
+        type=float,
+        default=float(os.environ.get("SOP_AUTO_RESCAN_S", "0")),
+        help="Auto-rescan sessions under <data_dir>/.../sessions when they change (0 disables).",
+    )
+    parser.add_argument(
         "--disable-auto-approve-done",
         action="store_true",
         help="Disable auto-qualifying low-risk DONE sessions; require manual review for all sessions.",
@@ -54,6 +60,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         ui_dir=ui_dir,
         admin_username=str(args.admin_username),
         admin_password=args.admin_password,
+        auto_rescan_seconds=float(args.auto_rescan_seconds),
         auto_approve_done_enabled=not bool(args.disable_auto_approve_done),
         auto_approve_min_duration_s=float(args.auto_approve_min_duration_s),
     )

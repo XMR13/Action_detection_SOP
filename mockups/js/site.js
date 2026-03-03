@@ -1320,6 +1320,86 @@
     }
   };
 
+  const bindStaleIndicator = ({ pillId, onRefresh }) => {
+    const pill = document.getElementById(pillId);
+    if (!(pill instanceof HTMLElement)) return;
+    if (typeof onRefresh !== "function") return;
+
+    let baselineLastScan = "";
+    let baselineCount = null;
+    let lastSeenCfg = null;
+    let running = false;
+
+    const loadCfg = async () => {
+      try {
+        const cfg = await apiFetchJson("/api/config");
+        return cfg && typeof cfg === "object" ? cfg : null;
+      } catch (err) {
+        return null;
+      }
+    };
+
+    const updateBaseline = (cfg) => {
+      baselineLastScan = cfg && cfg.last_scan_utc ? String(cfg.last_scan_utc) : "";
+      const n = cfg && cfg.session_count != null ? Number(cfg.session_count) : Number.NaN;
+      baselineCount = Number.isFinite(n) ? n : null;
+    };
+
+    const setVisible = (show, text) => {
+      if (show) {
+        if (text) pill.textContent = String(text);
+        pill.removeAttribute("hidden");
+      } else {
+        pill.setAttribute("hidden", "hidden");
+      }
+    };
+
+    const pollOnce = async () => {
+      if (running) return;
+      if (document.visibilityState === "hidden") return;
+      running = true;
+      try {
+        const cfg = await loadCfg();
+        if (!cfg) return;
+        lastSeenCfg = cfg;
+
+        const nextLast = cfg.last_scan_utc ? String(cfg.last_scan_utc) : "";
+        const nextCount = cfg.session_count != null ? Number(cfg.session_count) : Number.NaN;
+        const countChanged = Number.isFinite(nextCount) && baselineCount != null && nextCount !== baselineCount;
+        const scanChanged = Boolean(nextLast && baselineLastScan && nextLast !== baselineLastScan);
+
+        if (countChanged || scanChanged) {
+          setVisible(true, "New data available (click to refresh)");
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    pill.addEventListener("click", async () => {
+      pill.setAttribute("aria-busy", "true");
+      try {
+        await Promise.resolve(onRefresh());
+        if (lastSeenCfg) updateBaseline(lastSeenCfg);
+        setVisible(false);
+      } finally {
+        pill.removeAttribute("aria-busy");
+      }
+    });
+
+    // Initialize baseline and start polling.
+    (async () => {
+      const cfg = await loadCfg();
+      if (cfg) updateBaseline(cfg);
+      setVisible(false);
+      pollOnce();
+      window.setInterval(pollOnce, 15000);
+      document.addEventListener("visibilitychange", () => {
+        pollOnce();
+      });
+    })();
+  };
+
   const populateDashboard = async () => {
     const totalNode = document.getElementById("kpi-total-sessions");
     const pendingNode = document.getElementById("kpi-pending");
@@ -1704,6 +1784,7 @@
   const body = document.body;
   applyDateSliceToStaticNav();
   if (body && body.classList.contains("page-review-queue")) {
+    bindStaleIndicator({ pillId: "stale-pill-queue", onRefresh: () => populateQueue() });
     bindDateControls({
       fromId: "queue-date-from",
       toId: "queue-date-to",
@@ -1742,6 +1823,7 @@
     populateSetup();
   }
   if (body && body.classList.contains("page-dashboard")) {
+    bindStaleIndicator({ pillId: "stale-pill-dashboard", onRefresh: () => populateDashboard() });
     bindDateControls({
       fromId: "date-from",
       toId: "date-to",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 import re
@@ -38,6 +39,71 @@ def _parse_iso_ts(value: Any) -> float:
         return datetime.fromisoformat(v).timestamp()
     except Exception:
         return 0.0
+
+
+def _sessions_root_signature_ns(data_dir: Path) -> int:
+    """
+    Cheap change detector for ingestion into sessions folders under `data_dir`.
+
+    The runner MVP commonly writes to `<data_dir>/<run_name>/sessions/<date>/...`,
+    while the "web-first" layout is `<data_dir>/sessions/<date>/...`.
+
+    We watch:
+    - `<data_dir>/sessions`
+    - `<data_dir>/*/sessions` (one-level nested runner outputs)
+
+    For each sessions root, we only look at:
+    - the root mtime
+    - mtimes of the immediate date subdirectories
+
+    Creating a new session directory updates the parent date directory mtime,
+    so this detects new uploads without reading any JSON.
+    """
+
+    def mtime_ns(p: Path) -> int:
+        try:
+            return int(p.stat().st_mtime_ns)
+        except FileNotFoundError:
+            return 0
+        except OSError:
+            return 0
+
+    def iter_session_roots() -> List[Path]:
+        roots: List[Path] = []
+        direct = data_dir / "sessions"
+        if direct.exists() and direct.is_dir():
+            roots.append(direct)
+        try:
+            for child in data_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                if child.name.startswith(".") or child.name in {"_web_cache"}:
+                    continue
+                nested = child / "sessions"
+                if nested.exists() and nested.is_dir():
+                    roots.append(nested)
+        except OSError:
+            # If the directory is temporarily unavailable, keep signature stable.
+            pass
+        # Dedupe by resolved path.
+        unique: Dict[str, Path] = {}
+        for r in roots:
+            try:
+                unique[str(r.resolve())] = r
+            except OSError:
+                unique[str(r)] = r
+        return list(unique.values())
+
+    sig = 0
+    for root in iter_session_roots():
+        sig = max(sig, mtime_ns(root))
+        try:
+            for child in root.iterdir():
+                if child.is_dir():
+                    sig = max(sig, mtime_ns(child))
+        except OSError:
+            continue
+    return sig
 
 
 def _machine_helmet_status(session: SessionArtifact) -> str:
@@ -459,6 +525,7 @@ def _filter_sessions_by_date_window(
 def create_app(settings: WebMvpSettings) -> FastAPI:
     init_db(settings.db_path)
     index = SessionIndex(data_dir=settings.data_dir)
+    refresh_lock = threading.Lock()
 
     app = FastAPI(title="SOP Review MVP", version="0.1.0")
     auth_cfg = BasicAuthConfig(username=settings.admin_username, password=settings.admin_password)
@@ -472,7 +539,45 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
-        index.refresh()
+        with refresh_lock:
+            index.refresh()
+
+        # Optional server-side auto-rescan. Clients don't need to click Rescan
+        # to see new uploads, and all clients observe updates via /api/config.
+        auto_s = float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0)
+        if auto_s <= 0:
+            return
+
+        stop_evt = threading.Event()
+
+        def loop() -> None:
+            last_sig = _sessions_root_signature_ns(settings.data_dir)
+            # Sleep first so startup doesn't immediately re-scan twice.
+            while not stop_evt.wait(timeout=auto_s):
+                sig = _sessions_root_signature_ns(settings.data_dir)
+                if sig <= last_sig:
+                    continue
+                try:
+                    with refresh_lock:
+                        index.refresh()
+                    last_sig = sig
+                except Exception:
+                    # Keep loop alive; next poll will attempt again.
+                    continue
+
+        t = threading.Thread(target=loop, name="web_mvp_auto_rescan", daemon=True)
+        app.state._auto_rescan_stop = stop_evt
+        app.state._auto_rescan_thread = t
+        t.start()
+
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        stop_evt = getattr(app.state, "_auto_rescan_stop", None)
+        t = getattr(app.state, "_auto_rescan_thread", None)
+        if isinstance(stop_evt, threading.Event):
+            stop_evt.set()
+        if isinstance(t, threading.Thread):
+            t.join(timeout=2.0)
 
     @app.get("/", include_in_schema=False)
     def _root() -> RedirectResponse:
@@ -513,7 +618,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
     @app.post("/api/admin/rescan")
     def rescan() -> Dict[str, str]:
-        index.refresh()
+        with refresh_lock:
+            index.refresh()
         return {
             "status": "ok",
             "last_scan_utc": index.last_scan_utc or "",
@@ -559,6 +665,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "db_path": str(settings.db_path),
             "last_scan_utc": index.last_scan_utc,
             "session_count": len(index.list()),
+            "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),
             "auto_approve_done_enabled": settings.auto_approve_done_enabled,
             "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
         }
