@@ -45,8 +45,8 @@ def default_times_shitft() -> Tuple[ShiftDef, ShiftDef, ShiftDef]: #return back 
     # Shift 3 : 23:30 - 07:30 (next day) make sure the time date is gone
     return (
         ShiftDef("S1", "Shift 1", start=time(7,30), end=time(15,30)),
-        ShiftDef("S2", "Shift 2", start=time(15,30), end=(23,30)),
-        ShiftDef("S3", "Shift 3", start=time(23, 30), end=(7, 30)),
+        ShiftDef("S2", "Shift 2", start=time(15,30), end=time(23,30)),
+        ShiftDef("S3", "Shift 3", start=time(23, 30), end=time(7, 30)),
     )
 
 
@@ -67,11 +67,29 @@ def parse_iso_datetime(value: object) -> Optional[datetime]:
         return None
 
 
+def _coerce_shift_clock(value: object) -> time:
+    """Normalize shift clock values to datetime.time.
+
+    Accepts:
+    - datetime.time
+    - (hour, minute) tuple/list
+    """
+    if isinstance(value, time):
+        return value
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        hour, minute = value
+        if isinstance(hour, int) and isinstance(minute, int):
+            return time(hour, minute)
+    raise TypeError(f"Shift clock must be datetime.time or (hour, minute), got {type(value).__name__}")
+
+
 def _shift_window_for_day(shift: ShiftDef, *, day: datetime) -> tuple[datetime, datetime]:
     #continuing the crossing day date time
-    
-    start_dt = datetime.combine(day.date(), shift.start, tzinfo=day.tzinfo)
-    end_dt = datetime.combine(day.date(), shift.end, tzinfo=day.tzinfo)
+    start_clock = _coerce_shift_clock(shift.start)
+    end_clock = _coerce_shift_clock(shift.end)
+
+    start_dt = datetime.combine(day.date(), start_clock, tzinfo=day.tzinfo)
+    end_dt = datetime.combine(day.date(), end_clock, tzinfo=day.tzinfo)
     if shift.crosses_midnight:
         end_dt = end_dt + timedelta(days=1)
     return start_dt, end_dt
@@ -156,4 +174,3 @@ def assign_shift_for_interval(
 
     _, _, sh, w0, w1 = best
     return ShiftAssignment(sh.shift_id, sh.name, w0.date().isoformat(), w0, w1)
-

@@ -1,0 +1,519 @@
+/* Live portal extensions on top of the mockup design system */
+input[type="date"],
+input[type="password"] {
+  min-width: 170px;
+  min-height: 44px;
+  border: 1px solid var(--card-border-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 9px 10px;
+  outline: none;
+}
+
+input[readonly] {
+  color: rgba(21, 27, 39, 0.82);
+}
+
+.btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+form.is-submitting .btn {
+  pointer-events: none;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.kpi-value,
+.queue-status-card .value,
+.meta .val {
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.pending {
+  background: rgba(154, 52, 18, 0.1);
+  border-color: rgba(154, 52, 18, 0.24);
+  color: #7c2d12;
+}
+
+.pill.auto {
+  background: rgba(3, 105, 161, 0.14);
+  border-color: rgba(3, 105, 161, 0.26);
+  color: #075985;
+}
+
+form.filters {
+  width: 100%;
+}
+
+form.filters .field {
+  min-width: 154px;
+}
+
+form.filters .btn {
+  min-width: 116px;
+}
+
+/* Event Browser: keep filters visually balanced across the row. */
+form.filters.event-browser-filters {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px 12px;
+}
+
+form.filters.event-browser-filters .field {
+  min-width: 0;
+}
+
+form.filters.event-browser-filters .field select,
+form.filters.event-browser-filters .field input[type="text"],
+form.filters.event-browser-filters .field input[type="date"] {
+  width: 100%;
+  min-width: 0;
+}
+
+form.filters.event-browser-filters .btn {
+  justify-self: end;
+  min-width: 128px;
+}
+
+/* Event Inspector: align read-only UID and action buttons in a stable grid. */
+.filters.detail-header-tools {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.filters.detail-header-tools .field {
+  min-width: 0;
+}
+
+.filters.detail-header-tools .field input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.table th,
+.table td {
+  line-height: 1.35;
+}
+
+.mode-title {
+  line-height: 1.25;
+}
+
+.thumb-inline {
+  width: 44px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(45, 55, 72, 0.2);
+  object-fit: cover;
+  object-position: center;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.big-thumb-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  position: relative;
+  z-index: 1;
+}
+
+.login-inline-link {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-card {
+  width: min(980px, 96vw);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--card-border);
+  background: var(--card-strong);
+  box-shadow: var(--shadow-strong);
+  padding: 0;
+  overflow: hidden;
+}
+
+.login-layout {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+}
+
+.login-side {
+  min-width: 0;
+  padding: 28px;
+}
+
+.login-side-brand {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  background:
+    linear-gradient(160deg, rgba(232, 24, 32, 0.08), rgba(255, 255, 255, 0.76) 42%, rgba(64, 64, 64, 0.05));
+  border-right: 1px solid rgba(45, 55, 72, 0.1);
+}
+
+.login-side-form {
+  display: grid;
+  align-content: center;
+  gap: 18px;
+}
+
+.login-brand {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.login-brand .brand-logo.large {
+  width: min(240px, 100%);
+  height: auto;
+  aspect-ratio: 406 / 124;
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 2.4vw, 2.4rem);
+  line-height: 1.08;
+  letter-spacing: -0.6px;
+}
+
+.login-kicker {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+.login-form-head {
+  display: grid;
+  gap: 8px;
+}
+
+.login-form-head h2 {
+  margin: 0;
+  font-size: 1.7rem;
+  letter-spacing: -0.4px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+}
+
+.login-form label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.login-field {
+  display: grid;
+  gap: 7px;
+}
+
+.login-form input[type="text"],
+.login-form input[type="password"] {
+  width: 100%;
+}
+
+.login-submit {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.login-trust {
+  display: grid;
+  gap: 10px;
+}
+
+.login-stat {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(45, 55, 72, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px 13px;
+}
+
+.login-stat strong {
+  font-size: 13px;
+}
+
+.login-stat span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.login-note,
+.login-foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.login-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.login-preview-note {
+  border-color: rgba(154, 52, 18, 0.18);
+  background: rgba(255, 251, 235, 0.92);
+  color: var(--warn);
+}
+
+.validation-summary {
+  border: 1px solid rgba(185, 28, 28, 0.25);
+  border-radius: 12px;
+  background: rgba(255, 241, 242, 0.9);
+  color: var(--no);
+  padding: 9px 10px;
+}
+
+.validation-summary:empty {
+  display: none;
+}
+
+.validation-summary p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.text-danger {
+  color: var(--no);
+  font-size: 12px;
+}
+
+.queue-mini-item[data-queue-link] {
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .login-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .login-side-brand {
+    border-right: none;
+    border-bottom: 1px solid rgba(45, 55, 72, 0.1);
+  }
+
+  form.filters .field {
+    flex: 1 1 180px;
+  }
+
+  form.filters.event-browser-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  form.filters.event-browser-filters .btn {
+    justify-self: start;
+  }
+
+  .filters.detail-header-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .login-shell {
+    padding: 18px;
+  }
+
+  .login-side {
+    padding: 20px 18px;
+  }
+
+  .login-actions-row {
+    align-items: flex-start;
+  }
+
+  input[type="date"],
+  input[type="password"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  form.filters .btn {
+    width: auto;
+  }
+
+  form.filters.event-browser-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters.detail-header-tools {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .login-shell {
+    padding: 14px;
+  }
+
+  form.filters .field {
+    flex: 1 1 100%;
+  }
+
+  form.filters .btn {
+    width: 100%;
+  }
+
+  form.filters.event-browser-filters {
+    grid-template-columns: 1fr;
+  }
+
+  form.filters.event-browser-filters .btn {
+    justify-self: stretch;
+  }
+}
+
+.sidebar-note {
+  margin-top: 18px;
+}
+
+.sidebar-note .btn {
+  width: 100%;
+}
+
+.caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-head h3 {
+  margin-bottom: 4px;
+}
+
+.session-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.compact-grid {
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
+.compact {
+  gap: 8px;
+}
+
+.frame-overlay {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  z-index: 2;
+}
+
+.checklist {
+  display: grid;
+  gap: 10px;
+}
+
+.step-card {
+  border: 1px solid rgba(45, 55, 72, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 11px 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.step-card p {
+  margin: 8px 0 0;
+  color: rgba(21, 27, 39, 0.78);
+  font-size: 12px;
+}
+
+.step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-head strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.step-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.artifacts-list {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(45, 55, 72, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 11px 12px;
+}
+
+.artifact-item strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: rgba(21, 27, 39, 0.86);
+}

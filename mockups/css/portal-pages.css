@@ -1,0 +1,326 @@
+.artifact-item span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.config-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+body.page-dashboard .title h2,
+body.page-setup .title h2 {
+  color: var(--text);
+}
+
+.content {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.content > * {
+  min-width: 0;
+}
+
+.topbar {
+  margin-bottom: 0;
+  gap: 18px;
+}
+
+.title {
+  gap: 7px;
+  min-width: 0;
+}
+
+.title p,
+.caption,
+.mode-desc,
+.queue-next-copy .body,
+.queue-mini-main span,
+.step-card p {
+  overflow-wrap: anywhere;
+}
+
+.filters {
+  gap: 12px;
+}
+
+.field {
+  min-width: 150px;
+}
+
+select,
+input[type="text"],
+textarea {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.nav {
+  gap: 10px;
+}
+
+.nav a {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.nav a strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.nav a .pill {
+  flex: 0 0 auto;
+}
+
+.mode-banner,
+.panel,
+.dashboard-trend {
+  overflow: hidden;
+}
+
+.mode-banner {
+  padding: 14px 16px;
+}
+
+.mode-copy {
+  min-width: 0;
+  max-width: 58rem;
+}
+
+.mode-title {
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.mode-tags {
+  align-items: flex-start;
+}
+
+.kpis,
+.row2,
+.two-col,
+.queue-status-grid,
+.config-grid {
+  gap: 18px;
+}
+
+.card .pad,
+.panel,
+.dashboard-trend .pad {
+  padding: 16px;
+}
+
+.section-head {
+  margin-bottom: 14px;
+}
+
+.section-head .pill,
+.section-head a.pill {
+  align-self: flex-start;
+}
+
+.trend-context,
+.queue-next-strip,
+.meta,
+.timeline,
+.artifacts-list,
+.checklist,
+.queue-mini-list {
+  margin-top: 12px;
+}
+
+.trend-value-strip {
+  margin-top: 12px;
+}
+
+.big-thumb {
+  height: clamp(320px, 42vw, 430px);
+}
+
+.frame-overlay {
+  right: 12px;
+}
+
+.queue-actions {
+  position: static;
+  margin-top: 14px;
+  padding: 10px;
+}
+
+.queue-actions-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.queue-actions-head strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.queue-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.btn-action {
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: 12px;
+}
+
+.btn-detail {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: none;
+}
+
+.queue-help {
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.queue-help .hint {
+  padding: 5px 9px;
+}
+
+.nav-logout {
+  margin-top: 8px;
+  border-top: 1px dashed rgba(45, 55, 72, 0.18);
+  padding-top: 14px !important;
+}
+
+.meta {
+  gap: 12px;
+}
+
+.meta .row {
+  align-items: flex-start;
+}
+
+.meta .val {
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-value,
+.queue-status-card .value,
+.trend-grid-value,
+.trend-axis-label,
+.hint,
+.pill,
+.table td,
+.table th {
+  font-variant-numeric: tabular-nums;
+}
+
+.config-card .btn-row,
+.queue-actions .btn-row {
+  gap: 12px;
+}
+
+.artifact-item,
+.step-card,
+.queue-mini-item,
+.queue-status-card,
+.tl-item {
+  border-radius: 16px;
+}
+
+.table th,
+.table td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.table-sub {
+  line-height: 1.45;
+}
+
+@media (max-width: 1320px) {
+  .mode-copy {
+    max-width: 46rem;
+  }
+}
+
+@media (max-width: 1100px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    gap: 16px;
+  }
+
+  .queue-actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .content {
+    gap: 14px;
+  }
+
+  .nav a {
+    min-width: max-content;
+  }
+
+  .section-head,
+  .step-head {
+    flex-direction: column;
+  }
+
+  .step-pills {
+    justify-content: flex-start;
+  }
+
+  .meta .row {
+    flex-direction: column;
+  }
+
+  .meta .val {
+    text-align: left;
+  }
+
+  .frame-overlay {
+    right: auto;
+    max-width: calc(100% - 24px);
+  }
+}
+
+@media (max-width: 640px) {
+  .mode-banner,
+  .panel,
+  .dashboard-trend .pad,
+  .card .pad {
+    padding: 14px;
+  }
+
+  .queue-next-strip,
+  .nav a {
+    gap: 10px;
+  }
+
+  .queue-actions {
+    padding: 10px;
+  }
+
+  .queue-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}

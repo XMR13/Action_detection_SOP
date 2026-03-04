@@ -1,0 +1,71 @@
+/* Dashboard data hydration: avoid showing stale mock values on first paint. */
+.page-dashboard #kpi-total-sessions,
+.page-dashboard #kpi-pending,
+.page-dashboard #kpi-helmet-checked,
+.page-dashboard #kpi-unknown-rate,
+.page-dashboard #kpi-manual-review,
+.page-dashboard #dashboard-compact-manual-needed,
+.page-dashboard #dashboard-compact-approved,
+.page-dashboard #dashboard-compact-machine-no,
+.page-dashboard #dashboard-compact-pending,
+.page-dashboard #trend-strip-done,
+.page-dashboard #trend-strip-unknown,
+.page-dashboard #trend-strip-review,
+.page-dashboard #banner-pending-pill {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.page-dashboard.is-hydrating #kpi-total-sessions,
+.page-dashboard.is-hydrating #kpi-pending,
+.page-dashboard.is-hydrating #kpi-helmet-checked,
+.page-dashboard.is-hydrating #kpi-unknown-rate,
+.page-dashboard.is-hydrating #kpi-manual-review,
+.page-dashboard.is-hydrating #dashboard-compact-manual-needed,
+.page-dashboard.is-hydrating #dashboard-compact-approved,
+.page-dashboard.is-hydrating #dashboard-compact-machine-no,
+.page-dashboard.is-hydrating #dashboard-compact-pending,
+.page-dashboard.is-hydrating #trend-strip-done,
+.page-dashboard.is-hydrating #trend-strip-unknown,
+.page-dashboard.is-hydrating #trend-strip-review,
+.page-dashboard.is-hydrating #banner-pending-pill {
+  opacity: 0.45;
+  transform: translateY(1px);
+}
+
+/* Queue hydration: suppress stale mock numbers until API hydration completes. */
+.page-review-queue #queue-length-hint,
+.page-review-queue #queue-pending-pill,
+.page-review-queue #queue-stat-pending,
+.page-review-queue #queue-stat-approved,
+.page-review-queue #queue-stat-rejected,
+.page-review-queue #queue-stat-unknown,
+.page-review-queue #selected-session-label,
+.page-review-queue #selected-session-sla,
+.page-review-queue #selected-session-uid,
+.page-review-queue #selected-session-date,
+.page-review-queue #selected-machine-status,
+.page-review-queue #selected-human-status,
+.page-review-queue #selected-review-source,
+.page-review-queue #selected-final-status,
+.page-review-queue #selected-evidence {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.page-review-queue.is-hydrating #queue-length-hint,
+.page-review-queue.is-hydrating #queue-pending-pill,
+.page-review-queue.is-hydrating #queue-stat-pending,
+.page-review-queue.is-hydrating #queue-stat-approved,
+.page-review-queue.is-hydrating #queue-stat-rejected,
+.page-review-queue.is-hydrating #queue-stat-unknown,
+.page-review-queue.is-hydrating #selected-session-label,
+.page-review-queue.is-hydrating #selected-session-sla,
+.page-review-queue.is-hydrating #selected-session-uid,
+.page-review-queue.is-hydrating #selected-session-date,
+.page-review-queue.is-hydrating #selected-machine-status,
+.page-review-queue.is-hydrating #selected-human-status,
+.page-review-queue.is-hydrating #selected-review-source,
+.page-review-queue.is-hydrating #selected-final-status,
+.page-review-queue.is-hydrating #selected-evidence {
+  opacity: 0.45;
+  transform: translateY(1px);
+}
