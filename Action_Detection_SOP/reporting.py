@@ -17,6 +17,21 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .sop_engine import SessionResult, StepStatus, iter_roi_status_counts, iter_status_counts
+from .shifts import assign_shift_for_interval, parse_iso_datetime
+
+
+@dataclass(frozen=True)
+class ShiftSummary:
+    shift_id: str
+    shift_name: str
+    shift_date: str
+    total_sessions: int
+    roi_done: int
+    roi_not_done: int
+    roi_unknown: int
+    helmet_done: int
+    helmet_not_done: int
+    helmet_unknown: int
 
 
 @dataclass(frozen=True)
@@ -29,6 +44,7 @@ class DailyReport:
     helmet_done: int
     helmet_not_done: int
     helmet_unknown: int
+    shift_summaries: List[ShiftSummary]
 
 
 def session_result_to_dict(r: SessionResult) -> Dict[str, Any]:
@@ -39,6 +55,17 @@ def session_result_to_dict(r: SessionResult) -> Dict[str, Any]:
     payload["helmet"] = str(r.helmet.value)
     # Stable primary key used by the website/uploader for idempotency across retries and file moves.
     payload.setdefault("session_uid", uuid.uuid4().hex)
+
+    # Shift enrichment (best-effort). Uses ISO timestamps if present.
+    start_dt = parse_iso_datetime(payload.get("start_time_iso"))
+    end_dt = parse_iso_datetime(payload.get("end_time_iso"))
+    if start_dt is not None:
+        if end_dt is None:
+            end_dt = start_dt
+        assignment = assign_shift_for_interval(start_dt=start_dt, end_dt=end_dt)
+        if assignment is not None:
+            payload.update(assignment.to_iso_fields())
+
     return payload
 
 
@@ -88,6 +115,40 @@ def write_daily_report(
     sessions_list = list(sessions)
     roi_done, roi_not_done, roi_unknown = iter_roi_status_counts(sessions_list)
     done, not_done, unknown = iter_status_counts(sessions_list)
+
+    by_shift: Dict[tuple[str, str, str], List[SessionResult]] = {}
+    for s in sessions_list:
+        start_dt = parse_iso_datetime(s.start_time_iso)
+        end_dt = parse_iso_datetime(s.end_time_iso)
+        if start_dt is None:
+            continue
+        if end_dt is None:
+            end_dt = start_dt
+        assignment = assign_shift_for_interval(start_dt=start_dt, end_dt=end_dt)
+        if assignment is None:
+            continue
+        key = (assignment.shift_date, assignment.shift_id, assignment.shift_name)
+        by_shift.setdefault(key, []).append(s)
+
+    shift_summaries: List[ShiftSummary] = []
+    for (shift_date, shift_id, shift_name), bucket in sorted(by_shift.items()):
+        s_roi_done, s_roi_not_done, s_roi_unknown = iter_roi_status_counts(bucket)
+        s_done, s_not_done, s_unknown = iter_status_counts(bucket)
+        shift_summaries.append(
+            ShiftSummary(
+                shift_id=shift_id,
+                shift_name=shift_name,
+                shift_date=shift_date,
+                total_sessions=len(bucket),
+                roi_done=s_roi_done,
+                roi_not_done=s_roi_not_done,
+                roi_unknown=s_roi_unknown,
+                helmet_done=s_done,
+                helmet_not_done=s_not_done,
+                helmet_unknown=s_unknown,
+            )
+        )
+
     report = DailyReport(
         date=date,
         total_sessions=len(sessions_list),
@@ -97,6 +158,7 @@ def write_daily_report(
         helmet_done=done,
         helmet_not_done=not_done,
         helmet_unknown=unknown,
+        shift_summaries=shift_summaries,
     )
     report_dir = out_dir / "reports" / date
     report_dir.mkdir(parents=True, exist_ok=True)

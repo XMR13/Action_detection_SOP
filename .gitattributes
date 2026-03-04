@@ -1,0 +1,2 @@
+# Keep Python sources LF on all platforms (prevents CRLF conversion warnings).
+*.py text eol=lf

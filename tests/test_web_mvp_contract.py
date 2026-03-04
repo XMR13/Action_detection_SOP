@@ -29,7 +29,13 @@ def _build_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(settings))
 
 
-def _put_min_session(client: TestClient, *, session_uid: str, start_date: str = "2026-03-03") -> None:
+def _put_min_session(
+    client: TestClient,
+    *,
+    session_uid: str,
+    start_date: str = "2026-03-03",
+    extra: dict[str, object] | None = None,
+) -> None:
     payload = {
         "session_uid": session_uid,
         "session_id": "s001",
@@ -38,6 +44,8 @@ def _put_min_session(client: TestClient, *, session_uid: str, start_date: str = 
         "roi_dwell": "DONE",
         "helmet": "UNKNOWN",
     }
+    if extra:
+        payload.update(extra)
     res = client.put(f"/api/sessions/{session_uid}", headers=_auth_headers(), json=payload)
     assert res.status_code == 200
 
@@ -208,3 +216,31 @@ def test_sessions_evidence_filter_modes(tmp_path: Path) -> None:
         assert thumb_only.status_code == 200
         thumb_only_uids = {str(s["session_uid"]) for s in thumb_only.json()["sessions"]}
         assert thumb_only_uids == {"uid_thumb_only"}
+
+
+def test_sessions_shift_filter_modes(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_min_session(client, session_uid="uid_shift_1", extra={"shift_id": "S1", "shift_name": "Shift 1"})
+        _put_min_session(client, session_uid="uid_shift_2", extra={"shift_id": "S2", "shift_name": "Shift 2"})
+        _put_min_session(client, session_uid="uid_shift_3", extra={"shift_id": "S3", "shift_name": "Shift 3"})
+
+        all_rows = client.get("/api/sessions", headers=_auth_headers(), params={"shift": "ALL", "page": 1, "page_size": 25})
+        assert all_rows.status_code == 200
+        all_payload = all_rows.json()
+        assert all_payload["shift"] == "ALL"
+        all_uids = {str(s["session_uid"]) for s in all_payload["sessions"]}
+        assert all_uids == {"uid_shift_1", "uid_shift_2", "uid_shift_3"}
+
+        s1_rows = client.get("/api/sessions", headers=_auth_headers(), params={"shift": "S1", "page": 1, "page_size": 25})
+        assert s1_rows.status_code == 200
+        s1_payload = s1_rows.json()
+        assert s1_payload["shift"] == "S1"
+        s1_uids = {str(s["session_uid"]) for s in s1_payload["sessions"]}
+        assert s1_uids == {"uid_shift_1"}
+
+        s2_rows = client.get("/api/sessions", headers=_auth_headers(), params={"shift": "2", "page": 1, "page_size": 25})
+        assert s2_rows.status_code == 200
+        s2_payload = s2_rows.json()
+        assert s2_payload["shift"] == "S2"
+        s2_uids = {str(s["session_uid"]) for s in s2_payload["sessions"]}
+        assert s2_uids == {"uid_shift_2"}

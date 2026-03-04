@@ -149,20 +149,29 @@
 	                  <option value="QUALIFIED">Approved only</option>
 	                </select>
 	              </div>
-	              <div class="field">
-	                <label for="queue-evidence">Evidence</label>
-	                <select id="queue-evidence" name="queue-evidence">
-	                  <option value="ANY" selected>Any evidence</option>
-	                  <option value="CLIP_THUMB">Clip + thumbnail</option>
-	                  <option value="CLIP_ONLY">Clip only</option>
-	                  <option value="THUMB_ONLY">Thumbnail only</option>
-	                </select>
-	              </div>
-	              <div class="field">
-	                <label for="queue-sort">Sort by</label>
-	                <select id="queue-sort" name="queue-sort">
-	                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
-	                  <option value="NEWEST">Newest first</option>
+              <div class="field">
+                <label for="queue-evidence">Evidence</label>
+                <select id="queue-evidence" name="queue-evidence">
+                  <option value="ANY" selected>Any evidence</option>
+                  <option value="CLIP_THUMB">Clip + thumbnail</option>
+                  <option value="CLIP_ONLY">Clip only</option>
+                  <option value="THUMB_ONLY">Thumbnail only</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="queue-shift">Shift</label>
+                <select id="queue-shift" name="queue-shift">
+                  <option value="ALL" selected>All shifts</option>
+                  <option value="S1">Shift 1</option>
+                  <option value="S2">Shift 2</option>
+                  <option value="S3">Shift 3</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="queue-sort">Sort by</label>
+                <select id="queue-sort" name="queue-sort">
+                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
+                  <option value="NEWEST">Newest first</option>
 	                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
 	                </select>
 	              </div>
@@ -180,6 +189,7 @@
                 <colgroup>
                   <col class="queue-col-session" />
                   <col class="queue-col-date" />
+                  <col class="queue-col-shift" />
                   <col class="queue-col-start" />
                   <col class="queue-col-duration" />
                   <col class="queue-col-machine" />
@@ -191,12 +201,13 @@
                 </colgroup>
                 <thead>
                   <tr>
-	                    <th scope="col">Session</th>
-	                    <th scope="col">Date</th>
-	                    <th scope="col">Start</th>
-	                    <th scope="col">Dur</th>
-	                    <th scope="col">AI SOP</th>
-	                    <th scope="col">Human<br>review</th>
+                    <th scope="col">Session</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Shift</th>
+                    <th scope="col">Start</th>
+                    <th scope="col">Dur</th>
+                    <th scope="col">AI SOP</th>
+                    <th scope="col">Human<br>review</th>
 	                    <th scope="col">Final</th>
 	                    <th scope="col">Evidence</th>
 	                    <th scope="col">SLA</th>
@@ -205,7 +216,7 @@
 	                </thead>
                 <tbody>
                   <tr>
-                    <td colspan="10">
+                    <td colspan="11">
                       <span class="pill pending">Loading sessions...</span>
                     </td>
                   </tr>
@@ -245,10 +256,14 @@
 	                  <span class="key">Session UID</span>
 	                  <span class="val" id="selected-session-uid">-</span>
 	                </div>
-	                <div class="row">
-	                  <span class="key">Session Date</span>
-	                  <span class="val" id="selected-session-date">-</span>
-	                </div>
+                <div class="row">
+                  <span class="key">Session Date</span>
+                  <span class="val" id="selected-session-date">-</span>
+                </div>
+                <div class="row">
+                  <span class="key">Shift</span>
+                  <span class="val" id="selected-session-shift">-</span>
+                </div>
                 <div class="row">
                   <span class="key">AI SOP</span>
                   <span class="val" id="selected-machine-status">-</span>

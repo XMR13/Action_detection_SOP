@@ -87,6 +87,28 @@
     });
   };
 
+  const normalizeShiftId = (raw) => {
+    const key = String(raw || "")
+      .trim()
+      .toUpperCase()
+      .replaceAll(" ", "")
+      .replaceAll("_", "");
+    if (key === "S1" || key === "SHIFT1" || key === "1") return "S1";
+    if (key === "S2" || key === "SHIFT2" || key === "2") return "S2";
+    if (key === "S3" || key === "SHIFT3" || key === "3") return "S3";
+    return "";
+  };
+
+  const shiftLabel = (shiftId, shiftName) => {
+    const explicit = String(shiftName || "").trim();
+    if (explicit) return explicit;
+    const sid = normalizeShiftId(shiftId);
+    if (sid === "S1") return "Shift 1";
+    if (sid === "S2") return "Shift 2";
+    if (sid === "S3") return "Shift 3";
+    return "-";
+  };
+
   const formatDuration = (seconds) => {
     const s = Math.max(0, Number(seconds || 0));
     const mm = Math.floor(s / 60);
@@ -399,6 +421,7 @@
   const selectedSessionLabel = document.getElementById("selected-session-label");
   const selectedSessionUid = document.getElementById("selected-session-uid");
   const selectedSessionDate = document.getElementById("selected-session-date");
+  const selectedSessionShift = document.getElementById("selected-session-shift");
   const selectedMachineStatus = document.getElementById("selected-machine-status");
   const selectedHumanStatus = document.getElementById("selected-human-status");
   const selectedReviewSource = document.getElementById("selected-review-source");
@@ -476,13 +499,16 @@
       selectedSessionInline.textContent = resolvedSessionId;
     }
     if (selectedSessionLabel) {
-      selectedSessionLabel.textContent = `${resolvedSessionId} | ${resolvedDate} | Machine ${resolvedMachine}`;
+      selectedSessionLabel.textContent = `${resolvedSessionId} | ${resolvedDate} | ${resolvedShift} | Machine ${resolvedMachine}`;
     }
     if (selectedSessionUid) {
       selectedSessionUid.textContent = resolvedSessionUid;
     }
     if (selectedSessionDate) {
       selectedSessionDate.textContent = resolvedDate;
+    }
+    if (selectedSessionShift) {
+      selectedSessionShift.textContent = resolvedShift;
     }
     if (selectedMachineStatus) {
       selectedMachineStatus.textContent = resolvedMachine;
@@ -746,18 +772,22 @@
 
     const statusSel = document.getElementById("queue-status");
     const evidenceSel = document.getElementById("queue-evidence");
+    const shiftSel = document.getElementById("queue-shift");
     const sortSel = document.getElementById("queue-sort");
     const pageSizeSel = document.getElementById("queue-page-size");
 
     const reviewStatus = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
     const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "ANY") : "ANY";
+    const shiftFilter = shiftSel instanceof HTMLSelectElement ? String(shiftSel.value || "ALL") : "ALL";
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
     queuePageSize = pageSizeSel instanceof HTMLSelectElement ? readQueuePageSize() : queuePageSize;
 
     let url = withDateApiQuery(
       `/api/sessions?page=${encodeURIComponent(String(queuePage))}&page_size=${encodeURIComponent(
         String(queuePageSize)
-      )}&sort=${encodeURIComponent(sort || "NEWEST")}&evidence=${encodeURIComponent(evidenceFilter || "ANY")}`
+      )}&sort=${encodeURIComponent(sort || "NEWEST")}&evidence=${encodeURIComponent(evidenceFilter || "ANY")}&shift=${encodeURIComponent(
+        shiftFilter || "ALL"
+      )}`
     );
     if (reviewStatus && reviewStatus !== "ALL") {
       url += `&review_status=${encodeURIComponent(reviewStatus)}`;
@@ -768,7 +798,7 @@
       payload = await apiFetchJson(url);
     } catch (err) {
       syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="10"><span class="pill no">Failed to load sessions</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><span class="pill no">Failed to load sessions</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -792,7 +822,7 @@
     });
 
     if (sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10"><span class="pill">No sessions found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><span class="pill">No sessions found</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -808,6 +838,7 @@
         const reviewSource = String(s.review_source || "PENDING");
         const final = String(s.final_sop || s.final_helmet || machine);
         const date = String(s.date || "-");
+        const shift = shiftLabel(s.shift_id, s.shift_name);
         const start = formatHmsFromIso(s.start_time_iso);
         const dur = formatDuration(s.duration_s);
         const thumbUrl = s.thumbnail_url
@@ -828,7 +859,7 @@
             data-session-id="${sid}"
             data-session-uid="${uid}"
             data-date="${date}"
-            data-shift="-"
+            data-shift="${shift}"
             data-machine="${displayStepStatus(machine)}"
             data-human="${displayReviewStatus(review)}"
             data-review-source="${displayReviewSource(reviewSource)}"
@@ -841,6 +872,7 @@
               <div class="table-sub">${uid}</div>
             </td>
             <td>${date}</td>
+            <td><span class="pill ink">${shift}</span></td>
             <td>${start}</td>
             <td>${dur}</td>
             <td><span class="pill ${pillClassForStepStatus(machine)}">${displayStepStatus(machine)}</span></td>
@@ -1856,9 +1888,10 @@
     });
     const statusSel = document.getElementById("queue-status");
     const evidenceSel = document.getElementById("queue-evidence");
+    const shiftSel = document.getElementById("queue-shift");
     const sortSel = document.getElementById("queue-sort");
     const pageSizeSel = document.getElementById("queue-page-size");
-    [statusSel, evidenceSel, sortSel, pageSizeSel].forEach((node) => {
+    [statusSel, evidenceSel, shiftSel, sortSel, pageSizeSel].forEach((node) => {
       if (node instanceof HTMLSelectElement) {
         node.addEventListener("change", () => {
           resetQueuePage();

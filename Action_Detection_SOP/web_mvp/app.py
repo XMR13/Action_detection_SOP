@@ -23,6 +23,7 @@ from .auth import BasicAuthConfig, BasicAuthMiddleware, issue_session_token
 from .review_store import ReviewRecord, get_review, get_reviews_by_uid, init_db, upsert_review
 from .session_index import SessionArtifact, SessionIndex
 from .settings import WebMvpSettings
+from ..shifts import assign_shift_for_interval, parse_iso_datetime
 
 API_CONTRACT_VERSION = "2026-03-03.v1"
 _REVIEW_OVERRIDE_KEYS = {"operator_present", "roi_dwell", "helmet"}
@@ -44,6 +45,28 @@ def _parse_iso_ts(value: Any) -> float:
         return datetime.fromisoformat(v).timestamp()
     except Exception:
         return 0.0
+
+
+def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> dict[str, Any]:
+    start_dt = parse_iso_datetime(start_iso) or parse_iso_datetime(end_iso)
+    if start_dt is None:
+        return {}
+    end_dt = parse_iso_datetime(end_iso) or start_dt
+    assignment = assign_shift_for_interval(start_dt=start_dt, end_dt=end_dt)
+    if assignment is None:
+        return {}
+    return assignment.to_iso_fields()
+
+
+def _normalize_shift_filter(value: Any) -> str:
+    raw = str(value or "").strip().upper().replace(" ", "").replace("_", "")
+    if raw in {"S1", "SHIFT1", "1"}:
+        return "S1"
+    if raw in {"S2", "SHIFT2", "2"}:
+        return "S2"
+    if raw in {"S3", "SHIFT3", "3"}:
+        return "S3"
+    return "ALL"
 
 
 def _sessions_root_signature_ns(data_dir: Path) -> int:
@@ -856,6 +879,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date_to: Optional[str] = None,
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
+        shift: str = Query(default="ALL"),
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
         page: int = Query(default=1, ge=1),
         page_size: Optional[int] = Query(default=None, ge=1, le=2000),
@@ -869,6 +893,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             date_to=date_to,
         )
         reviews = get_reviews_by_uid(settings.db_path, (s.session_uid for s in sessions))
+        shift_filter = _normalize_shift_filter(shift)
         out: List[Dict[str, Any]] = []
         for s in sessions:
             r = reviews.get(s.session_uid)
@@ -892,6 +917,17 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             end_s = float(s.checklist.get("end_time_s") or 0.0)
             duration_s = max(0.0, end_s - start_s)
             start_ts = _parse_iso_ts(start_iso) or _parse_iso_ts(end_iso)
+            shift_fields = {}
+            if (
+                not isinstance(s.checklist.get("shift_id"), str)
+                or not s.checklist.get("shift_id")
+                or not isinstance(s.checklist.get("shift_date"), str)
+                or not s.checklist.get("shift_date")
+            ):
+                shift_fields = _shift_fields_from_isos(start_iso=start_iso, end_iso=end_iso)
+            resolved_shift_id = str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or "").strip().upper()
+            if shift_filter != "ALL" and resolved_shift_id != shift_filter:
+                continue
 
             machine_helmet = _normalize_step_status(_machine_helmet_status(s))
             machine_sop = _machine_sop_status(s)
@@ -905,6 +941,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "session_id": s.session_id,
                     "start_time_iso": start_iso,
                     "end_time_iso": end_iso,
+                    "shift_id": str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or ""),
+                    "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
+                    "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
                     "duration_s": duration_s,
                     "machine_helmet": machine_helmet,
                     "machine_sop": machine_sop,
@@ -961,6 +1000,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "date_from": applied_date_from,
             "date_to": applied_date_to,
             "evidence": evidence,
+            "shift": shift_filter,
             "total": total,
             "page": int(page),
             "page_size": effective_page_size,
@@ -981,6 +1021,17 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         machine_sop = _machine_sop_status(s)
         final_helmet = _final_step_status(machine_status=machine_helmet, review=r, step_key="helmet")
         final_sop = _final_sop_status(session=s, review=r)
+
+        start_iso = s.checklist.get("start_time_iso")
+        end_iso = s.checklist.get("end_time_iso")
+        shift_fields = {}
+        if (
+            not isinstance(s.checklist.get("shift_id"), str)
+            or not s.checklist.get("shift_id")
+            or not isinstance(s.checklist.get("shift_date"), str)
+            or not s.checklist.get("shift_date")
+        ):
+            shift_fields = _shift_fields_from_isos(start_iso=start_iso, end_iso=end_iso)
 
         clips: List[Dict[str, Any]] = []
         if isinstance(s.evidence.get("clips"), list):
@@ -1016,6 +1067,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "date": s.date,
             "session_id": s.session_id,
             "checklist": s.checklist,
+            "shift_id": str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or ""),
+            "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
+            "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
             "machine_helmet": machine_helmet,
             "machine_sop": machine_sop,
             "machine_roi_dwell": _machine_roi_status(s),
