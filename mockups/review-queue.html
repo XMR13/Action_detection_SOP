@@ -91,7 +91,7 @@
               <button class="btn" id="queue-date-clear" type="button">Clear</button>
             </div>
 	            <span class="hint" id="queue-active-date-slice">Date: all</span>
-              <span class="pill ink" id="stale-pill-queue" hidden style="cursor:pointer">New data available</span>
+              <button class="pill ink" id="stale-pill-queue" type="button" hidden>New data available</button>
 	          </div>
 	        </header>
 
@@ -178,7 +178,7 @@
 	              <div class="field">
 	                <label for="queue-page-size">Rows per page</label>
 	                <select id="queue-page-size" name="queue-page-size">
-	                  <option value="15" selected>20</option>
+	                  <option value="20" selected>20</option>
 	                  <option value="10">10</option>
 	                </select>
 	              </div>
@@ -217,7 +217,7 @@
                 <tbody>
                   <tr>
                     <td colspan="11">
-                      <span class="pill pending">Loading sessions...</span>
+                      <span class="pill pending">Loading sessions…</span>
                     </td>
                   </tr>
                 </tbody>
@@ -246,7 +246,7 @@
 	              <div class="queue-next-strip">
 	                <div class="queue-next-copy">
 	                  <span class="head">Current selection</span>
-	                  <span class="body" id="selected-session-label">Loading selection...</span>
+	                  <span class="body" id="selected-session-label">Loading selection…</span>
 	                </div>
                 <span class="pill no" id="selected-session-sla">SLA --</span>
               </div>

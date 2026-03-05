@@ -285,6 +285,18 @@ svg {
   color: var(--no);
 }
 
+button.pill {
+  cursor: pointer;
+}
+
+button.pill:hover {
+  filter: brightness(0.98);
+}
+
+button.pill:active {
+  transform: translateY(1px);
+}
+
 .content {
   width: 100%;
   max-width: 1580px;
@@ -1312,4 +1324,3 @@ textarea:focus-visible {
     scroll-behavior: auto !important;
   }
 }
-

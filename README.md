@@ -1,163 +1,58 @@
-# SOP Roll checking in Roll Wrapping
+# Action Detection SOP (Roll Wrapping)
 
-## Project Description.
+On-prem computer vision pipeline for SOP compliance in roll wrapping, optimized for Jetson deployment.
 
-Merupakan project yang bertujuan untuk melakukan pengecekan SOP secara otomatis dengan menggunakan metode **Deep Learning** (khususnya *vision* dan *recognition*).
+## Scope (current MVP)
 
-Tujuan utamanya adalah melakukan **SOP compliance checking** dari **kamera CCTV real-time**:
-- Deteksi objek penting (contoh: **person**, **helmet/PPE**, dan objek konteks lain bila dibutuhkan).
-- Menilai apakah **aksi/SOP step** tertentu sudah dilakukan (fokus pada *action*, bukan identitas orang).
+- Sessionization by person-in-ROI.
+- SOP checks: `operator_present`, `roi_dwell`, `helmet`.
+- Filesystem-first outputs (`data/sessions`, `data/reports`) + review website MVP.
+- Edge-to-web sync via uploader with persistent offline spool + retry backoff.
 
-### Cara kerja (high-level)
+## Requirements
 
-1. Ambil frame dari CCTV (real-time stream).
-2. Lakukan preprocessing (resize/letterbox, normalisasi) untuk input model.
-3. Jalankan inference model (YOLO / model lain) untuk deteksi objek.
-4. Postprocess (decode output, confidence filter, NMS, mapping koordinat kembali ke gambar original).
-5. (Tahap berikutnya) Gunakan hasil deteksi (dan/atau model temporal) untuk memutuskan status SOP: done / not done / unknown. (akan dilanjutkan ketika frame sudah selesa)
+- Python `3.10`
+- Dependency manager: `uv`
+- Deployment target: Jetson Orin NX (JetPack `6.x+`)
 
-### Status saat ini (kode di repo)
+## Quick Start
 
-Saat ini repo sudah menyediakan fonda
-si untuk **object detection YOLO-style** (preprocess → inference backend → postprocess) dan contoh demo inference pada gambar statis. Logic action/SOP akan dibangun di atas fondasi ini.
-
-## Repository Layout (Current)
-
-- `yolo_kit/` — utilitas runtime deteksi (letterbox, decode+NMS, dan backend inference: ONNX Runtime / TensorRT / TorchScript).
-- `Models/` — model artifacts (contoh `.onnx`).
-- `configs/metadata*.yaml` — class mapping (class id → name) untuk inference/runtime.
-- `Media/` — sample media untuk demo.
-- `testing_basic_detect.py` — demo sederhana untuk menjalankan deteksi pada sebuah image.
-- `Action_Detection_SOP/` — placeholder package untuk logic SOP/action (akan diperluas).
-
-
-## Development Environment
-
-Project ini dikembangkan dengan menggunakan device pribadi dengan spesifikasi sebagai berikut:
-
-- CPU   : Ryzen 5 4600H
-- GPU   : Nvidia GTX 1650Ti mobile
-- RAM   : 16GB DDR4
-
-Software stack:
-PYthon  : 3.10
-OS      : Windows 10
-
-Dan Pengaplikasian project ini akan dilakukan mini komputer jetson orin NX 16GB, dengan spesifikasi sebagai berikut
-
-- GPU & CPU : Tegra Orin NX (SoC)
-- RAM       : 16 GB
-
-Software stack :
-Python      :3.10
-Jetpack     : 6.0 + 
-
-## How to run the application
-
-### Prerequisites (ringkas)
-
-1. Python 3.10+
-2. OpenCV + NumPy
-3. Backend inference (pilih sesuai kebutuhan):
-   - **ONNX Runtime** (laptop/dev) → `onnxruntime` atau `onnxruntime-gpu`
-   - **TensorRT** (Jetson deployment) → TensorRT Python bindings (+ biasanya membutuhkan PyTorch untuk buffer di backend ini)
-   - **TorchScript** (opsional) → PyTorch
-
-### Quick demo (image detection)
-
-Repo ini menyediakan demo untuk menjalankan deteksi pada image:
-
-1. Pastikan dependencies sudah terinstall (repo menggunakan `uv`; jalankan sendiri sesuai environment kamu).
-2. Jalankan:
-   - `python3 -m Scripts.testing_basic_detect`
-   - `python3 -m Scripts.visualize_detections --image Media/pedestrian.png --show --out output.jpg`
-
-### Video / CCTV (file video atau webcam)
-
-Untuk input video:
-
-- `python3 -m Scripts.visualize_detections --video path/to/video.mp4 --show --out output.mp4`
-
-Untuk webcam:
-
-- `python3 -m Scripts.visualize_detections --webcam 0 --show`
-
-Tips:
-
-- Kalau FPS terlalu berat, coba proses tiap N frame: `--every 2` atau `--every 3`
-- Jika FPS dari RTSP/NVR tidak terbaca (atau video output terlihat lambat), pakai:
-  - `--source-fps <angka>` untuk override FPS input
-  - `--video-fps-out <angka>` untuk paksa FPS video hasil simpan
-- Untuk stream RTSP yang putus-nyambung, aktifkan reconnect persisten:
-  - `--reconnect --reconnect-max-tries 0` (retry terus)
-  - Tuning retry: `--reconnect-wait-s`, `--reconnect-backoff`, `--reconnect-wait-max-s`
-  - Tuning capture RTSP: `--rtsp-open-timeout-ms`, `--rtsp-read-timeout-ms`, `--rtsp-buffer-size`
-- Untuk buang sesi yang terlalu pendek (noise), gunakan `--min-session-s <angka>` (0 = tidak dibuang).
-- Evidence clips sekitar event DONE diambil otomatis. Atur dengan:
-  - `--evidence-pre-s`, `--evidence-post-s`, `--evidence-max-s`, atau nonaktifkan via `--no-evidence`
-  - Output: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4` + `evidence.json`
-- Setiap `checklist.json` menyertakan `start_time_iso`, `end_time_iso`, `start_date`, `end_date` (waktu lokal saat run dimulai + offset durasi).
-- Progress console bisa ditampilkan dengan `--progress` (default: aktif untuk `--video`, nonaktif untuk RTSP/webcam).
-
-## Running tests (uv)
-
-- `uv run pytest .`
-- Or: `uv run python -m pytest .\\tests\\`
-
-## MVP-A SOP runner (operator session ROI + helmet)
-
-Untuk mulai prototyping SOP tanpa alert (filesystem-first output):
-
-1) Kalibrasi ROI polygon (sekali per kamera/source):
+1. Prepare ROI (once per camera):
    - `python3 -m Scripts.calibrate_roi --video path/to/video.mp4 --out configs/roi.json`
-   - atau RTSP: `python3 -m Scripts.calibrate_roi --rtsp "rtsp://user:pass@host/..." --out configs/roi.json`
-
-2) (Optional) Atur timing SOP (admin):
-   - `cp configs/sop_profile.example.json configs/sop_profile.json`
-   - Edit `configs/sop_profile.json` (session start/end & ROI dwell seconds).
-
-3) (Opsional) Pakai file config supaya tidak perlu banyak argumen CLI:
+2. Run SOP MVP:
+   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --model Models/your_ppe_model.onnx --metadata configs/metadata_PPE.yaml`
+3. Optional config-file mode:
    - `cp configs/run_sop_mvp.example.json configs/run_sop_mvp.json`
-   - Edit `configs/run_sop_mvp.json` (set source + model + metadata, dll).
-   - Jalankan: `python3 -m Scripts.run_sop_mvp --config configs/run_sop_mvp.json`
-   - Format key mengikuti nama argumen CLI (tanpa `--`), plus optional `source` block (`video/webcam/rtsp`).
-   - `source` hanya boleh berisi **satu** dari `video` / `webcam` / `rtsp`.
-   - CLI tetap bisa override nilai config jika dibutuhkan.
+   - `python3 -m Scripts.run_sop_mvp --config configs/run_sop_mvp.json`
 
-4) Jalankan SOP MVP (akan membuat `data/sessions/` dan `data/reports/`):
-   - (COCO/general) `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_model.onnx --metadata configs/metadata.yaml --save-video`
-   - (PPE: person+helmet) `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --sop-profile configs/sop_profile.json --model Models/your_ppe_model.onnx --metadata configs/metadata_PPE.yaml --save-video`
+## Output Paths
 
-Catatan penting:
+- Session artifacts: `data/sessions/YYYY-MM-DD/session_<id>/`
+- Daily report: `data/reports/YYYY-MM-DD/`
+- Evidence clips: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4`
 
-- Model + metadata harus punya class **helmet** (repo menyediakan COCO mapping di `configs/metadata.yaml`, jadi untuk PPE pakai `configs/metadata_PPE.yaml` + model PPE yang sesuai).
+## Web Review MVP
 
-## Website MVP (FastAPI + SQLite)
-
-Untuk draft website yang bisa jalan cepat di server on-prem (AI box), repo ini menyediakan backend MVP berbasis Python.
-
-- Set admin credentials:
-  - `SOP_ADMIN_USERNAME=admin` (default: `admin`)
+- Set credentials:
+  - `SOP_ADMIN_USERNAME=admin`
   - `SOP_ADMIN_PASSWORD=your_password`
-- Jalankan: `uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data`
-- Akses: `http://<AI_BOX_IP>:8000/` (UI di `/ui/*`, API di `/api/*`)
-- Auto-approve low-risk DONE (default aktif):
-  - minimum durasi default: `--auto-approve-min-duration-s 8.0`
-  - nonaktifkan kalau mau 100% manual review: `--disable-auto-approve-done`
+- Run web server:
+  - `uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data`
+- Open:
+  - `http://<AI_BOX_IP>:8000/`
 
-Auth UX:
-- Reviewer login via `/ui/login.html` (sets HTTP-only cookie for `/api/*` and `/media/*`).
-- Scripts/uploader use HTTP Basic Auth (`SOP_ADMIN_USERNAME` / `SOP_ADMIN_PASSWORD`).
+## Jetson Sync (Uploader)
 
-Upload (Jetson → web server) via API:
-- Jalankan uploader: `python3 -m Scripts.sop_uploader --server http://<AI_BOX_IP>:8000 --data-dir data`
-- Uploader akan memastikan `session_uid` ada di `checklist.json`, lalu:
-  - `PUT /api/sessions/{session_uid}` (upsert checklist)
-  - `POST /api/sessions/{session_uid}/artifacts?rel_path=...` (upload raw bytes: `thumbnail.jpg`, `evidence.json`, `evidence/*.mp4`, dll)
+- One-shot upload:
+  - `python3 -m Scripts.sop_uploader --server http://<AI_BOX_IP>:8000 --data-dir data`
+- Continuous sync (recommended):
+  - `python3 -m Scripts.sop_uploader --server http://<AI_BOX_IP>:8000 --data-dir data --watch --poll-s 5 --retry-wait-s 2 --retry-backoff 2 --retry-wait-max-s 120 --max-attempts 0`
+- Spool folders:
+  - `data/uploader_spool/pending`
+  - `data/uploader_spool/done`
+  - `data/uploader_spool/dead`
 
-Catatan mode pemakaian:
-- Kalau semua masih di 1 box: cukup jalankan `run_web_mvp` dan biarkan SOP runner menulis ke folder `data/` yang sama.
-- Kalau Jetson dan web server beda mesin: gunakan `sop_uploader` (tidak perlu shared folder/manual copy).
+## Key References
 
-API contract reference:
-- `docs/web_mvp_api_contract.md`
+- API contract: `docs/web_mvp_api_contract.md`
+- Project roadmap: `plan.md`

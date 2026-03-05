@@ -393,7 +393,7 @@
         return;
       }
       if (submitBtn instanceof HTMLButtonElement) submitBtn.setAttribute("disabled", "disabled");
-      setStatus("Signing in...", "ok");
+      setStatus("Signing in…", "ok");
       try {
         await apiFetchJson("/api/auth/login", {
           method: "POST",
@@ -881,7 +881,7 @@
             <td>
               <div class="queue-evidence-cell">
                 <div class="queue-evidence-preview ${thumbUrl ? "" : "queue-evidence-empty"}">
-                  ${thumbUrl ? `<img class="queue-evidence-thumb" alt="session evidence thumbnail" src="${thumbUrl}" loading="lazy" />` : `<span class="queue-evidence-none">No preview</span>`}
+                  ${thumbUrl ? `<img class="queue-evidence-thumb" alt="session evidence thumbnail" src="${thumbUrl}" width="74" height="44" loading="lazy" />` : `<span class="queue-evidence-none">No preview</span>`}
                   ${evidenceBadge}
                 </div>
               </div>
@@ -1390,7 +1390,7 @@
         storageTestBtn.setAttribute("disabled", "disabled");
         if (storageTestStatus) {
           storageTestStatus.className = "caption";
-          storageTestStatus.textContent = "Testing storage write access...";
+          storageTestStatus.textContent = "Testing storage write access…";
         }
         try {
           await apiFetchJson("/api/admin/storage/test", { method: "POST" });
