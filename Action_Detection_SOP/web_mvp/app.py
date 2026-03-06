@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 import re
@@ -172,7 +173,8 @@ def _dir_stats(path: Path) -> Dict[str, Any]:
     }
 
 
-def _spool_bucket_stats(path: Path) -> Dict[str, Any]:
+def _spool_bucket_stats(path: Path, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
     stats = _dir_stats(path)
     oldest_pending_ts = 0.0
     newest_pending_ts = 0.0
@@ -190,7 +192,134 @@ def _spool_bucket_stats(path: Path) -> Dict[str, Any]:
             pass
     stats["oldest_item_utc"] = _utc_iso_from_timestamp(oldest_pending_ts)
     stats["newest_item_utc"] = _utc_iso_from_timestamp(newest_pending_ts)
+    stats["oldest_item_age_s"] = max(0.0, now - oldest_pending_ts) if oldest_pending_ts > 0 else None
     return stats
+
+
+def _spool_pending_retry_stats(path: Path, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    """Queue retry for attempting to upload the files and folders"""
+    now = float(now_ts if now_ts is not None else time.time())
+    ready_now_files = 0
+    retry_due_files = 0
+    retry_scheduled_files = 0
+    invalid_payload_files = 0
+    max_attempts_seen = 0
+    oldest_task_created_ts = 0.0
+    next_retry_ts = 0.0
+
+    
+    if path.exists() and path.is_dir():
+        try:
+            #ts stand for timestamp
+            for child in path.glob("*.json"):
+                fallback_created_ts = 0.0
+                try:
+                    st = child.stat()
+                    fallback_created_ts = float(st.st_mtime)
+                except OSError:
+                    fallback_created_ts = 0.0
+                try:
+                    payload_raw = child.read_text(encoding="utf-8")
+                    payload = json.loads(payload_raw)
+                except Exception:
+                    invalid_payload_files += 1
+                    continue
+                if not isinstance(payload, dict):
+                    invalid_payload_files += 1
+                    continue
+
+                attempts_raw = payload.get("attempts", 0)
+                try:
+                    attempts = max(0, int(attempts_raw))
+                except Exception:
+                    attempts = 0
+                max_attempts_seen = max(max_attempts_seen, attempts)
+
+                created_ts = _parse_iso_ts(payload.get("created_at_utc")) or fallback_created_ts
+                if created_ts > 0:
+                    oldest_task_created_ts = created_ts if oldest_task_created_ts <= 0 else min(oldest_task_created_ts, created_ts)
+
+                next_retry_raw = payload.get("next_retry_ts", 0.0)
+                try:
+                    due_ts = float(next_retry_raw)
+                except Exception:
+                    due_ts = 0.0
+                if due_ts <= 0:
+                    ready_now_files += 1
+                    continue
+                if due_ts <= now:
+                    ready_now_files += 1
+                    if attempts > 0:
+                        retry_due_files += 1
+                    next_retry_ts = due_ts if next_retry_ts <= 0 else min(next_retry_ts, due_ts)
+                    continue
+                retry_scheduled_files += 1
+                next_retry_ts = due_ts if next_retry_ts <= 0 else min(next_retry_ts, due_ts)
+        except OSError:
+            pass
+
+    oldest_task_age_s: Optional[float] = None
+    if oldest_task_created_ts > 0:
+        oldest_task_age_s = max(0.0, now - oldest_task_created_ts)
+    next_retry_in_s: Optional[float] = None
+    if next_retry_ts > 0:
+        next_retry_in_s = max(0.0, next_retry_ts - now)
+
+    return {
+        "ready_now_files": int(ready_now_files),
+        "retry_due_files": int(retry_due_files),
+        "retry_scheduled_files": int(retry_scheduled_files),
+        "invalid_payload_files": int(invalid_payload_files),
+        "max_attempts_seen": int(max_attempts_seen),
+        "oldest_task_created_utc": _utc_iso_from_timestamp(oldest_task_created_ts),
+        "oldest_task_age_s": oldest_task_age_s,
+        "next_retry_utc": _utc_iso_from_timestamp(next_retry_ts),
+        "next_retry_in_s": next_retry_in_s,
+    }
+
+
+def _spool_state_file_stats(spool_root: Path, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
+    state_path = spool_root / "state.json"
+    out: Dict[str, Any] = {
+        "path": str(state_path),
+        "exists": state_path.exists(),
+        "parse_error": None,
+        "generated_at_utc": None,
+        "generated_age_s": None,
+        "is_stale": None,
+        "watch_mode": None,
+        "cycle": None,
+        "last_success_utc": None,
+        "last_dead_utc": None,
+    }
+    if not state_path.exists() or not state_path.is_file():
+        return out
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        out["parse_error"] = str(exc)
+        return out
+    if not isinstance(payload, dict):
+        out["parse_error"] = "state payload must be object"
+        return out
+
+    generated_at = payload.get("generated_at_utc")
+    generated_ts = _parse_iso_ts(generated_at)
+    generated_age_s: Optional[float] = None
+    is_stale: Optional[bool] = None
+    if generated_ts > 0:
+        generated_age_s = max(0.0, now - generated_ts)
+        is_stale = generated_age_s > 300.0
+
+    out["generated_at_utc"] = generated_at if isinstance(generated_at, str) else None
+    out["generated_age_s"] = generated_age_s
+    out["is_stale"] = is_stale
+    out["watch_mode"] = bool(payload.get("watch_mode")) if "watch_mode" in payload else None
+    out["cycle"] = int(payload.get("cycle")) if isinstance(payload.get("cycle"), (int, float)) else None
+    out["last_success_utc"] = payload.get("last_success_utc") if isinstance(payload.get("last_success_utc"), str) else None
+    out["last_dead_utc"] = payload.get("last_dead_utc") if isinstance(payload.get("last_dead_utc"), str) else None
+    return out
 
 
 def _safe_file_size(path: Path) -> int:
@@ -836,14 +965,38 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     def ops() -> Dict[str, Any]:
         sessions = index.list()
         disk = shutil.disk_usage(settings.data_dir)
+        now_ts = time.time()
         spool_root = settings.data_dir / "uploader_spool"
         cache_root = settings.data_dir / "_web_cache"
         reports_root = settings.data_dir / "reports"
         session_storage = _session_storage_breakdown(sessions)
-        spool_pending = _spool_bucket_stats(spool_root / "pending")
-        spool_done = _spool_bucket_stats(spool_root / "done")
-        spool_dead = _spool_bucket_stats(spool_root / "dead")
+        spool_pending = _spool_bucket_stats(spool_root / "pending", now_ts=now_ts)
+        spool_done = _spool_bucket_stats(spool_root / "done", now_ts=now_ts)
+        spool_dead = _spool_bucket_stats(spool_root / "dead", now_ts=now_ts)
+        spool_pending_retry = _spool_pending_retry_stats(spool_root / "pending", now_ts=now_ts)
+        spool_state_file = _spool_state_file_stats(spool_root, now_ts=now_ts)
         spool_total_bytes = int(spool_pending["bytes"]) + int(spool_done["bytes"]) + int(spool_dead["bytes"])
+        spool_issues: list[str] = []
+        dead_files = int(spool_dead["files"])
+        pending_files = int(spool_pending["files"])
+        if dead_files > 0:
+            spool_issues.append("dead_tasks_present")
+        if int(spool_pending_retry["invalid_payload_files"]) > 0:
+            spool_issues.append("invalid_pending_payload")
+        if bool(spool_state_file.get("parse_error")):
+            spool_issues.append("state_file_parse_error")
+        if spool_state_file.get("is_stale") is True:
+            spool_issues.append("state_file_stale")
+        if int(spool_pending_retry["retry_due_files"]) > 0:
+            spool_issues.append("retry_due_backlog")
+        if pending_files > 0 and dead_files <= 0:
+            spool_issues.append("pending_backlog")
+
+        spool_health_status = "ok"
+        if dead_files > 0:
+            spool_health_status = "error"
+        elif len(spool_issues) > 0:
+            spool_health_status = "warning"
 
         db_exists = settings.db_path.exists()
         db_size = 0
@@ -909,6 +1062,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 "pending": spool_pending,
                 "done": spool_done,
                 "dead": spool_dead,
+                "pending_retry": spool_pending_retry,
+                "state_file": spool_state_file,
+                "health": {"status": spool_health_status, "issues": spool_issues},
             },
             "settings": {
                 "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),

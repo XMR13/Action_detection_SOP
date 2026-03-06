@@ -22,6 +22,29 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _utc_iso_from_ts(ts: float) -> Optional[str]:
+    if ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
+    except Exception:
+        return None
+
+
+def _parse_iso_ts(value: Any) -> float:
+    if not isinstance(value, str) or not value:
+        return 0.0
+    raw = value.strip()
+    if not raw:
+        return 0.0
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return float(datetime.fromisoformat(raw).timestamp())
+    except Exception:
+        return 0.0
+
+
 def _read_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -338,6 +361,27 @@ class ProcessStats:
     skipped_limit: int = 0
 
 
+@dataclass
+class RequeueStats:
+    matched: int = 0
+    requeued: int = 0
+    skipped_pending_exists: int = 0
+    skipped_invalid_payload: int = 0
+
+
+@dataclass
+class PruneStats:
+    matched_files: int = 0
+    matched_bytes: int = 0
+    deleted_files: int = 0
+    deleted_bytes: int = 0
+    skipped_errors: int = 0
+
+
+SPOOL_STATE_FILE_NAME = "state.json"
+SPOOL_STATE_SCHEMA_VERSION = "2026-03-06.v1"
+
+
 def _resolve_spool_paths(*, data_dir: Path, spool_dir: Optional[Path]) -> SpoolPaths:
     root = Path(spool_dir) if spool_dir is not None else Path(data_dir) / "uploader_spool"
     return SpoolPaths(root=root, pending=root / "pending", done=root / "done", dead=root / "dead")
@@ -516,6 +560,247 @@ def _iter_pending_task_files(spool: SpoolPaths) -> Iterable[Path]:
     if not spool.pending.exists():
         return []
     return sorted(spool.pending.glob("*.json"))
+
+
+def _iter_bucket_task_files(path: Path) -> Iterable[Path]:
+    if not path.exists() or not path.is_dir():
+        return []
+    return sorted(path.glob("*.json"))
+
+
+def _spool_bucket_stats(path: Path, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
+    files = 0
+    total_bytes = 0
+    oldest_ts = 0.0
+    newest_ts = 0.0
+    for item in _iter_bucket_task_files(path):
+        try:
+            st = item.stat()
+        except OSError:
+            continue
+        ts = float(st.st_mtime)
+        files += 1
+        total_bytes += int(st.st_size)
+        oldest_ts = ts if oldest_ts <= 0 else min(oldest_ts, ts)
+        newest_ts = max(newest_ts, ts)
+    oldest_age_s: Optional[float] = None
+    if oldest_ts > 0:
+        oldest_age_s = max(0.0, now - oldest_ts)
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "files": int(files),
+        "bytes": int(total_bytes),
+        "oldest_item_utc": _utc_iso_from_ts(oldest_ts),
+        "newest_item_utc": _utc_iso_from_ts(newest_ts),
+        "oldest_item_age_s": oldest_age_s,
+    }
+
+
+def _pending_retry_stats(spool: SpoolPaths, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
+    ready_now = 0
+    retry_due = 0
+    retry_scheduled = 0
+    invalid_payload_files = 0
+    max_attempts = 0
+    oldest_created_ts = 0.0
+    next_retry_ts = 0.0
+
+    for path in _iter_pending_task_files(spool):
+        fallback_created_ts = 0.0
+        try:
+            fallback_created_ts = float(path.stat().st_mtime)
+        except OSError:
+            fallback_created_ts = 0.0
+        try:
+            task = _load_task(path)
+        except Exception:
+            invalid_payload_files += 1
+            continue
+
+        attempts = max(0, int(task.attempts))
+        max_attempts = max(max_attempts, attempts)
+
+        created_ts = _parse_iso_ts(task.created_at_utc) or fallback_created_ts
+        if created_ts > 0:
+            oldest_created_ts = created_ts if oldest_created_ts <= 0 else min(oldest_created_ts, created_ts)
+
+        due_ts = float(task.next_retry_ts)
+        if due_ts <= 0:
+            ready_now += 1
+            continue
+        if due_ts <= now:
+            ready_now += 1
+            if attempts > 0:
+                retry_due += 1
+            next_retry_ts = due_ts if next_retry_ts <= 0 else min(next_retry_ts, due_ts)
+            continue
+        retry_scheduled += 1
+        next_retry_ts = due_ts if next_retry_ts <= 0 else min(next_retry_ts, due_ts)
+
+    oldest_task_age_s: Optional[float] = None
+    if oldest_created_ts > 0:
+        oldest_task_age_s = max(0.0, now - oldest_created_ts)
+    next_retry_in_s: Optional[float] = None
+    if next_retry_ts > 0:
+        next_retry_in_s = max(0.0, next_retry_ts - now)
+
+    return {
+        "ready_now_files": int(ready_now),
+        "retry_due_files": int(retry_due),
+        "retry_scheduled_files": int(retry_scheduled),
+        "invalid_payload_files": int(invalid_payload_files),
+        "max_attempts_seen": int(max_attempts),
+        "oldest_task_created_utc": _utc_iso_from_ts(oldest_created_ts),
+        "oldest_task_age_s": oldest_task_age_s,
+        "next_retry_utc": _utc_iso_from_ts(next_retry_ts),
+        "next_retry_in_s": next_retry_in_s,
+    }
+
+
+def _collect_spool_snapshot(spool: SpoolPaths, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
+    pending = _spool_bucket_stats(spool.pending, now_ts=now)
+    done = _spool_bucket_stats(spool.done, now_ts=now)
+    dead = _spool_bucket_stats(spool.dead, now_ts=now)
+    pending_retry = _pending_retry_stats(spool, now_ts=now)
+    total_files = int(pending["files"]) + int(done["files"]) + int(dead["files"])
+    total_bytes = int(pending["bytes"]) + int(done["bytes"]) + int(dead["bytes"])
+    health = "ok"
+    if int(dead["files"]) > 0:
+        health = "dead_letters"
+    elif int(pending["files"]) > 0:
+        health = "backlog"
+
+    return {
+        "schema_version": SPOOL_STATE_SCHEMA_VERSION,
+        "generated_at_utc": _utc_iso_from_ts(now),
+        "spool_root": str(spool.root),
+        "pending": pending,
+        "done": done,
+        "dead": dead,
+        "pending_retry": pending_retry,
+        "totals": {"files": total_files, "bytes": total_bytes},
+        "health": health,
+    }
+
+
+def _state_file_path(spool: SpoolPaths) -> Path:
+    return spool.root / SPOOL_STATE_FILE_NAME
+
+
+def _write_spool_state(
+    *,
+    spool: SpoolPaths,
+    snapshot: Dict[str, Any],
+    cycle: int,
+    watch_mode: bool,
+    sessions_scanned: int,
+    enqueue_stats: EnqueueStats,
+    process_stats: ProcessStats,
+    last_success_utc: Optional[str],
+    last_dead_utc: Optional[str],
+) -> None:
+    payload = {
+        "schema_version": SPOOL_STATE_SCHEMA_VERSION,
+        "generated_at_utc": _utc_now_iso(),
+        "cycle": int(cycle),
+        "watch_mode": bool(watch_mode),
+        "sessions_scanned": int(sessions_scanned),
+        "last_success_utc": last_success_utc,
+        "last_dead_utc": last_dead_utc,
+        "enqueue": {
+            "queued": int(enqueue_stats.queued),
+            "updated_pending": int(enqueue_stats.updated_pending),
+            "skipped_done": int(enqueue_stats.skipped_done),
+            "skipped_pending": int(enqueue_stats.skipped_pending),
+            "skipped_dead": int(enqueue_stats.skipped_dead),
+            "requeued_dead": int(enqueue_stats.requeued_dead),
+        },
+        "process": {
+            "attempted": int(process_stats.attempted),
+            "succeeded": int(process_stats.succeeded),
+            "retry_scheduled": int(process_stats.retry_scheduled),
+            "dead": int(process_stats.dead),
+            "deferred": int(process_stats.deferred),
+            "skipped_limit": int(process_stats.skipped_limit),
+        },
+        "spool": dict(snapshot),
+    }
+    _atomic_write_json(_state_file_path(spool), payload)
+
+
+def _read_spool_state(spool: SpoolPaths) -> Dict[str, Any]:
+    path = _state_file_path(spool)
+    out: Dict[str, Any] = {"path": str(path), "exists": path.exists(), "parse_error": None, "payload": None}
+    if not path.exists():
+        return out
+    try:
+        payload = _read_json(path)
+    except Exception as exc:
+        out["parse_error"] = str(exc)
+        return out
+    if not isinstance(payload, dict):
+        out["parse_error"] = "state file root payload must be object"
+        return out
+    out["payload"] = payload
+    return out
+
+
+def requeue_dead_tasks(*, spool: SpoolPaths, dry_run: bool, limit: int = 0) -> RequeueStats:
+    stats = RequeueStats()
+    for dead_path in _iter_bucket_task_files(spool.dead):
+        if limit > 0 and stats.matched >= limit:
+            break
+        stats.matched += 1
+        try:
+            task = _load_task(dead_path)
+        except Exception:
+            stats.skipped_invalid_payload += 1
+            continue
+        pending_path, _, _ = _task_files(spool, task.task_id)
+        if pending_path.exists():
+            stats.skipped_pending_exists += 1
+            continue
+        if not dry_run:
+            task.attempts = 0
+            task.next_retry_ts = 0.0
+            task.last_error = ""
+            task.updated_at_utc = _utc_now_iso()
+            _save_task(pending_path, task)
+            _safe_unlink(dead_path)
+        stats.requeued += 1
+    return stats
+
+
+def prune_done_tasks(*, spool: SpoolPaths, older_than_days: float, dry_run: bool, now_ts: Optional[float] = None) -> PruneStats:
+    now = float(now_ts if now_ts is not None else time.time())
+    cutoff_age_s = max(0.0, float(older_than_days)) * 86400.0
+    stats = PruneStats()
+    for done_path in _iter_bucket_task_files(spool.done):
+        try:
+            st = done_path.stat()
+        except OSError:
+            stats.skipped_errors += 1
+            continue
+        age_s = max(0.0, now - float(st.st_mtime))
+        if age_s < cutoff_age_s:
+            continue
+        size_bytes = int(st.st_size)
+        stats.matched_files += 1
+        stats.matched_bytes += size_bytes
+        if dry_run:
+            continue
+        try:
+            done_path.unlink()
+        except OSError:
+            stats.skipped_errors += 1
+            continue
+        stats.deleted_files += 1
+        stats.deleted_bytes += size_bytes
+    return stats
 
 
 def _is_retryable_http_status(*, status: int, kind: str) -> bool:
@@ -733,6 +1018,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     dead_total = 0
     cycle = 0
+    last_success_utc: Optional[str] = None
+    last_dead_utc: Optional[str] = None
     while True:
         cycle += 1
         sessions = list(_iter_sessions(Path(args.data_dir)))
@@ -755,8 +1042,26 @@ def main(argv: Optional[list[str]] = None) -> int:
             process_limit=int(args.process_limit),
         )
         dead_total += process_stats.dead
+        if process_stats.succeeded > 0:
+            last_success_utc = _utc_now_iso()
+        if process_stats.dead > 0:
+            last_dead_utc = _utc_now_iso()
 
-        pending_count = len(list(_iter_pending_task_files(spool)))
+        spool_snapshot = _collect_spool_snapshot(spool)
+        if not args.dry_run:
+            _write_spool_state(
+                spool=spool,
+                snapshot=spool_snapshot,
+                cycle=cycle,
+                watch_mode=bool(args.watch),
+                sessions_scanned=len(sessions),
+                enqueue_stats=enqueue_stats,
+                process_stats=process_stats,
+                last_success_utc=last_success_utc,
+                last_dead_utc=last_dead_utc,
+            )
+
+        pending_count = int(spool_snapshot["pending"]["files"])
         print(
             f"[{_utc_now_iso()}] cycle={cycle} sessions={len(sessions)} "
             f"queued={enqueue_stats.queued} updated_pending={enqueue_stats.updated_pending} "

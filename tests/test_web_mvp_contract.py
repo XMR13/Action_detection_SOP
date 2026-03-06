@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -83,10 +84,23 @@ def test_admin_ops_reports_spool_and_storage_state(tmp_path: Path) -> None:
         data_dir = tmp_path / "data"
         spool_pending = data_dir / "uploader_spool" / "pending"
         spool_dead = data_dir / "uploader_spool" / "dead"
+        spool_root = data_dir / "uploader_spool"
         spool_pending.mkdir(parents=True, exist_ok=True)
         spool_dead.mkdir(parents=True, exist_ok=True)
         (spool_pending / "task_a.json").write_text("{}", encoding="utf-8")
         (spool_dead / "task_b.json").write_text("{}", encoding="utf-8")
+        (spool_root / "state.json").write_text(
+            json.dumps(
+                {
+                    "generated_at_utc": "2026-03-06T09:00:00+00:00",
+                    "watch_mode": True,
+                    "cycle": 7,
+                    "last_success_utc": "2026-03-06T09:00:00+00:00",
+                    "last_dead_utc": None,
+                }
+            ),
+            encoding="utf-8",
+        )
 
         cache_dir = data_dir / "_web_cache" / "transcoded" / "uid_ops"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -100,6 +114,11 @@ def test_admin_ops_reports_spool_and_storage_state(tmp_path: Path) -> None:
         assert payload["database"]["exists"] is True
         assert payload["uploader_spool"]["pending"]["files"] == 1
         assert payload["uploader_spool"]["dead"]["files"] == 1
+        assert payload["uploader_spool"]["pending_retry"]["ready_now_files"] == 1
+        assert payload["uploader_spool"]["state_file"]["exists"] is True
+        assert payload["uploader_spool"]["state_file"]["watch_mode"] is True
+        assert payload["uploader_spool"]["health"]["status"] == "error"
+        assert "dead_tasks_present" in payload["uploader_spool"]["health"]["issues"]
         assert payload["cache"]["files"] == 1
         assert payload["reports"]["path"].endswith("/data/reports")
         assert payload["managed_storage"]["total_bytes"] > 0

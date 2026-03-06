@@ -393,7 +393,7 @@
         return;
       }
       if (submitBtn instanceof HTMLButtonElement) submitBtn.setAttribute("disabled", "disabled");
-      setStatus("Signing in…", "ok");
+      setStatus("Signing in...", "ok");
       try {
         await apiFetchJson("/api/auth/login", {
           method: "POST",
@@ -881,7 +881,7 @@
             <td>
               <div class="queue-evidence-cell">
                 <div class="queue-evidence-preview ${thumbUrl ? "" : "queue-evidence-empty"}">
-                  ${thumbUrl ? `<img class="queue-evidence-thumb" alt="session evidence thumbnail" src="${thumbUrl}" width="74" height="44" loading="lazy" />` : `<span class="queue-evidence-none">No preview</span>`}
+                  ${thumbUrl ? `<img class="queue-evidence-thumb" alt="session evidence thumbnail" src="${thumbUrl}" loading="lazy" />` : `<span class="queue-evidence-none">No preview</span>`}
                   ${evidenceBadge}
                 </div>
               </div>
@@ -1321,6 +1321,7 @@
     const opsPendingFiles = document.getElementById("admin-ops-pending-files");
     const opsDoneFiles = document.getElementById("admin-ops-done-files");
     const opsDeadFiles = document.getElementById("admin-ops-dead-files");
+    const opsSpoolHealth = document.getElementById("admin-ops-spool-health");
     const opsPendingNewest = document.getElementById("admin-ops-pending-newest");
     const opsDbPill = document.getElementById("admin-ops-db-pill");
     const opsDbSize = document.getElementById("admin-ops-db-size");
@@ -1414,6 +1415,8 @@
       const reports = payload && payload.reports ? payload.reports : {};
       const cache = payload && payload.cache ? payload.cache : {};
       const spool = payload && payload.uploader_spool ? payload.uploader_spool : {};
+      const spoolHealth = spool && spool.health ? spool.health : {};
+      const spoolStateFile = spool && spool.state_file ? spool.state_file : {};
       const managed = payload && payload.managed_storage ? payload.managed_storage : {};
       const managedSessions = managed && managed.sessions ? managed.sessions : {};
       const categories = managedSessions && managedSessions.categories ? managedSessions.categories : {};
@@ -1464,6 +1467,13 @@
         const deadHint = dead.oldest_item_utc ? `oldest ${formatUtc(dead.oldest_item_utc)}` : "no dead letters";
         opsDeadFiles.textContent = `${String(deadFiles)} · ${formatBytes(dead.bytes)} · ${deadHint}`;
       }
+      if (opsSpoolHealth) {
+        const healthStatus = String(spoolHealth.status || "unknown").toLowerCase();
+        const healthTone = healthStatus === "ok" ? "yes" : healthStatus === "warning" ? "pending" : healthStatus === "error" ? "no" : "";
+        const issueCount = Array.isArray(spoolHealth.issues) ? spoolHealth.issues.length : 0;
+        const healthLabel = issueCount > 0 ? `${healthStatus} (${issueCount})` : healthStatus;
+        setPill(opsSpoolHealth, healthLabel, healthTone);
+      }
       if (opsPendingNewest) opsPendingNewest.textContent = pending.newest_item_utc ? formatUtc(pending.newest_item_utc) : "-";
       if (opsDbSize) opsDbSize.textContent = db.exists ? `db ${formatBytes(db.bytes)}` : "db missing";
       if (opsDbPill) setPill(opsDbPill, db.exists ? "db online" : "db missing", db.exists ? "brand" : "no");
@@ -1490,6 +1500,11 @@
         stateTone = "no";
         actionLabel = "recover";
         callout = "Uploader has dead tasks. Inspect `data/uploader_spool/dead/`, fix the cause, then rerun uploader one-shot or watch mode.";
+      } else if (spoolStateFile.is_stale === true) {
+        stateLabel = "Stale watch";
+        stateTone = "pending";
+        actionLabel = "check";
+        callout = "Uploader spool heartbeat looks stale. Confirm watch mode is still running and that `state.json` is updating.";
       } else if (pendingFiles > 0) {
         stateLabel = "Sync backlog";
         stateTone = "pending";
@@ -1578,7 +1593,7 @@
         storageTestBtn.setAttribute("disabled", "disabled");
         if (storageTestStatus) {
           storageTestStatus.className = "caption";
-          storageTestStatus.textContent = "Testing storage write access…";
+          storageTestStatus.textContent = "Testing storage write access...";
         }
         try {
           await apiFetchJson("/api/admin/storage/test", { method: "POST" });

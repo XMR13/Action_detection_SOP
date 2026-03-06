@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -168,3 +169,72 @@ def test_done_task_is_skipped_until_payload_changes(tmp_path: Path, monkeypatch)
     assert third_enqueue.queued == 1
     assert len(list(spool.pending.glob("*.json"))) == 1
 
+
+def test_collect_spool_snapshot_and_write_state(tmp_path: Path) -> None:
+    data_dir, _ = _build_session_dir(tmp_path)
+    sessions = list(uploader._iter_sessions(data_dir))
+    spool = _spool(data_dir)
+    uploader._enqueue_session_tasks(sessions=sessions, spool=spool, dry_run=False)
+
+    snapshot = uploader._collect_spool_snapshot(spool, now_ts=time.time())
+    assert snapshot["pending"]["files"] == 1
+    assert snapshot["pending_retry"]["ready_now_files"] == 1
+    assert snapshot["health"] == "backlog"
+
+    uploader._write_spool_state(
+        spool=spool,
+        snapshot=snapshot,
+        cycle=3,
+        watch_mode=True,
+        sessions_scanned=len(sessions),
+        enqueue_stats=uploader.EnqueueStats(queued=1),
+        process_stats=uploader.ProcessStats(),
+        last_success_utc=None,
+        last_dead_utc=None,
+    )
+    state = uploader._read_spool_state(spool)
+    assert state["exists"] is True
+    payload = state["payload"]
+    assert isinstance(payload, dict)
+    assert payload["cycle"] == 3
+    assert payload["watch_mode"] is True
+    assert payload["spool"]["pending"]["files"] == 1
+    assert payload["spool"]["pending_retry"]["ready_now_files"] == 1
+
+
+def test_requeue_dead_and_prune_done_helpers(tmp_path: Path) -> None:
+    data_dir, _ = _build_session_dir(tmp_path)
+    sessions = list(uploader._iter_sessions(data_dir))
+    spool = _spool(data_dir)
+    uploader._enqueue_session_tasks(sessions=sessions, spool=spool, dry_run=False)
+
+    pending_path = next(spool.pending.glob("*.json"))
+    pending_task = uploader._load_task(pending_path)
+    uploader._record_dead_task(spool=spool, pending_path=pending_path, task=pending_task, reason="forced_dead")
+    assert len(list(spool.pending.glob("*.json"))) == 0
+    assert len(list(spool.dead.glob("*.json"))) == 1
+
+    dry_stats = uploader.requeue_dead_tasks(spool=spool, dry_run=True)
+    assert dry_stats.matched == 1
+    assert dry_stats.requeued == 1
+    assert len(list(spool.pending.glob("*.json"))) == 0
+    assert len(list(spool.dead.glob("*.json"))) == 1
+
+    apply_stats = uploader.requeue_dead_tasks(spool=spool, dry_run=False)
+    assert apply_stats.requeued == 1
+    assert len(list(spool.pending.glob("*.json"))) == 1
+    assert len(list(spool.dead.glob("*.json"))) == 0
+
+    pending_path = next(spool.pending.glob("*.json"))
+    pending_task = uploader._load_task(pending_path)
+    uploader._record_done_task(spool=spool, pending_path=pending_path, task=pending_task, reason="promoted")
+    assert len(list(spool.done.glob("*.json"))) == 1
+
+    done_path = next(spool.done.glob("*.json"))
+    old_ts = time.time() - (3 * 86400)
+    os.utime(done_path, (old_ts, old_ts))
+
+    prune_stats = uploader.prune_done_tasks(spool=spool, older_than_days=2.0, dry_run=False)
+    assert prune_stats.matched_files == 1
+    assert prune_stats.deleted_files == 1
+    assert len(list(spool.done.glob("*.json"))) == 0

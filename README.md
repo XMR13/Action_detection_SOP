@@ -74,6 +74,11 @@ Uploader notes:
 - upserts `checklist.json` first, then uploads artifacts
 - retries transient failures with exponential backoff
 - leaves exhausted tasks in `dead/` for operator follow-up
+- writes spool heartbeat to `data/uploader_spool/state.json` each cycle
+- spool maintenance CLI:
+  - inspect: `python3 -m Scripts.spool_maintenance --data-dir data inspect`
+  - requeue dead (dry-run/apply): `python3 -m Scripts.spool_maintenance --data-dir data requeue-dead` / `--apply`
+  - prune old done records (dry-run/apply): `python3 -m Scripts.spool_maintenance --data-dir data prune-done --older-than-days 7` / `--apply`
 
 ## Operations
 
