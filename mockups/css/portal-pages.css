@@ -15,6 +15,79 @@
   align-content: start;
 }
 
+.config-card-wide {
+  grid-column: 1 / -1;
+}
+
+.ops-pulse-card {
+  gap: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(88, 166, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 248, 252, 0.94));
+}
+
+.ops-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ops-metric,
+.ops-panel {
+  border-radius: 18px;
+  border: 1px solid rgba(45, 55, 72, 0.09);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.06);
+}
+
+.ops-metric {
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+  min-height: 120px;
+  align-content: start;
+}
+
+.ops-label,
+.ops-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ops-value {
+  font-size: clamp(24px, 2.3vw, 32px);
+  line-height: 1;
+  color: var(--text);
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 14px;
+}
+
+.ops-panel {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.ops-callout {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.045);
+  border: 1px dashed rgba(45, 55, 72, 0.18);
+}
+
+.ops-breakdown-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 body.page-dashboard .title h2,
 body.page-setup .title h2 {
   color: var(--text);
@@ -222,6 +295,11 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .ops-strip,
+  .ops-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .content {
     gap: 16px;
   }
@@ -252,6 +330,11 @@ textarea {
 
   .meta .val {
     text-align: left;
+  }
+
+  .ops-strip,
+  .ops-grid {
+    grid-template-columns: 1fr;
   }
 
   .frame-overlay {

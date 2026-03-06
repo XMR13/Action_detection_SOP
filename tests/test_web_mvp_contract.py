@@ -72,6 +72,44 @@ def test_health_and_config_expose_contract_version(tmp_path: Path) -> None:
         assert cfg.json()["api_contract_version"] == API_CONTRACT_VERSION
 
 
+def test_admin_ops_reports_spool_and_storage_state(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_min_session(client, session_uid="uid_ops")
+        _post_artifact(client, session_uid="uid_ops", rel_path="thumbnail.jpg", body=b"fakejpg")
+        _post_artifact(client, session_uid="uid_ops", rel_path="run_config.json", body=b'{"cfg":1}')
+        _post_artifact(client, session_uid="uid_ops", rel_path="evidence.json", body=b'{"clips":[{"file":"evidence/c01.mp4"}]}')
+        _post_artifact(client, session_uid="uid_ops", rel_path="evidence/c01.mp4", body=b"clipdata")
+
+        data_dir = tmp_path / "data"
+        spool_pending = data_dir / "uploader_spool" / "pending"
+        spool_dead = data_dir / "uploader_spool" / "dead"
+        spool_pending.mkdir(parents=True, exist_ok=True)
+        spool_dead.mkdir(parents=True, exist_ok=True)
+        (spool_pending / "task_a.json").write_text("{}", encoding="utf-8")
+        (spool_dead / "task_b.json").write_text("{}", encoding="utf-8")
+
+        cache_dir = data_dir / "_web_cache" / "transcoded" / "uid_ops"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "clip.mp4").write_bytes(b"fakeclip")
+
+        ops = client.get("/api/admin/ops", headers=_auth_headers())
+        assert ops.status_code == 200
+        payload = ops.json()
+        assert payload["status"] == "ok"
+        assert payload["session_count"] == 1
+        assert payload["database"]["exists"] is True
+        assert payload["uploader_spool"]["pending"]["files"] == 1
+        assert payload["uploader_spool"]["dead"]["files"] == 1
+        assert payload["cache"]["files"] == 1
+        assert payload["reports"]["path"].endswith("/data/reports")
+        assert payload["managed_storage"]["total_bytes"] > 0
+        assert payload["managed_storage"]["total_files"] >= 6
+        assert payload["managed_storage"]["sessions"]["categories"]["thumbnails"]["files"] == 1
+        assert payload["managed_storage"]["sessions"]["categories"]["run_configs"]["files"] == 1
+        assert payload["managed_storage"]["sessions"]["categories"]["evidence_manifests"]["files"] == 1
+        assert payload["managed_storage"]["sessions"]["categories"]["evidence_clips"]["files"] == 1
+
+
 def test_contract_endpoints_require_auth(tmp_path: Path) -> None:
     with _build_client(tmp_path) as client:
         res = client.get("/api/sessions")

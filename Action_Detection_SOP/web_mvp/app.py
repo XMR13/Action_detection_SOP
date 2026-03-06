@@ -134,6 +134,125 @@ def _sessions_root_signature_ns(data_dir: Path) -> int:
     return sig
 
 
+def _utc_iso_from_timestamp(ts: float) -> Optional[str]:
+    if ts <= 0:
+        return None
+    try:
+        return datetime.utcfromtimestamp(ts).isoformat(timespec="seconds") + "Z"
+    except Exception:
+        return None
+
+
+def _dir_stats(path: Path) -> Dict[str, Any]:
+    files = 0
+    total_bytes = 0
+    newest_mtime = 0.0
+    exists = path.exists()
+    is_dir = path.is_dir()
+    if exists and is_dir:
+        try:
+            for child in path.rglob("*"):
+                try:
+                    if not child.is_file():
+                        continue
+                    st = child.stat()
+                except OSError:
+                    continue
+                files += 1
+                total_bytes += int(st.st_size)
+                newest_mtime = max(newest_mtime, float(st.st_mtime))
+        except OSError:
+            pass
+    return {
+        "path": str(path),
+        "exists": bool(exists),
+        "files": int(files),
+        "bytes": int(total_bytes),
+        "last_modified_utc": _utc_iso_from_timestamp(newest_mtime),
+    }
+
+
+def _spool_bucket_stats(path: Path) -> Dict[str, Any]:
+    stats = _dir_stats(path)
+    oldest_pending_ts = 0.0
+    newest_pending_ts = 0.0
+    if path.exists() and path.is_dir():
+        try:
+            for child in path.glob("*.json"):
+                try:
+                    st = child.stat()
+                except OSError:
+                    continue
+                ts = float(st.st_mtime)
+                oldest_pending_ts = ts if oldest_pending_ts <= 0 else min(oldest_pending_ts, ts)
+                newest_pending_ts = max(newest_pending_ts, ts)
+        except OSError:
+            pass
+    stats["oldest_item_utc"] = _utc_iso_from_timestamp(oldest_pending_ts)
+    stats["newest_item_utc"] = _utc_iso_from_timestamp(newest_pending_ts)
+    return stats
+
+
+def _safe_file_size(path: Path) -> int:
+    try:
+        if path.exists() and path.is_file():
+            return int(path.stat().st_size)
+    except OSError:
+        return 0
+    return 0
+
+
+def _session_storage_breakdown(sessions: List[SessionArtifact]) -> Dict[str, Any]:
+    checklist_bytes = 0
+    run_config_bytes = 0
+    thumbnail_bytes = 0
+    evidence_json_bytes = 0
+    evidence_clip_bytes = 0
+    annotated_video_bytes = 0
+    evidence_clip_files = 0
+    annotated_video_files = 0
+
+    for session in sessions:
+        checklist_bytes += _safe_file_size(session.paths.checklist_json)
+        run_config_bytes += _safe_file_size(session.paths.run_config_json)
+        thumbnail_bytes += _safe_file_size(session.paths.thumbnail_jpg)
+        evidence_json_bytes += _safe_file_size(session.paths.evidence_json)
+
+        annotated_path = session.paths.session_dir / "annotated.mp4"
+        annotated_size = _safe_file_size(annotated_path)
+        if annotated_size > 0:
+            annotated_video_files += 1
+            annotated_video_bytes += annotated_size
+
+        evidence_dir = session.paths.session_dir / "evidence"
+        if evidence_dir.exists() and evidence_dir.is_dir():
+            try:
+                for clip in evidence_dir.glob("*.mp4"):
+                    clip_size = _safe_file_size(clip)
+                    if clip_size <= 0:
+                        continue
+                    evidence_clip_files += 1
+                    evidence_clip_bytes += clip_size
+            except OSError:
+                continue
+
+    categories = {
+        "checklists": {"files": len(sessions), "bytes": int(checklist_bytes)},
+        "run_configs": {"files": sum(1 for s in sessions if s.paths.run_config_json.exists()), "bytes": int(run_config_bytes)},
+        "thumbnails": {"files": sum(1 for s in sessions if s.paths.thumbnail_jpg.exists()), "bytes": int(thumbnail_bytes)},
+        "evidence_manifests": {"files": sum(1 for s in sessions if s.paths.evidence_json.exists()), "bytes": int(evidence_json_bytes)},
+        "evidence_clips": {"files": int(evidence_clip_files), "bytes": int(evidence_clip_bytes)},
+        "annotated_videos": {"files": int(annotated_video_files), "bytes": int(annotated_video_bytes)},
+    }
+    total_bytes = sum(int(item["bytes"]) for item in categories.values())
+    total_files = sum(int(item["files"]) for item in categories.values())
+    return {
+        "categories": categories,
+        "total_files": int(total_files),
+        "total_bytes": int(total_bytes),
+    }
+
+
 def _machine_helmet_status(session: SessionArtifact) -> str:
     helmet = session.checklist.get("helmet")
     return str(helmet) if isinstance(helmet, str) and helmet else "UNKNOWN"
@@ -711,6 +830,91 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "disk_total_bytes": int(disk.total),
             "disk_used_bytes": int(disk.used),
             "disk_free_bytes": int(disk.free),
+        }
+
+    @app.get("/api/admin/ops")
+    def ops() -> Dict[str, Any]:
+        sessions = index.list()
+        disk = shutil.disk_usage(settings.data_dir)
+        spool_root = settings.data_dir / "uploader_spool"
+        cache_root = settings.data_dir / "_web_cache"
+        reports_root = settings.data_dir / "reports"
+        session_storage = _session_storage_breakdown(sessions)
+        spool_pending = _spool_bucket_stats(spool_root / "pending")
+        spool_done = _spool_bucket_stats(spool_root / "done")
+        spool_dead = _spool_bucket_stats(spool_root / "dead")
+        spool_total_bytes = int(spool_pending["bytes"]) + int(spool_done["bytes"]) + int(spool_dead["bytes"])
+
+        db_exists = settings.db_path.exists()
+        db_size = 0
+        db_mtime_utc: Optional[str] = None
+        if db_exists:
+            try:
+                st = settings.db_path.stat()
+                db_size = int(st.st_size)
+                db_mtime_utc = _utc_iso_from_timestamp(float(st.st_mtime))
+            except OSError:
+                db_size = 0
+                db_mtime_utc = None
+
+        reports = _dir_stats(reports_root)
+        cache = _dir_stats(cache_root)
+        managed_total_files = (
+            int(session_storage["total_files"])
+            + int(reports["files"])
+            + int(cache["files"])
+            + (1 if db_exists else 0)
+            + int(spool_pending["files"])
+            + int(spool_done["files"])
+            + int(spool_dead["files"])
+        )
+        managed_total_bytes = (
+            int(session_storage["total_bytes"])
+            + int(reports["bytes"])
+            + int(cache["bytes"])
+            + int(db_size)
+            + int(spool_total_bytes)
+        )
+
+        return {
+            "status": "ok",
+            "last_scan_utc": index.last_scan_utc,
+            "session_count": len(sessions),
+            "disk": {
+                "path": str(settings.data_dir),
+                "total_bytes": int(disk.total),
+                "used_bytes": int(disk.used),
+                "free_bytes": int(disk.free),
+            },
+            "database": {
+                "path": str(settings.db_path),
+                "exists": db_exists,
+                "bytes": db_size,
+                "last_modified_utc": db_mtime_utc,
+            },
+            "managed_storage": {
+                "total_files": int(managed_total_files),
+                "total_bytes": int(managed_total_bytes),
+                "sessions": session_storage,
+                "reports": reports,
+                "cache": cache,
+                "database": {"files": 1 if db_exists else 0, "bytes": int(db_size)},
+                "uploader_spool": {"files": int(spool_pending["files"]) + int(spool_done["files"]) + int(spool_dead["files"]), "bytes": int(spool_total_bytes)},
+            },
+            "reports": reports,
+            "cache": cache,
+            "uploader_spool": {
+                "path": str(spool_root),
+                "exists": spool_root.exists(),
+                "pending": spool_pending,
+                "done": spool_done,
+                "dead": spool_dead,
+            },
+            "settings": {
+                "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),
+                "auto_approve_done_enabled": settings.auto_approve_done_enabled,
+                "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
+            },
         }
 
     @app.post("/api/admin/storage/test")

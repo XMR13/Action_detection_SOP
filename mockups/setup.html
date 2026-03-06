@@ -84,6 +84,115 @@
 	        </section>
 	
 	        <section class="config-grid">
+          <article class="panel config-card config-card-wide ops-pulse-card">
+            <div class="section-head">
+              <div>
+                <h3>Operations Pulse</h3>
+                <p class="caption">Live snapshot from <code>/api/admin/ops</code> for storage, spool pressure, and review server readiness.</p>
+              </div>
+              <div class="btn-row">
+                <button class="btn primary" id="admin-ops-refresh" type="button">Refresh Ops</button>
+              </div>
+            </div>
+            <div class="ops-strip">
+              <article class="ops-metric">
+                <span class="ops-label">Service state</span>
+                <strong class="ops-value" id="admin-ops-service-state">-</strong>
+                <span class="pill" id="admin-ops-service-pill">waiting</span>
+              </article>
+              <article class="ops-metric">
+                <span class="ops-label">Total managed data</span>
+                <strong class="ops-value" id="admin-ops-managed-total">-</strong>
+                <span class="ops-meta" id="admin-ops-managed-meta">-</span>
+              </article>
+              <article class="ops-metric">
+                <span class="ops-label">Video footprint</span>
+                <strong class="ops-value" id="admin-ops-video-total">-</strong>
+                <span class="ops-meta" id="admin-ops-video-meta">-</span>
+              </article>
+              <article class="ops-metric">
+                <span class="ops-label">Disk free</span>
+                <strong class="ops-value" id="admin-ops-disk-free">-</strong>
+                <span class="ops-meta" id="admin-ops-disk-used">-</span>
+              </article>
+            </div>
+            <div class="ops-grid">
+              <section class="ops-panel">
+                <div class="step-head">
+                  <strong>Uploader Queue</strong>
+                  <span class="pill ink" id="admin-ops-spool-root">spool</span>
+                </div>
+                <div class="meta">
+                  <div class="row">
+                    <span class="key">Pending files</span>
+                    <span class="val" id="admin-ops-pending-files">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Done files</span>
+                    <span class="val" id="admin-ops-done-files">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Dead files</span>
+                    <span class="val" id="admin-ops-dead-files">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Newest pending</span>
+                    <span class="val" id="admin-ops-pending-newest">-</span>
+                  </div>
+                </div>
+              </section>
+              <section class="ops-panel">
+                <div class="step-head">
+                  <strong>Storage Breakdown</strong>
+                  <span class="pill brand" id="admin-ops-db-pill">db</span>
+                </div>
+                <div class="meta">
+                  <div class="row">
+                    <span class="key">Evidence clips</span>
+                    <span class="val" id="admin-ops-evidence-size">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Annotated videos</span>
+                    <span class="val" id="admin-ops-annotated-size">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Session metadata</span>
+                    <span class="val" id="admin-ops-session-meta-size">-</span>
+                  </div>
+                  <div class="row">
+                    <span class="key">Reports + DB + spool</span>
+                    <span class="val" id="admin-ops-platform-size">-</span>
+                  </div>
+                </div>
+                <div class="ops-breakdown-pills">
+                  <span class="pill ink" id="admin-ops-cache-size">cache -</span>
+                  <span class="pill brand" id="admin-ops-db-size">db -</span>
+                  <span class="pill" id="admin-ops-reports-files">reports -</span>
+                  <span class="pill" id="admin-ops-cache-updated">cache updated -</span>
+                </div>
+              </section>
+              <section class="ops-panel">
+                <div class="step-head">
+                  <strong>Recommended Action</strong>
+                  <span class="pill" id="admin-ops-action-pill">monitor</span>
+                </div>
+                <p class="caption ops-callout" id="admin-ops-callout">
+                  Waiting for server data…
+                </p>
+                <div class="timeline compact">
+                  <div class="tl-item">
+                    <span class="t">Retention</span>
+                    <span class="d" id="admin-ops-retention-hint">Run dry-run cleanup before deleting generated media.</span>
+                  </div>
+                  <div class="tl-item">
+                    <span class="t">Backup</span>
+                    <span class="d" id="admin-ops-backup-hint">Protect sessions, reports, and SQLite DB before maintenance.</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </article>
+
 	          <article class="panel config-card">
 	            <h3>Server Status</h3>
 	            <div class="meta">
@@ -154,7 +263,7 @@
 	              </div>
 	            </div>
 	            <div class="btn-row">
-	              <button class="btn" id="admin-storage-refresh" type="button">Refresh</button>
+	              <button class="btn" id="admin-storage-refresh" type="button">Refresh Storage</button>
 	              <button class="btn" id="admin-storage-test" type="button">Test Storage</button>
 	            </div>
 	            <p class="caption" id="admin-storage-test-status"></p>
