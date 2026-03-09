@@ -427,7 +427,6 @@
   const selectedReviewSource = document.getElementById("selected-review-source");
   const selectedFinalStatus = document.getElementById("selected-final-status");
   const selectedEvidence = document.getElementById("selected-evidence");
-  const selectedSessionSla = document.getElementById("selected-session-sla");
   const selectedDetailLink = document.getElementById("selected-detail-link");
   const queueOpenSelected = document.getElementById("queue-open-selected");
   let queuePage = 1;
@@ -480,7 +479,7 @@
       return;
     }
 
-    const { sessionId, sessionUid, date, shift, machine, human, reviewSource, final, evidence, sla } = row.dataset;
+    const { sessionId, sessionUid, date, shift, machine, human, reviewSource, final, evidence } = row.dataset;
     const resolvedSessionId = sessionId || link.textContent?.trim() || "UNKNOWN";
     const resolvedShift = shift || "-";
     const resolvedMachine = machine || "-";
@@ -490,8 +489,6 @@
     const resolvedEvidence = evidence || "-";
     const resolvedSessionUid = sessionUid || "-";
     const resolvedDate = date || "-";
-    const resolvedSla = sla || "-";
-
     if (selectedSessionIdInput instanceof HTMLInputElement) {
       selectedSessionIdInput.value = resolvedSessionId;
     }
@@ -524,9 +521,6 @@
     }
     if (selectedEvidence) {
       selectedEvidence.textContent = resolvedEvidence;
-    }
-    if (selectedSessionSla) {
-      selectedSessionSla.textContent = resolvedSla === "reviewed" ? "Reviewed" : `SLA ${resolvedSla}`;
     }
     if (selectedDetailLink instanceof HTMLAnchorElement) {
       const targetUid = resolvedSessionUid && resolvedSessionUid !== "-" ? resolvedSessionUid : resolvedSessionId;
@@ -798,7 +792,7 @@
       payload = await apiFetchJson(url);
     } catch (err) {
       syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="11"><span class="pill no">Failed to load sessions</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10"><span class="pill no">Failed to load sessions</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -822,7 +816,7 @@
     });
 
     if (sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11"><span class="pill">No sessions found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10"><span class="pill">No sessions found</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -849,7 +843,6 @@
         const evidenceLabel =
           s.clip_count > 0 ? (s.has_thumbnail ? "thumbnail + klip" : "klip") : s.has_thumbnail ? "thumbnail" : "-";
         const evidenceBadge = s.clip_count > 0 ? `<span class="queue-evidence-badge" title="${s.clip_count} clip(s)">▶</span>` : "";
-        const sla = review === "PENDING" ? "-" : "reviewed";
 
         const rowActive = index === 0 ? " queue-row-active" : "";
         const linkActive = index === 0 ? " active" : "";
@@ -865,7 +858,6 @@
             data-review-source="${displayReviewSource(reviewSource)}"
             data-final="${displayStepStatus(final)}"
             data-evidence="${evidenceLabel}"
-            data-sla="${sla}"
           >
             <td>
               <a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-queue-link>${sid}</a>
@@ -886,7 +878,6 @@
                 </div>
               </div>
             </td>
-            <td><span class="pill">${sla}</span></td>
             <td><a class="btn btn-compact action-inspect" href="${buildUiHrefWithDate("session-detail.html", encodeURIComponent(uid))}">Inspect</a></td>
           </tr>
         `;
@@ -901,8 +892,6 @@
   };
 
   const populateDetail = async () => {
-    const detailDateLabel = document.getElementById("detail-active-date-slice");
-    if (detailDateLabel) detailDateLabel.textContent = dateSliceLabel();
     const hash = window.location.hash ? window.location.hash.slice(1) : "";
     const sessionUid = hash ? decodeURIComponent(hash) : "";
     if (!sessionUid) {
@@ -933,38 +922,30 @@
 
     const sessionId = String(payload.session_id || "-");
     const sessionDate = String(payload.date || "-");
-    const uidHint = document.getElementById("detail-session-uid-hint");
     const dateHint = document.getElementById("detail-session-date-hint");
     const sidNode = document.getElementById("detail-session-id");
     if (sidNode) sidNode.textContent = sessionId;
-    if (uidHint) uidHint.textContent = `UID: ${sessionUid}`;
     if (dateHint) dateHint.textContent = `Session date: ${sessionDate}`;
     if (selectedSessionIdInput instanceof HTMLInputElement) {
       selectedSessionIdInput.value = sessionId;
     }
 
-    const metaSessionId = document.getElementById("detail-meta-session-id");
-    const metaSessionUid = document.getElementById("detail-meta-session-uid");
-    const metaSessionDate = document.getElementById("detail-meta-session-date");
-    const metaStartTime = document.getElementById("detail-meta-start-time");
-    const metaDuration = document.getElementById("detail-meta-duration");
-    if (metaSessionId) metaSessionId.textContent = sessionId;
-    if (metaSessionUid) metaSessionUid.textContent = sessionUid;
-    if (metaSessionDate) metaSessionDate.textContent = sessionDate;
-    if (metaStartTime) {
-      const startIso = payload.checklist && payload.checklist.start_time_iso ? String(payload.checklist.start_time_iso) : "";
-      metaStartTime.textContent = formatDateTimeFromIso(startIso);
-    }
-    if (metaDuration) {
-      const startS =
-        payload.checklist && payload.checklist.start_time_s != null ? Number(payload.checklist.start_time_s) : Number.NaN;
-      const endS =
-        payload.checklist && payload.checklist.end_time_s != null ? Number(payload.checklist.end_time_s) : Number.NaN;
-      if (!Number.isNaN(startS) && !Number.isNaN(endS) && endS >= startS) {
-        metaDuration.textContent = `${(endS - startS).toFixed(1)} seconds`;
-      } else {
-        metaDuration.textContent = "-";
-      }
+    const overviewSession = document.getElementById("detail-overview-session");
+    const overviewDate = document.getElementById("detail-overview-date");
+    const overviewDuration = document.getElementById("detail-overview-duration");
+    const overviewAi = document.getElementById("detail-overview-ai");
+    const overviewStatusCard = document.getElementById("detail-overview-status-card");
+    if (overviewSession) overviewSession.textContent = sessionId;
+    if (overviewDate) overviewDate.textContent = sessionDate;
+    const startS =
+      payload.checklist && payload.checklist.start_time_s != null ? Number(payload.checklist.start_time_s) : Number.NaN;
+    const endS =
+      payload.checklist && payload.checklist.end_time_s != null ? Number(payload.checklist.end_time_s) : Number.NaN;
+    if (!Number.isNaN(startS) && !Number.isNaN(endS) && endS >= startS) {
+      const durationText = `${(endS - startS).toFixed(1)} detik`;
+      if (overviewDuration) overviewDuration.textContent = durationText;
+    } else if (overviewDuration) {
+      overviewDuration.textContent = "-";
     }
 
     const queueCrumb = document.getElementById("detail-queue-link");
@@ -1007,50 +988,36 @@
 
     const machine = String(payload.machine_sop || payload.machine_helmet || "UNKNOWN");
     const review = String(payload.review_status || (payload.review && payload.review.review_status) || "PENDING");
-    const reviewSource = String(payload.review_source || "PENDING");
-    const autoReason = payload.auto_review_reason ? String(payload.auto_review_reason) : "";
     const machinePill = document.getElementById("detail-machine-status");
     const reviewPill = document.getElementById("detail-review-status");
-    const reviewSourcePill = document.getElementById("detail-review-source");
-    const autoReasonNode = document.getElementById("detail-auto-review-reason");
+    if (overviewAi) {
+      overviewAi.textContent = displayStepStatus(machine);
+    }
+    if (overviewStatusCard instanceof HTMLElement) {
+      overviewStatusCard.classList.remove("status-yes", "status-no", "status-unknown");
+      const machineKey = String(machine || "").toUpperCase();
+      if (machineKey === "DONE") overviewStatusCard.classList.add("status-yes");
+      else if (machineKey === "NOT_DONE") overviewStatusCard.classList.add("status-no");
+      else overviewStatusCard.classList.add("status-unknown");
+    }
     if (machinePill) {
       machinePill.className = `pill ${pillClassForStepStatus(machine)}`;
-      machinePill.textContent = `machine ${displayStepStatus(machine)}`;
+      machinePill.textContent = `AI ${displayStepStatus(machine)}`;
     }
     if (reviewPill) {
       reviewPill.className = `pill ${pillClassForReviewStatus(review)}`;
-      reviewPill.textContent = `review ${displayReviewStatus(review)}`;
-    }
-    if (reviewSourcePill) {
-      reviewSourcePill.className = `pill ${pillClassForReviewSource(reviewSource)}`;
-      reviewSourcePill.textContent = `source ${displayReviewSource(reviewSource)}`;
-    }
-    if (autoReasonNode) {
-      if (reviewSource.toUpperCase() === "AUTO" && autoReason) {
-        autoReasonNode.textContent = `Auto decision policy: ${autoReason}`;
-      } else if (reviewSource.toUpperCase() === "PENDING" && autoReason) {
-        autoReasonNode.textContent = `Pending policy reason: ${autoReason}`;
-      } else if (reviewSource.toUpperCase() === "MANUAL") {
-        autoReasonNode.textContent = "Manual review submitted.";
-      } else {
-        autoReasonNode.textContent = "Auto decision policy: -";
-      }
+      reviewPill.textContent = `Review ${displayReviewStatus(review)}`;
     }
 
     const noteBox = document.getElementById("review-note");
     if (noteBox instanceof HTMLTextAreaElement) {
       noteBox.value = payload.review && payload.review.review_note ? String(payload.review.review_note) : "";
     }
-    const overrideHelmet = document.getElementById("override-helmet");
-    if (overrideHelmet instanceof HTMLSelectElement) {
-      const ov = payload.review && payload.review.overrides ? payload.review.overrides : {};
-      const helmetOv = ov && ov.helmet ? String(ov.helmet) : "";
-      overrideHelmet.value = helmetOv;
-    }
 
     const player = document.querySelector(".detail-player");
     const evidenceStrip = document.getElementById("detail-evidence-strip");
     const evidenceState = document.getElementById("detail-evidence-state");
+    const evidencePill = document.getElementById("detail-evidence-pill");
     if (player instanceof HTMLElement) {
       const renderThumbnail = () => {
         if (payload.thumbnail_url) {
@@ -1084,25 +1051,30 @@
         if (preferAnnotated) {
           evidenceState.className = "pill dir-b";
           evidenceState.textContent = "unknown: video anotasi penuh";
+          if (evidencePill) evidencePill.textContent = "Bukti video penuh";
           return;
         }
         if (clips.length > 0) {
           evidenceState.className = "pill brand";
           evidenceState.textContent = `${clips.length} klip tersedia`;
+          if (evidencePill) evidencePill.textContent = `${clips.length} klip bukti`;
           return;
         }
         if (hasAnnotated) {
           evidenceState.className = "pill brand";
           evidenceState.textContent = "video anotasi penuh";
+          if (evidencePill) evidencePill.textContent = "Bukti video penuh";
           return;
         }
         if (payload.thumbnail_url) {
           evidenceState.className = "pill dir-b";
           evidenceState.textContent = "thumbnail saja";
+          if (evidencePill) evidencePill.textContent = "Bukti thumbnail";
           return;
         }
         evidenceState.className = "pill no";
         evidenceState.textContent = "tidak ada bukti";
+        if (evidencePill) evidencePill.textContent = "Bukti tidak ada";
       };
 
       const setActiveClipPill = (activeKey) => {
@@ -1181,11 +1153,6 @@
           evidenceStrip.appendChild(annotatedBtn);
         }
 
-        const artifactsLink = document.createElement("a");
-        artifactsLink.className = "pill";
-        artifactsLink.href = "#artifacts";
-        artifactsLink.textContent = "buka artefak";
-        evidenceStrip.appendChild(artifactsLink);
       };
 
       setEvidenceState();
@@ -1204,76 +1171,19 @@
       }
     }
 
-    const checklistWrap = document.querySelector(".checklist");
-    if (checklistWrap instanceof HTMLElement && payload.checklist) {
-      const checklist = payload.checklist;
-      const overrides = payload.review && payload.review.overrides ? payload.review.overrides : {};
-      const steps = [
-        { key: "operator_present", label: "Operator berada di ROI" },
-        { key: "roi_dwell", label: "Durasi berada di ROI" },
-        { key: "helmet", label: "Kepatuhan helm" },
-      ];
-      checklistWrap.innerHTML = steps
-        .map((step) => {
-          const machineVal = String(checklist[step.key] || "UNKNOWN");
-          const reviewVal = overrides && overrides[step.key] ? String(overrides[step.key]) : machineVal;
-          return `
-            <div class="step-card">
-              <div class="step-head">
-                <strong>${step.label}</strong>
-                <div class="step-pills">
-                  <span class="pill ${pillClassForStepStatus(machineVal)}">machine ${displayStepStatus(machineVal)}</span>
-                  <span class="pill ${pillClassForStepStatus(reviewVal)}">review ${displayStepStatus(reviewVal)}</span>
-                </div>
-              </div>
-            </div>
-          `;
-        })
-        .join("");
-    }
-
-    const artifactsList = document.querySelector(".artifacts-list");
-    if (artifactsList instanceof HTMLElement) {
-      const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
-      artifactsList.innerHTML = artifacts
-        .map((a) => {
-          const name = a && a.name ? String(a.name) : "-";
-          const url = a && a.url ? String(a.url) : "";
-          const safeUrl = url ? url : "#";
-          return `
-            <a class="artifact-item" href="${safeUrl}" target="_blank" rel="noreferrer">
-              <strong>${name}</strong>
-              <span>Buka artefak</span>
-            </a>
-          `;
-        })
-        .join("");
-    }
-
     if (form) {
       form.onsubmit = async (event) => {
         event.preventDefault();
         const reviewStatus = statusInput instanceof HTMLInputElement ? statusInput.value : "PENDING";
         const note = noteBox instanceof HTMLTextAreaElement ? noteBox.value : "";
-        const overrides = {};
-        if (overrideHelmet instanceof HTMLSelectElement && overrideHelmet.value) {
-          overrides.helmet = overrideHelmet.value;
-        }
         try {
           await apiFetchJson(`/api/sessions/${encodeURIComponent(sessionUid)}/review`, {
             method: "PUT",
-            body: JSON.stringify({ review_status: reviewStatus, review_note: note, overrides }),
+            body: JSON.stringify({ review_status: reviewStatus, review_note: note }),
           });
           if (reviewPill) {
             reviewPill.className = `pill ${pillClassForReviewStatus(reviewStatus)}`;
-            reviewPill.textContent = `review ${displayReviewStatus(reviewStatus)}`;
-          }
-          if (reviewSourcePill) {
-            reviewSourcePill.className = `pill ${pillClassForReviewSource("MANUAL")}`;
-            reviewSourcePill.textContent = "source MANUAL";
-          }
-          if (autoReasonNode) {
-            autoReasonNode.textContent = "Manual review submitted.";
+            reviewPill.textContent = `Review ${displayReviewStatus(reviewStatus)}`;
           }
           if (String(reviewStatus || "").toUpperCase() !== "PENDING") {
             const nextUid = await resolveNextPending();
@@ -2120,14 +2030,6 @@
     populateQueue();
   }
   if (body && body.classList.contains("page-event-detail")) {
-    bindDateControls({
-      fromId: "detail-date-from",
-      toId: "detail-date-to",
-      applyId: "detail-date-apply",
-      clearId: "detail-date-clear",
-      labelId: "detail-active-date-slice",
-      onChange: () => populateDetail(),
-    });
     window.addEventListener("hashchange", () => {
       populateDetail();
     });

@@ -50,7 +50,7 @@
         <section class="panel sidebar-note">
           <h3>Detail-level Review</h3>
           <p class="caption">
-            Use this page to inspect evidence, timeline events, and final machine vs reviewer decision history.
+            Gunakan halaman ini untuk melihat bukti dan menyimpan hasil review.
           </p>
           <a class="btn primary" href="review-queue.html">Back to Queue</a>
         </section>
@@ -60,7 +60,7 @@
         <header class="topbar detail-header">
           <div class="title">
             <h2>Session Detail</h2>
-            <p>Evidence-first review for one machine session.</p>
+            <p>Periksa bukti lalu simpan keputusan untuk satu sesi pengecekan SOP.</p>
             <div class="detail-crumb">
               <a id="detail-queue-link" href="review-queue.html">Review Queue</a>
               <span>/</span>
@@ -68,41 +68,31 @@
             </div>
           </div>
           <div class="filters">
-            <span class="hint" id="detail-session-uid-hint">UID: -</span>
             <span class="hint" id="detail-session-date-hint">Session date: -</span>
-            <div class="field">
-              <label for="detail-date-from">Date from</label>
-              <input id="detail-date-from" name="detail-date-from" type="date" />
-            </div>
-            <div class="field">
-              <label for="detail-date-to">Date to</label>
-              <input id="detail-date-to" name="detail-date-to" type="date" />
-            </div>
-            <div class="field">
-              <label>&nbsp;</label>
-              <button class="btn" id="detail-date-apply" type="button">Apply</button>
-            </div>
-            <div class="field">
-              <label>&nbsp;</label>
-              <button class="btn" id="detail-date-clear" type="button">Clear</button>
-            </div>
-            <span class="hint" id="detail-active-date-slice">Date: all</span>
           </div>
         </header>
 
-        <section class="mode-banner detail">
-          <div class="mode-copy">
-            <span class="mode-eyebrow">DETAIL AUDIT</span>
-            <span class="mode-title">Inspect evidence first, then commit one final reviewer decision.</span>
-            <span class="mode-desc">
-              Queue is for triage. This page is where decision and audit note are finalized.
-            </span>
-          </div>
-          <div class="mode-tags">
-            <span class="pill dir-b">machine unknown</span>
-            <span class="pill">human pending</span>
-            <span class="pill ink">opened 16:14:22</span>
-          </div>
+        <section class="detail-overview" aria-label="Ringkasan cepat sesi">
+          <article class="detail-overview-card">
+            <span class="detail-overview-label">Sesi</span>
+            <strong class="detail-overview-value" id="detail-overview-session">-</strong>
+            <span class="detail-overview-meta">ID sesi yang sedang direview</span>
+          </article>
+          <article class="detail-overview-card">
+            <span class="detail-overview-label">Tanggal</span>
+            <strong class="detail-overview-value" id="detail-overview-date">-</strong>
+            <span class="detail-overview-meta">Tanggal sesi tercatat</span>
+          </article>
+          <article class="detail-overview-card">
+            <span class="detail-overview-label">Durasi</span>
+            <strong class="detail-overview-value" id="detail-overview-duration">-</strong>
+            <span class="detail-overview-meta">Lama operator berada pada area review</span>
+          </article>
+          <article class="detail-overview-card detail-overview-status" id="detail-overview-status-card">
+            <span class="detail-overview-label">Hasil AI</span>
+            <strong class="detail-overview-value" id="detail-overview-ai">-</strong>
+            <span class="detail-overview-meta">Gunakan bukti untuk konfirmasi hasil ini</span>
+          </article>
         </section>
 
         <section class="detail-shell">
@@ -110,8 +100,8 @@
             <article class="panel detail-evidence-panel">
               <div class="section-head">
                 <div>
-	                  <h3>Evidence Player</h3>
-	                  <p class="caption">Primary clip context and key moments for this session.</p>
+	                  <h3>Bukti sesi</h3>
+	                  <p class="caption">Clip pengecekan untuk sesi dan moment penting saat penjalanan SOP.</p>
 	                </div>
 	                <span class="pill brand" id="detail-evidence-state">clip available</span>
 	              </div>
@@ -126,171 +116,35 @@
               </div>
 
 	              <div class="detail-evidence-strip" id="detail-evidence-strip">
-	                <span class="pill">frame masuk +0.0s</span>
-	                <span class="pill dir-b">confidence turun +3.4s</span>
-	                <span class="pill">glare puncak +8.1s</span>
-	                <a class="pill" href="#artifacts">buka artefak</a>
+	                <span class="pill">Memuat bukti...</span>
 	              </div>
-
-              <div class="timeline detail-key-events">
-                <div class="tl-item">
-                  <span class="t">00.0s</span>
-	                  <span class="d">Sesi dimulai saat orang berada di ROI melewati ambang waktu.</span>
-	                </div>
-                <div class="tl-item">
-                  <span class="t">03.4s</span>
-	                  <span class="d">Deteksi helm muncul sesaat tapi confidence tidak stabil.</span>
-	                </div>
-                <div class="tl-item">
-                  <span class="t">08.1s</span>
-	                  <span class="d">Glare memuncak dan area kepala menjadi tidak andal.</span>
-	                </div>
-                <div class="tl-item">
-                  <span class="t">10.8s</span>
-	                  <span class="d">Sesi selesai. Checklist final disimpan ke checklist.json.</span>
-	                </div>
-              </div>
             </article>
-
-            <div class="detail-lower-grid">
-              <article class="panel">
-                <div class="section-head">
-	                  <div>
-	                    <h3>Checklist</h3>
-	                    <p class="caption">Status mesin vs review manual per langkah SOP.</p>
-	                  </div>
-	                  <span class="pill">status diff</span>
-	                </div>
-                <div class="checklist">
-                  <div class="step-card">
-                    <div class="step-head">
-	                      <strong>Operator berada di ROI</strong>
-                      <div class="step-pills">
-                        <span class="pill yes">machine DONE</span>
-                        <span class="pill yes">review DONE</span>
-                      </div>
-                    </div>
-	                    <p>Keberadaan operator stabil. Tidak perlu intervensi reviewer.</p>
-                  </div>
-                  <div class="step-card">
-                    <div class="step-head">
-	                      <strong>Kepatuhan helm</strong>
-                      <div class="step-pills">
-                        <span class="pill dir-b">machine UNKNOWN</span>
-                        <span class="pill dir-b">review UNKNOWN</span>
-                      </div>
-                    </div>
-	                    <p>Keyakinan kurang karena glare dan occlusion pada area kepala.</p>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel">
-                <h3>Session Metadata</h3>
-                <div class="meta">
-                  <div class="row">
-                    <span class="key">Session ID</span>
-                    <span class="val" id="detail-meta-session-id">-</span>
-                  </div>
-                  <div class="row">
-                    <span class="key">Session UID</span>
-                    <span class="val" id="detail-meta-session-uid">-</span>
-                  </div>
-                  <div class="row">
-                    <span class="key">Session date</span>
-                    <span class="val" id="detail-meta-session-date">-</span>
-                  </div>
-                  <div class="row">
-                    <span class="key">Start time</span>
-                    <span class="val" id="detail-meta-start-time">-</span>
-                  </div>
-                  <div class="row">
-                    <span class="key">Duration</span>
-                    <span class="val" id="detail-meta-duration">-</span>
-                  </div>
-                  <div class="row">
-                    <span class="key">Model version</span>
-                    <span class="val">ppe-yolo-onnx-v3</span>
-                  </div>
-                </div>
-              </article>
-            </div>
-
-            <div class="detail-lower-grid">
-              <article class="panel">
-                <h3>Comments & Overrides</h3>
-                <div class="timeline">
-                  <div class="tl-item">
-                    <span class="t">Pending reviewer input</span>
-                    <span class="d">No manual decision has been saved yet for this session.</span>
-                  </div>
-                  <div class="tl-item">
-                    <span class="t">16:14:31 | system</span>
-                    <span class="d">Setelah disimpan, hasil mesin dan override manual dicatat untuk audit.</span>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel" id="artifacts">
-                <h3>Artifacts</h3>
-                <div class="artifacts-list">
-                  <div class="artifact-item">
-                    <strong>checklist.json</strong>
-                    <span>Final machine checklist payload</span>
-                  </div>
-                  <div class="artifact-item">
-                    <strong>thumbnail.jpg</strong>
-                    <span>Gambar bukti utama yang tampil di antrian</span>
-                  </div>
-                  <div class="artifact-item">
-                    <strong>evidence/helmet_done_01.mp4</strong>
-                    <span>Optional clip written by event clipper</span>
-                  </div>
-                  <div class="artifact-item">
-                    <strong>run_config.json</strong>
-                    <span>Thresholds and config source for reproducibility</span>
-                  </div>
-                </div>
-              </article>
-            </div>
           </section>
 
           <aside class="detail-rail">
             <article class="panel detail-decision-panel">
               <div class="section-head">
                 <div>
-	                <h3>Reviewer Decision</h3>
-                  <p class="caption">Apply one final result after reviewing clip evidence.</p>
+	                <h3>Review manual</h3>
+                  <p class="caption">Pilih hasil yang paling sesuai setelah memeriksa bukti sesi.</p>
                 </div>
-                <span class="pill">required</span>
               </div>
 
 	              <div class="detail-status-row">
-	                <span class="pill dir-b" id="detail-machine-status">machine -</span>
-	                <span class="pill pending" id="detail-review-status">review -</span>
-	                <span class="pill ink" id="detail-review-source">source -</span>
-	                <span class="pill">evidence ready</span>
+	                <span class="pill dir-b" id="detail-machine-status">AI -</span>
+	                <span class="pill pending" id="detail-review-status">Review -</span>
+	                <span class="pill" id="detail-evidence-pill">Bukti -</span>
 	              </div>
-	              <p class="caption" id="detail-auto-review-reason">Auto decision policy: -</p>
 
               <form id="review-form" class="detail-decision-form" data-disable-on-submit>
                 <input id="review-status" name="review_status" type="hidden" value="PENDING" />
                 <input id="selected-session-id" name="selected_session_id" type="hidden" value="" />
-                <div class="field">
-	                  <label for="override-helmet">Helmet override</label>
-	                  <select id="override-helmet" name="override_helmet">
-	                    <option value="">No override</option>
-	                    <option value="DONE">DONE</option>
-	                    <option value="NOT_DONE">NOT DONE</option>
-	                    <option value="UNKNOWN">UNKNOWN</option>
-	                  </select>
-	                </div>
 	                <div class="field">
 	                  <label for="review-note">Reviewer note</label>
 	                  <textarea
 	                    id="review-note"
 	                    name="review_note"
-	                    placeholder="State what evidence supports your decision…"
+	                    placeholder="Tuliskan catatan singkat jika keputusan perlu penjelasan tambahan."
 	                    autocomplete="off"
 	                  ></textarea>
 	                </div>
@@ -304,12 +158,6 @@
 	                <div class="detail-nav-row">
 	                  <a class="btn" id="detail-back-link" href="review-queue.html">Back to Queue</a>
 	                  <a class="btn primary" id="detail-next-link" href="review-queue.html">Next Pending</a>
-	                </div>
-
-	                <div class="queue-help">
-	                  <span class="hint"><span class="kbd">Y</span> approve</span>
-	                  <span class="hint"><span class="kbd">N</span> reject</span>
-	                  <span class="hint"><span class="kbd">S</span> unknown</span>
 	                </div>
               </form>
             </article>

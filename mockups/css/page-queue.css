@@ -68,10 +68,6 @@
   width: 10%;
 }
 
-.queue-table col.queue-col-sla {
-  width: 6%;
-}
-
 .queue-table col.queue-col-action {
   width: 7%;
 }

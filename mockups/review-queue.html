@@ -103,10 +103,9 @@
               Gunakan tabel ini untuk mempriotaskan hasil review, buka panel detail untuk mengecek bukti cuplikan sebelumn menentukan keptutusan.
             </span>
           </div>
-	          <div class="mode-tags">
+	            <div class="mode-tags">
 	            <span class="pill brand">unknown helmet</span>
 	            <span class="pill" id="queue-pending-pill">pending --</span>
-	            <span class="pill ink">SLA target &lt; 10m</span>
 	          </div>
 	        </section>
 
@@ -170,7 +169,7 @@
               <div class="field">
                 <label for="queue-sort">Sort by</label>
                 <select id="queue-sort" name="queue-sort">
-                  <option value="PENDING_FIRST" selected>SLA age (pending first)</option>
+                  <option value="PENDING_FIRST" selected>Pending first</option>
                   <option value="NEWEST">Newest first</option>
 	                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
 	                </select>
@@ -195,8 +194,7 @@
                   <col class="queue-col-machine" />
                   <col class="queue-col-human" />
                   <col class="queue-col-final" />
-                  <col class="queue-col-evidence" />
-                  <col class="queue-col-sla" />
+                  <col class="queue-col-evidence">
                   <col class="queue-col-action" />
                 </colgroup>
                 <thead>
@@ -208,15 +206,14 @@
                     <th scope="col">Dur</th>
                     <th scope="col">AI SOP</th>
                     <th scope="col">Human<br>review</th>
-	                    <th scope="col">Final</th>
-	                    <th scope="col">Evidence</th>
-	                    <th scope="col">SLA</th>
-	                    <th scope="col">Action</th>
+                    <th scope="col">Final</th>
+                    <th scope="col">Evidence</th>
+                    <th scope="col">Action</th>
 	                  </tr>
 	                </thead>
                 <tbody>
                   <tr>
-                    <td colspan="11">
+                    <td colspan="10">
                       <span class="pill pending">Loading sessions…</span>
                     </td>
                   </tr>
@@ -243,12 +240,11 @@
 	            </div>
 
             <div class="queue-review-context">
-	              <div class="queue-next-strip">
+              <div class="queue-next-strip">
 	                <div class="queue-next-copy">
 	                  <span class="head">Current selection</span>
 	                  <span class="body" id="selected-session-label">Loading selection…</span>
 	                </div>
-                <span class="pill no" id="selected-session-sla">SLA --</span>
               </div>
 
 	              <div class="meta queue-facts">
