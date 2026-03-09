@@ -222,6 +222,25 @@
     return `${page}${query ? `?${query}` : ""}${hash}`;
   };
 
+  const buildSessionDetailHref = (sessionUid) => {
+    const slice = readDateSliceFromUrl();
+    const params = new URLSearchParams();
+    if (slice.from) params.set("date_from", slice.from);
+    if (slice.to) params.set("date_to", slice.to);
+    if (sessionUid) params.set("session_uid", String(sessionUid));
+    const query = params.toString();
+    const hash = sessionUid ? `#${encodeURIComponent(String(sessionUid))}` : "";
+    return `session-detail.html${query ? `?${query}` : ""}${hash}`;
+  };
+
+  const readSessionUidFromUrl = () => {
+    const params = new URLSearchParams(window.location.search || "");
+    const fromQuery = params.get("session_uid");
+    if (fromQuery) return String(fromQuery);
+    const hash = window.location.hash ? window.location.hash.slice(1) : "";
+    return hash ? decodeURIComponent(hash) : "";
+  };
+
   const applyDateSliceToStaticNav = () => {
     const navTargets = new Set(["index.html", "review-queue.html", "session-detail.html", "setup.html"]);
     document.querySelectorAll("a[href]").forEach((node) => {
@@ -524,11 +543,11 @@
     }
     if (selectedDetailLink instanceof HTMLAnchorElement) {
       const targetUid = resolvedSessionUid && resolvedSessionUid !== "-" ? resolvedSessionUid : resolvedSessionId;
-      selectedDetailLink.href = buildUiHrefWithDate("session-detail.html", encodeURIComponent(String(targetUid)));
+      selectedDetailLink.href = buildSessionDetailHref(String(targetUid));
     }
     if (queueOpenSelected instanceof HTMLAnchorElement) {
       const targetUid = resolvedSessionUid && resolvedSessionUid !== "-" ? resolvedSessionUid : resolvedSessionId;
-      queueOpenSelected.href = buildUiHrefWithDate("session-detail.html", encodeURIComponent(String(targetUid)));
+      queueOpenSelected.href = buildSessionDetailHref(String(targetUid));
     }
   };
 
@@ -878,7 +897,7 @@
                 </div>
               </div>
             </td>
-            <td><a class="btn btn-compact action-inspect" href="${buildUiHrefWithDate("session-detail.html", encodeURIComponent(uid))}">Inspect</a></td>
+            <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Inspect</a></td>
           </tr>
         `;
       })
@@ -892,15 +911,14 @@
   };
 
   const populateDetail = async () => {
-    const hash = window.location.hash ? window.location.hash.slice(1) : "";
-    const sessionUid = hash ? decodeURIComponent(hash) : "";
+    const sessionUid = readSessionUidFromUrl();
     if (!sessionUid) {
       // If user opens Session Detail from the sidebar, pick the newest session.
       try {
         const list = await apiFetchJson(withDateApiQuery("/api/sessions?limit=1"));
         const sessions = Array.isArray(list.sessions) ? list.sessions : [];
         if (sessions.length > 0 && sessions[0].session_uid) {
-          window.location.hash = encodeURIComponent(String(sessions[0].session_uid));
+          window.location.assign(buildSessionDetailHref(String(sessions[0].session_uid)));
           return;
         }
       } catch (err) {
@@ -922,21 +940,31 @@
 
     const sessionId = String(payload.session_id || "-");
     const sessionDate = String(payload.date || "-");
+    const startIso = payload.checklist && payload.checklist.start_time_iso ? String(payload.checklist.start_time_iso) : "";
+    const resolvedShift = shiftLabel(
+      payload && payload.shift_id ? payload.shift_id : payload && payload.checklist ? payload.checklist.shift_id : "",
+      payload && payload.shift_name ? payload.shift_name : payload && payload.checklist ? payload.checklist.shift_name : ""
+    );
     const dateHint = document.getElementById("detail-session-date-hint");
     const sidNode = document.getElementById("detail-session-id");
     if (sidNode) sidNode.textContent = sessionId;
-    if (dateHint) dateHint.textContent = `Session date: ${sessionDate}`;
+    if (dateHint) {
+      const dateHintValue = startIso ? formatDateTimeFromIso(startIso) : sessionDate;
+      dateHint.textContent = `Session time: ${dateHintValue}`;
+    }
     if (selectedSessionIdInput instanceof HTMLInputElement) {
       selectedSessionIdInput.value = sessionId;
     }
 
     const overviewSession = document.getElementById("detail-overview-session");
     const overviewDate = document.getElementById("detail-overview-date");
+    const overviewShift = document.getElementById("detail-overview-shift");
     const overviewDuration = document.getElementById("detail-overview-duration");
     const overviewAi = document.getElementById("detail-overview-ai");
     const overviewStatusCard = document.getElementById("detail-overview-status-card");
     if (overviewSession) overviewSession.textContent = sessionId;
-    if (overviewDate) overviewDate.textContent = sessionDate;
+    if (overviewDate) overviewDate.textContent = startIso ? formatDateTimeFromIso(startIso) : sessionDate;
+    if (overviewShift) overviewShift.textContent = resolvedShift || "-";
     const startS =
       payload.checklist && payload.checklist.start_time_s != null ? Number(payload.checklist.start_time_s) : Number.NaN;
     const endS =
@@ -978,7 +1006,7 @@
     if (nextLink instanceof HTMLAnchorElement) {
       const nextUid = await resolveNextPending();
       if (nextUid && nextUid !== sessionUid) {
-        nextLink.href = buildUiHrefWithDate("session-detail.html", encodeURIComponent(nextUid));
+        nextLink.href = buildSessionDetailHref(nextUid);
         nextLink.textContent = "Next Pending";
       } else {
         nextLink.href = buildUiHrefWithDate("review-queue.html");
@@ -1188,7 +1216,7 @@
           if (String(reviewStatus || "").toUpperCase() !== "PENDING") {
             const nextUid = await resolveNextPending();
             if (nextUid && nextUid !== sessionUid) {
-              window.location.assign(buildUiHrefWithDate("session-detail.html", encodeURIComponent(nextUid)));
+              window.location.assign(buildSessionDetailHref(nextUid));
               return;
             }
             window.location.assign(buildUiHrefWithDate("review-queue.html"));
@@ -1966,7 +1994,7 @@
                     <td><span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(sop)}">SOP ${displayStepStatus(sop)}</span></td>
                     <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
                     <td>${remark}</td>
-                    <td><a class="btn btn-compact action-inspect" href="${buildUiHrefWithDate("session-detail.html", encodeURIComponent(uid))}">Inspect</a></td>
+                    <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Inspect</a></td>
                   </tr>
                 `;
               })
