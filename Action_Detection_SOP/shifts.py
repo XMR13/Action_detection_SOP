@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import Iterable, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 """Scirpt for getting the shift data into the reports"""
 
@@ -28,7 +28,7 @@ class ShiftAssignment:
     shift_start_dt: datetime
     shift_end_dt: datetime
 
-    def to_iso_fields(self) -> dict[str, str]:
+    def to_iso_fields(self) -> Dict[str, str]:
         return {
             "shift_id": self.shift_id,
             "shift_name": self.shift_name,
@@ -83,7 +83,7 @@ def _coerce_shift_clock(value: object) -> time:
     raise TypeError(f"Shift clock must be datetime.time or (hour, minute), got {type(value).__name__}")
 
 
-def _shift_window_for_day(shift: ShiftDef, *, day: datetime) -> tuple[datetime, datetime]:
+def _shift_window_for_day(shift: ShiftDef, *, day: datetime) -> Tuple[datetime, datetime]:
     #continuing the crossing day date time
     start_clock = _coerce_shift_clock(shift.start)
     end_clock = _coerce_shift_clock(shift.end)
@@ -143,7 +143,7 @@ def assign_shift_for_interval(
         days.add(base - timedelta(days=1))
         days.add(base + timedelta(days=1))
 
-    best: Optional[tuple[float, datetime, ShiftDef, datetime, datetime]] = None
+    best: Optional[Tuple[float, datetime, ShiftDef, datetime, datetime]] = None
     for day in sorted(days):
         for sh in shift_defs:
             w0, w1 = _shift_window_for_day(sh, day=day)

@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import cv2
 
@@ -563,7 +563,7 @@ def run_mvp(
     start_t_s: Optional[float] = None
     run_start_dt: Optional[datetime] = None
     loop_count = 0
-    thumb_written: set[str] = set()
+    thumb_written: Set[str] = set()
     evidence_session_id: Optional[str] = None
     evidence_clip_counts: Dict[str, int] = {}
     evidence_clips: List[Dict[str, object]] = []

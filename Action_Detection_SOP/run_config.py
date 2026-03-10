@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Set
 
 
 def load_run_config(path: Path) -> Dict[str, object]:
@@ -19,8 +19,8 @@ def load_run_config(path: Path) -> Dict[str, object]:
     return payload
 
 
-def collect_cli_dests(parser: argparse.ArgumentParser, argv: Sequence[str]) -> set[str]:
-    dests: set[str] = set()
+def collect_cli_dests(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Set[str]:
+    dests: Set[str] = set()
     for opt, action in parser._option_string_actions.items():
         for arg in argv:
             if arg == opt or arg.startswith(f"{opt}="):
@@ -47,7 +47,7 @@ def apply_run_config(
     *,
     args: argparse.Namespace,
     payload: Dict[str, object],
-    cli_dests: set[str],
+    cli_dests: Set[str],
     parser: argparse.ArgumentParser,
 ) -> None:
     allowed = {action.dest for action in parser._actions if action.dest != "help"}

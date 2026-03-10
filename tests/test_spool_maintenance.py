@@ -4,17 +4,18 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Dict, Tuple
 
 from Scripts import sop_uploader as uploader
 from Scripts import spool_maintenance
 
 
-def _write_json(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _build_session_dir(tmp_path: Path) -> tuple[Path, Path]:
+def _build_session_dir(tmp_path: Path) -> Tuple[Path, Path]:
     data_dir = tmp_path / "data"
     session_dir = data_dir / "sessions" / "2026-03-06" / "session_001"
     session_dir.mkdir(parents=True, exist_ok=True)

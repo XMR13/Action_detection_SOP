@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 import re
 from dataclasses import dataclass
 from datetime import datetime, date as Date
@@ -48,7 +48,7 @@ def _parse_iso_ts(value: Any) -> float:
         return 0.0
 
 
-def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> dict[str, Any]:
+def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> Dict[str, Any]:
     start_dt = parse_iso_datetime(start_iso) or parse_iso_datetime(end_iso)
     if start_dt is None:
         return {}
@@ -487,7 +487,7 @@ def _auto_approve_blocker(notes: Any) -> Optional[str]:
     return None
 
 
-def _should_auto_approve_session(*, session: SessionArtifact, settings: WebMvpSettings) -> tuple[bool, Optional[str]]:
+def _should_auto_approve_session(*, session: SessionArtifact, settings: WebMvpSettings) -> Tuple[bool, Optional[str]]:
     if not settings.auto_approve_done_enabled:
         return False, "auto_approve_disabled"
 
@@ -785,7 +785,7 @@ def _resolve_date_window(
     date: Optional[str],
     date_from: Optional[str],
     date_to: Optional[str],
-) -> tuple[Optional[Date], Optional[Date], Optional[str], Optional[str]]:
+) -> Tuple[Optional[Date], Optional[Date], Optional[str], Optional[str]]:
     if date and (date_from or date_to):
         raise HTTPException(status_code=400, detail="Use either `date` or `date_from/date_to`, not both")
     if date:
@@ -815,7 +815,7 @@ def _filter_sessions_by_date_window(
     date: Optional[str],
     date_from: Optional[str],
     date_to: Optional[str],
-) -> tuple[List[SessionArtifact], Optional[str], Optional[str]]:
+) -> Tuple[List[SessionArtifact], Optional[str], Optional[str]]:
     lower, upper, lower_raw, upper_raw = _resolve_date_window(date=date, date_from=date_from, date_to=date_to)
     if lower or upper:
         filtered: List[SessionArtifact] = []
@@ -976,7 +976,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         spool_pending_retry = _spool_pending_retry_stats(spool_root / "pending", now_ts=now_ts)
         spool_state_file = _spool_state_file_stats(spool_root, now_ts=now_ts)
         spool_total_bytes = int(spool_pending["bytes"]) + int(spool_done["bytes"]) + int(spool_dead["bytes"])
-        spool_issues: list[str] = []
+        spool_issues: List[str] = []
         dead_files = int(spool_dead["files"])
         pending_files = int(spool_pending["files"])
         if dead_files > 0:

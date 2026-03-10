@@ -14,7 +14,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .sop_engine import SessionResult, StepStatus, iter_roi_status_counts, iter_status_counts
 from .shifts import assign_shift_for_interval, parse_iso_datetime
@@ -116,7 +116,7 @@ def write_daily_report(
     roi_done, roi_not_done, roi_unknown = iter_roi_status_counts(sessions_list)
     done, not_done, unknown = iter_status_counts(sessions_list)
 
-    by_shift: Dict[tuple[str, str, str], List[SessionResult]] = {}
+    by_shift: Dict[Tuple[str, str, str], List[SessionResult]] = {}
     for s in sessions_list:
         start_dt = parse_iso_datetime(s.start_time_iso)
         end_dt = parse_iso_datetime(s.end_time_iso)

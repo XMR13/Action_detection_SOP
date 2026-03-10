@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from yolo_kit.types import Detection
 
@@ -284,8 +284,8 @@ class _RoiDwellTracker:
                     matches.append((iou, ti, di))
         matches.sort(reverse=True, key=lambda x: x[0])
 
-        matched_tracks: set[int] = set()
-        matched_dets: set[int] = set()
+        matched_tracks: Set[int] = set()
+        matched_dets: Set[int] = set()
         for _, ti, di in matches:
             if ti in matched_tracks or di in matched_dets:
                 continue
@@ -487,7 +487,7 @@ class SopEngine:
     def _finalize_session(self, *, end_time_s: float) -> SessionResult:
         assert self._active is not None
 
-        notes: list[str] = list(self._active.notes)
+        notes: List[str] = list(self._active.notes)
 
         operator_status = StepStatus.DONE
         roi_status = StepStatus.UNKNOWN

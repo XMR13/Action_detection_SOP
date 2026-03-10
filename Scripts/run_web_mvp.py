@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import uvicorn
 
@@ -21,7 +21,7 @@ def _default_db_path(data_dir: Path) -> Path:
     return data_dir / "web_mvp.sqlite3"
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Run the SOP Review Website MVP (FastAPI + SQLite).")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)

@@ -6,7 +6,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -19,8 +19,8 @@ class BasicAuthConfig:
     password: Optional[str] = None
     cookie_name: str = "sop_review_session"
     cookie_max_age_s: int = 12 * 60 * 60  # 12 hours
-    allow_unauth_prefixes: tuple[str, ...] = ("/ui/",)
-    allow_unauth_paths: tuple[str, ...] = ("/", "/api/health", "/api/auth/login")
+    allow_unauth_prefixes: Tuple[str, ...] = ("/ui/",)
+    allow_unauth_paths: Tuple[str, ...] = ("/", "/api/health", "/api/auth/login")
 
 
 def _unauthorized() -> Response:

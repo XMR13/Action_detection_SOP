@@ -5,7 +5,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ def _iter_files(root: Path, pattern: str) -> Iterable[Path]:
 
 def _eligible_files(*, data_dir: Path, policy: RetentionPolicy, now_ts: Optional[float] = None) -> List[RetentionAction]:
     now = float(now_ts if now_ts is not None else time.time())
-    candidates: list[tuple[str, Iterable[Path], float]] = [
+    candidates: List[Tuple[str, Iterable[Path], float]] = [
         ("transcoded_cache", _iter_files(data_dir / "_web_cache" / "transcoded", "*.mp4"), float(policy.transcoded_cache_days)),
         ("annotated_video", _iter_files(data_dir / "sessions", "annotated.mp4"), float(policy.annotated_video_days)),
         ("evidence_clip", _iter_files(data_dir / "sessions", "*.mp4"), float(policy.evidence_clip_days)),
@@ -100,7 +100,7 @@ def apply_retention(*, data_dir: Path, policy: RetentionPolicy, dry_run: bool, n
     )
 
 
-def _actions_to_json(actions: List[RetentionAction]) -> List[dict]:
+def _actions_to_json(actions: List[RetentionAction]) -> List[Dict[str, object]]:
     return [
         {
             "category": item.category,
@@ -112,7 +112,7 @@ def _actions_to_json(actions: List[RetentionAction]) -> List[dict]:
     ]
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Cleanup retention-managed generated artifacts under a SOP data directory.")
     parser.add_argument("--data-dir", type=Path, default=Path.cwd() / "data")
     parser.add_argument("--transcoded-cache-days", type=float, default=7.0)

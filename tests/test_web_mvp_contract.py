@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from typing import Dict, Optional
 
 from fastapi.testclient import TestClient
 
@@ -10,7 +11,7 @@ from Action_Detection_SOP.web_mvp.app import API_CONTRACT_VERSION, create_app
 from Action_Detection_SOP.web_mvp.settings import WebMvpSettings
 
 
-def _auth_headers(username: str = "admin", password: str = "secret") -> dict[str, str]:
+def _auth_headers(username: str = "admin", password: str = "secret") -> Dict[str, str]:
     token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
     return {"Authorization": f"Basic {token}"}
 
@@ -35,7 +36,7 @@ def _put_min_session(
     *,
     session_uid: str,
     start_date: str = "2026-03-03",
-    extra: dict[str, object] | None = None,
+    extra: Optional[Dict[str, object]] = None,
 ) -> None:
     payload = {
         "session_uid": session_uid,

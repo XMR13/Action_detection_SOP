@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.client import HTTPConnection, HTTPSConnection, HTTPResponse
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
@@ -213,7 +213,7 @@ def _iter_sessions(data_dir: Path) -> Iterable[LocalSession]:
     sessions_root = data_dir / "sessions"
     if not sessions_root.exists():
         return []
-    out: list[LocalSession] = []
+    out: List[LocalSession] = []
     for date_dir in sorted(sessions_root.iterdir()):
         if not date_dir.is_dir():
             continue
@@ -879,7 +879,7 @@ def _process_pending_tasks(
 ) -> ProcessStats:
     stats = ProcessStats()
     pending_files = list(_iter_pending_task_files(spool))
-    pending_with_tasks: list[Tuple[Path, SpoolTask]] = []
+    pending_with_tasks: List[Tuple[Path, SpoolTask]] = []
     for path in pending_files:
         try:
             task = _load_task(path)
@@ -955,7 +955,7 @@ def _process_pending_tasks(
 
 
 def _next_pending_retry_ts(spool: SpoolPaths) -> Optional[float]:
-    due_values: list[float] = []
+    due_values: List[float] = []
     for path in _iter_pending_task_files(spool):
         try:
             task = _load_task(path)
@@ -967,7 +967,7 @@ def _next_pending_retry_ts(spool: SpoolPaths) -> Optional[float]:
     return min(due_values)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Upload completed SOP sessions to the review website (web MVP).")
     parser.add_argument("--data-dir", type=Path, default=Path.cwd() / "data", help="Root containing sessions/YYYY-MM-DD.")
     parser.add_argument("--server", required=True, help="Website base URL, e.g. http://10.0.0.10:8000")

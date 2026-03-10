@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -87,7 +87,7 @@ def load_roi_json(path: Path) -> RoiPolygon:
         if isinstance(fw, (int, float)) and isinstance(fh, (int, float)):
             frame_size = (int(fw), int(fh))
 
-    points: list[Point] = []
+    points: List[Point] = []
     for idx, p in enumerate(poly):
         if (
             not isinstance(p, (list, tuple))
