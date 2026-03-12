@@ -9,6 +9,22 @@ from Action_Detection_SOP.run_config import apply_run_config, collect_cli_dests,
 from Action_Detection_SOP.runner_mvp import run_mvp
 
 
+def _add_bool_optional_flag(
+    parser: argparse.ArgumentParser,
+    name: str,
+    *,
+    default: Optional[bool],
+    help_text: str,
+) -> None:
+    """
+    Python 3.8-compatible replacement for argparse.BooleanOptionalAction.
+    """
+
+    dest = name.lstrip("-").replace("-", "_")   
+    parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
+    parser.add_argument(f"--no-{dest.replace('_', '-')}", dest=dest, action="store_false", help=argparse.SUPPRESS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MVP-A SOP runner (operator session in ROI + helmet compliance).")
     parser.add_argument("--config", default=None, help="Optional JSON config to reduce CLI args (CLI overrides config).")
@@ -73,11 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="OpenCV capture buffer size hint for RTSP (0 = backend default).",
     )
-    parser.add_argument(
+    _add_bool_optional_flag(
+        parser,
         "--rtsp-prefer-ffmpeg",
-        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Prefer FFmpeg backend for RTSP open when available.",
+        help_text="Prefer FFmpeg backend for RTSP open when available.",
     )
     parser.add_argument(
         "--source-fps",
@@ -217,11 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-pre-s", type=float, default=2.0, help="Seconds of evidence before DONE events.")
     parser.add_argument("--evidence-post-s", type=float, default=2.0, help="Seconds of evidence after DONE events.")
     parser.add_argument("--evidence-max-s", type=float, default=6.0, help="Max total length for each evidence clip.")
-    parser.add_argument(
+    _add_bool_optional_flag(
+        parser,
         "--progress",
-        action=argparse.BooleanOptionalAction,
         default=None,
-        help="Show console progress (default: on for --video, off for rtsp/webcam).",
+        help_text="Show console progress (default: on for --video, off for rtsp/webcam).",
     )
     parser.add_argument("--progress-every-s", type=float, default=2.0, help="Progress update interval (seconds).")
     parser.add_argument("--progress-bar-width", type=int, default=30, help="Width of the progress bar.")
