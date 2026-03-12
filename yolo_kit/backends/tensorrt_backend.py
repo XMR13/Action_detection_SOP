@@ -131,7 +131,7 @@ class TensorRTBackend:
         self._cudart = cudart
         self.engine_path = Path(engine_path)
         if not self.engine_path.exists():
-            raise FileNotFoundError(str(self.engine_path))
+            raise FileNotFoundError(f"TensorRT engine file not found in : {self.engine_path}")
 
         self.device_id = _parse_cuda_device_id(cfg.device)
         _cuda_call(cudart, cudart.cudaSetDevice(int(self.device_id)))
