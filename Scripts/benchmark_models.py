@@ -170,6 +170,8 @@ def _run_case(args: argparse.Namespace, case: CaseSpec) -> CaseResult:
         onnx_providers=onnx_providers,
         onnx_input_name=args.onnx_input_name,
         onnx_output_name=args.onnx_output_name,
+        trt_output_name=args.trt_output_name,
+        trt_output_index=int(args.trt_output_index),
     )
 
     t_pre: List[float] = []
@@ -251,6 +253,17 @@ def main() -> int:
         default=None,
         help='Override ONNX output name (default: first output, e.g. "output0").',
     )
+    parser.add_argument(
+        "--trt-output-name",
+        default=None,
+        help="Override TensorRT output tensor name (default: selected by --trt-output-index).",
+    )
+    parser.add_argument(
+        "--trt-output-index",
+        type=int,
+        default=0,
+        help="TensorRT output tensor index to use when the engine exposes multiple outputs.",
+    )
 
     parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
@@ -279,6 +292,8 @@ def main() -> int:
         raise ValueError("--conf must be in [0, 1]")
     if args.iou < 0 or args.iou > 1:
         raise ValueError("--iou must be in [0, 1]")
+    if args.trt_output_index < 0:
+        raise ValueError("--trt-output-index must be >= 0")
 
     cases = [_parse_case(c) for c in args.case]
 
@@ -301,4 +316,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

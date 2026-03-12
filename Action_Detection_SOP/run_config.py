@@ -93,6 +93,7 @@ def apply_run_config(
         "backend",
         "out_dir",
         "onnx_providers",
+        "trt_output_name",
     }
     int_keys = {
         "webcam",
@@ -108,6 +109,7 @@ def apply_run_config(
         "roi_expand",
         "max_frames",
         "progress_bar_width",
+        "trt_output_index",
     }
     float_keys = {
         "reconnect_wait_s",

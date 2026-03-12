@@ -49,6 +49,58 @@ DEFAULT_SESSION_END_S = 3.0
 DEFAULT_ROI_DWELL_S = 8.0
 
 
+@dataclass
+class StagePerfTracker:
+    preprocess_s: List[float]
+    inference_s: List[float]
+    postprocess_s: List[float]
+    total_s: List[float]
+
+    def record(self, *, preprocess_s: float, inference_s: float, postprocess_s: float, total_s: float) -> None:
+        self.preprocess_s.append(float(preprocess_s))
+        self.inference_s.append(float(inference_s))
+        self.postprocess_s.append(float(postprocess_s))
+        self.total_s.append(float(total_s))
+
+
+def _percentile_s(values_s: Sequence[float], q: float) -> float:
+    if not values_s:
+        return 0.0
+    values = sorted(float(v) * 1000.0 for v in values_s)
+    if len(values) == 1:
+        return float(values[0])
+    pos = (float(q) / 100.0) * (len(values) - 1)
+    lo = int(pos)
+    hi = min(len(values) - 1, lo + 1)
+    if lo == hi:
+        return float(values[lo])
+    t = pos - lo
+    return float(values[lo] * (1.0 - t) + values[hi] * t)
+
+
+def _summary_ms(values_s: Sequence[float]) -> Dict[str, float]:
+    if not values_s:
+        return {"n": 0.0, "mean_ms": 0.0, "p50_ms": 0.0, "p95_ms": 0.0}
+    total = sum(float(v) for v in values_s)
+    count = len(values_s)
+    return {
+        "n": float(count),
+        "mean_ms": (total * 1000.0) / float(count),
+        "p50_ms": _percentile_s(values_s, 50.0),
+        "p95_ms": _percentile_s(values_s, 95.0),
+    }
+
+
+def _format_stage_summary(label: str, values_s: Sequence[float]) -> str:
+    summary = _summary_ms(values_s)
+    return (
+        f"{label}: n={int(summary['n'])} "
+        f"mean={summary['mean_ms']:.3f}ms "
+        f"p50={summary['p50_ms']:.3f}ms "
+        f"p95={summary['p95_ms']:.3f}ms"
+    )
+
+
 def _name_to_ids(class_names: Dict[int, str], labels: Sequence[str]) -> List[int]:
     wanted = {s.strip().lower() for s in labels if s.strip()}
     ids: List[int] = []
@@ -151,6 +203,17 @@ def _overlay_style(frame_height: int) -> Tuple[float, int]:
     scale = max(0.5, min(1.6, scale))
     thickness = max(1, int(round(scale * 2)))
     return scale, thickness
+
+
+def _run_pipeline_timed(pipeline: object, image_bgr: "cv2.Mat") -> Tuple[List[Detection], Tuple[float, float, float, float]]:
+    t0 = time.perf_counter()
+    prep = pipeline.preprocess(image_bgr)
+    t1 = time.perf_counter()
+    preds = pipeline._infer_fn(prep.blob)  # type: ignore[attr-defined]
+    t2 = time.perf_counter()
+    detections = pipeline.post.process(preds, orig_size=prep.orig_size, pad=prep.pad, ratio=prep.ratio)
+    t3 = time.perf_counter()
+    return detections, (t1 - t0, t2 - t1, t3 - t2, t3 - t0)
 
 
 def _format_progress(
@@ -296,6 +359,8 @@ def run_mvp(
         ),
         letterbox_cfg=LetterboxConfig(new_shape=(int(args.imgsz), int(args.imgsz))),
         onnx_providers=onnx_providers,
+        trt_output_name=args.trt_output_name,
+        trt_output_index=int(args.trt_output_index),
     )
     if pipeline.backend_name == "onnxruntime":
         ort_backend = pipeline.backend
@@ -320,6 +385,15 @@ def run_mvp(
                     msg += f" Available providers: {available_providers}."
                 msg += ' Hint: pass --onnx-providers "CUDAExecutionProvider" (or use --require-cuda).'
                 raise RuntimeError(msg)
+    elif pipeline.backend_name == "tensorrt":
+        trt_backend = pipeline.backend
+        if trt_backend is not None and hasattr(trt_backend, "output_names"):
+            print(
+                "TensorRT outputs:",
+                list(getattr(trt_backend, "output_names")),
+                "selected:",
+                getattr(trt_backend, "primary_output", None),
+            )
 
     if args.loop_video and not args.video:
         raise ValueError("--loop-video is only valid with --video.")
@@ -337,6 +411,8 @@ def run_mvp(
         raise ValueError("--rtsp-read-timeout-ms must be >= 0")
     if args.rtsp_buffer_size < 0:
         raise ValueError("--rtsp-buffer-size must be >= 0")
+    if args.trt_output_index < 0:
+        raise ValueError("--trt-output-index must be >= 0")
 
     if args.roi_upscale < 1.0:
         raise ValueError("--roi-upscale must be >= 1.0")
@@ -606,6 +682,7 @@ def run_mvp(
     printed_progress = False
     pbar = None
     last_pbar_frame = 0
+    perf = StagePerfTracker(preprocess_s=[], inference_s=[], postprocess_s=[], total_s=[])
     if progress_enabled and tqdm is not None:
         if total_frames is not None:
             pbar = tqdm(total=total_frames, unit="frame", desc="sop", mininterval=progress_every_s)
@@ -650,6 +727,11 @@ def run_mvp(
                 if delta:
                     pbar.update(delta)
                     last_pbar_frame = frame_idx
+                if should_process and perf.total_s:
+                    elapsed = max(time.monotonic() - progress_start, 1e-6)
+                    proc_fps = float(processed) / elapsed
+                    total_summary = _summary_ms(perf.total_s)
+                    pbar.set_postfix(proc_fps=f"{proc_fps:.1f}", det_ms=f"{total_summary['mean_ms']:.1f}", refresh=False)
             elif progress_enabled and progress_every_s > 0:
                 now = time.monotonic()
                 if now - last_progress >= progress_every_s:
@@ -665,6 +747,10 @@ def run_mvp(
                     sys.stdout.flush()
                     printed_progress = True
                     last_progress = now
+                    if should_process and perf.total_s:
+                        total_summary = _summary_ms(perf.total_s)
+                        sys.stdout.write(f" det_ms={total_summary['mean_ms']:.1f}")
+                        sys.stdout.flush()
 
             # Timestamp
             t_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
@@ -730,10 +816,22 @@ def run_mvp(
                         )
                         inv_scale = 1.0 / s
 
-                    dets_local = pipeline(crop)
+                    dets_local, perf_s = _run_pipeline_timed(pipeline, crop)
+                    perf.record(
+                        preprocess_s=perf_s[0],
+                        inference_s=perf_s[1],
+                        postprocess_s=perf_s[2],
+                        total_s=perf_s[3],
+                    )
                     dets_global = _offset_detections(dets_local, dx=float(x0), dy=float(y0), inv_scale=inv_scale)
                 else:
-                    dets_global = pipeline(frame)
+                    dets_global, perf_s = _run_pipeline_timed(pipeline, frame)
+                    perf.record(
+                        preprocess_s=perf_s[0],
+                        inference_s=perf_s[1],
+                        postprocess_s=perf_s[2],
+                        total_s=perf_s[3],
+                    )
 
                 dets_roi = _filter_by_roi(dets_global, roi_for_frame)
                 persons_all, helmets_all = _split_classes(dets_global, person_ids=person_ids, helmet_ids=helmet_ids)
@@ -1020,6 +1118,13 @@ def run_mvp(
 
     daily_json = write_daily_report(out_dir=out_dir, date=date, sessions=sessions)
     daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
+    run_config["performance"] = {
+        "preprocess": _summary_ms(perf.preprocess_s),
+        "inference": _summary_ms(perf.inference_s),
+        "postprocess": _summary_ms(perf.postprocess_s),
+        "total": _summary_ms(perf.total_s),
+        "samples_recorded": int(len(perf.total_s)),
+    }
     if run_video_path is not None:
         run_config["run_video"] = _file_metadata(run_video_path)
     if discarded_sessions:
@@ -1036,6 +1141,11 @@ def run_mvp(
     print(f"Wrote daily report: {outputs.daily_report_json}")
     print(f"Wrote sessions CSV: {outputs.daily_report_csv}")
     print(f"Wrote run config: {run_config_path}")
+    if perf.total_s:
+        print(_format_stage_summary("preprocess", perf.preprocess_s))
+        print(_format_stage_summary("inference", perf.inference_s))
+        print(_format_stage_summary("postprocess", perf.postprocess_s))
+        print(_format_stage_summary("total", perf.total_s))
     print(f"Sessions: {len(outputs.session_dirs)}")
 
     return 0

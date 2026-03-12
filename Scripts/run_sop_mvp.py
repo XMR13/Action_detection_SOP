@@ -124,6 +124,17 @@ def build_parser() -> argparse.ArgumentParser:
         help='Comma-separated ORT providers, e.g. "CUDAExecutionProvider,CPUExecutionProvider".',
     )
     parser.add_argument(
+        "--trt-output-name",
+        default=None,
+        help="Override TensorRT output tensor name (default: selected by --trt-output-index).",
+    )
+    parser.add_argument(
+        "--trt-output-index",
+        type=int,
+        default=0,
+        help="TensorRT output tensor index to use when the engine exposes multiple outputs.",
+    )
+    parser.add_argument(
         "--require-onnx-provider",
         action="append",
         default=[],

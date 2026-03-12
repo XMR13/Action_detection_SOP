@@ -300,7 +300,9 @@ class TensorRTBackend:
             self._free_device_ptr(existing.device_ptr)
 
         device_ptr = int(_cuda_call(self._cudart, self._cudart.cudaMalloc(nbytes)))
-        host_array = None if is_input else np.empty(shape, dtype=dtype)
+        host_array = None
+        if (not is_input) and name == self.primary_output:
+            host_array = np.empty(shape, dtype=dtype)
         state = _BindingState(
             name=name,
             index=index,
@@ -380,24 +382,21 @@ class TensorRTBackend:
         if not ok:
             raise RuntimeError("TensorRT execution failed")
 
-        for name in self.output_names:
-            out_state = self._binding_states[name]
-            assert out_state.host_array is not None
-            _cuda_call(
-                cudart,
-                cudart.cudaMemcpyAsync(
-                    int(out_state.host_array.ctypes.data),
-                    int(out_state.device_ptr),
-                    int(out_state.nbytes),
-                    cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
-                    self._stream,
-                ),
-            )
+        out_state = self._binding_states[self.primary_output]
+        assert out_state.host_array is not None
+        _cuda_call(
+            cudart,
+            cudart.cudaMemcpyAsync(
+                int(out_state.host_array.ctypes.data),
+                int(out_state.device_ptr),
+                int(out_state.nbytes),
+                cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                self._stream,
+            ),
+        )
 
         _cuda_call(cudart, cudart.cudaStreamSynchronize(self._stream))
-        primary = self._binding_states[self.primary_output].host_array
-        assert primary is not None
-        return primary
+        return out_state.host_array
 
     def close(self) -> None:
         for state in list(self._binding_states.values()):
