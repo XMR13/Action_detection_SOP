@@ -128,6 +128,28 @@ class TestYoloPostprocessDecode(unittest.TestCase):
         self.assertTrue(np.allclose(scores_out[:2], np.array([0.9, 0.8], dtype=np.float32)))
         self.assertTrue(np.array_equal(class_ids_out[:2], np.array([1, 0], dtype=np.int64)))
 
+    def test_decode_two_class_anchors_with_sparse_scores(self) -> None:
+        # Two-class YOLO exports are shaped (4 + 2, A). Helmet/person models can have
+        # sparse score rows with many exact zeros; those rows must still decode as class
+        # scores, not as score + class_id.
+        a = 8400
+        boxes = np.zeros((4, a), dtype=np.float32)
+        boxes[0, :] = 50
+        boxes[1, :] = 60
+        boxes[2, :] = 10
+        boxes[3, :] = 20
+
+        class_scores = np.zeros((2, a), dtype=np.float32)
+        class_scores[0, 0] = 0.84
+        class_scores[1, 1] = 0.77
+        class_scores[1, 2] = 0.13
+
+        p = np.vstack([boxes, class_scores])  # (6, 8400)
+        post = YoloPostprocessor(YoloPostConfig(anchors_has_objectness=False))
+        _boxes_out, scores, class_ids = post._decode(p)
+        self.assertTrue(np.allclose(scores[:3], np.array([0.84, 0.77, 0.13], dtype=np.float32)))
+        self.assertTrue(np.array_equal(class_ids[:3], np.array([0, 1, 1], dtype=np.int64)))
+
     def test_process_denormalizes_boxes_when_needed(self) -> None:
         # Some ONNX exports emit normalized cxcywh in anchors layout: (4 + C, A).
         # Ensure process() scales normalized boxes back to pixel coords.

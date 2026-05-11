@@ -1,96 +1,157 @@
 # Action Detection SOP (Roll Wrapping)
 
-On-prem computer vision pipeline for SOP compliance in roll wrapping, optimized for Jetson deployment.
+On-prem computer vision pipeline for roll-wrapping SOP review, built for Jetson deployment and a filesystem-first review workflow.
 
-## Scope (current MVP)
+## Current State
 
-- Sessionization by person-in-ROI.
-- SOP checks: `operator_present`, `roi_dwell`, `helmet`.
-- Filesystem-first outputs (`data/sessions`, `data/reports`) + FastAPI review website.
-- Edge-to-web sync via uploader with persistent offline spool, retry backoff, and watch mode.
-- Stable `session_uid` in session artifacts for idempotent review and upload flows.
-
-## Current Status
-
-- Done: MVP runner, evidence clips, review website viewer/ingestion modes, uploader sync, config-file runs, golden-set runner.
-- Partial: supervised PPE dataset reproducibility, official PPE deployment model naming, roll-session pipeline integration.
-- Next: ops hardening (`M5.5`) for monitoring, retention, backup/restore, and handover docs.
-- Deferred: reviewer identity + audit trail (`M5.4`) until the deployment is no longer single-user.
+- Working MVP: person-in-ROI sessions, helmet checks, evidence clips, daily reports, FastAPI review website, and Jetson-to-web uploader.
+- Next profile: `roll_sop_v1`, a roll-centric SOP flow for the moved CCTV viewpoint.
+- Current `roll_sop_v1` target checks: `cleaned`, `labeled`, and `overall_status`.
+- Separate safety flow: helmet alerts are independent website alert records, not part of roll `overall_status`.
 
 ## Requirements
 
 - Python `3.10`
 - Dependency manager: `uv`
-- Deployment target: Jetson Orin NX (JetPack `6.x+`)
+- Deployment target: Jetson Orin NX / JetPack `6.x+`
 
-## Quick Start
+## Important Files
 
-1. Prepare ROI (once per camera):
-   - `python3 -m Scripts.calibrate_roi --video path/to/video.mp4 --out configs/roi.json`
-2. Run SOP MVP:
-   - `python3 -m Scripts.run_sop_mvp --video path/to/video.mp4 --roi configs/roi.json --model Models/your_ppe_model.onnx --metadata configs/metadata_PPE.yaml`
-3. Optional config-file mode:
-   - `cp configs/run_sop_mvp.example.json configs/run_sop_mvp.json`
-   - `python3 -m Scripts.run_sop_mvp --config configs/run_sop_mvp.json`
+- Runner: `Scripts/run_sop_mvp.py`
+- Web review server: `Scripts/run_web_mvp.py`
+- Uploader: `Scripts/sop_uploader.py`
+- Frame extraction: `Scripts/extract_frames_for_labeling.py`
+- Auto pre-annotation: `Scripts/auto_annotate_person_coco.py`
+- Current PPE metadata: `configs/metadata_PPE.yaml`
+- Next roll SOP metadata: `configs/metadata_roll_sop_v1.yaml`
+- Roadmap: `plan.md`
+- Domain terms: `CONTEXT.md`
+
+## Current MVP Run
+
+Prepare ROI once per camera:
+
+```bash
+python3 -m Scripts.calibrate_roi \
+  --video path/to/video.mp4 \
+  --out configs/roi.json
+```
+
+Run the existing SOP MVP:
+
+```bash
+python3 -m Scripts.run_sop_mvp \
+  --video path/to/video.mp4 \
+  --roi configs/roi.json \
+  --model Models/yolo10s-PPE.onnx \
+  --metadata configs/metadata_PPE.yaml
+```
+
+Config-file mode is preferred for repeatable runs:
+
+```bash
+python3 -m Scripts.run_sop_mvp --config configs/run_sop_mvp.json
+```
+
+## Labeling Workflow
+
+Extract screenshots from long videos at a coarse rate first:
+
+```bash
+python3 -m Scripts.extract_frames_for_labeling \
+  --video path/to/video_01.mp4 \
+  --out-dir datasets/roll_sop_v1/frames/video_01 \
+  --target-fps 0.2 \
+  --dedupe-threshold 2.0
+```
+
+Pre-annotate `person` and `helmet` with the current PPE model:
+
+```bash
+python3 -m Scripts.auto_annotate_person_coco \
+  --images-dir datasets/roll_sop_v1/frames/video_01 \
+  --out datasets/roll_sop_v1/frames/video_01/auto_coco.json \
+  --model Models/yolo10s-PPE.onnx \
+  --metadata configs/metadata_PPE.yaml \
+  --label person \
+  --label helmet
+```
+
+In CVAT, manually add the remaining classes:
+
+- `roll`
+- `cleaning_cloth`
+- `label`
+
+The next training contract is:
+
+```text
+datasets/roll_sop_v1/
+Models/roll_sop_v1.onnx
+configs/metadata_roll_sop_v1.yaml
+```
 
 ## Output Paths
 
 - Session artifacts: `data/sessions/YYYY-MM-DD/session_<id>/`
-- Daily report: `data/reports/YYYY-MM-DD/`
+- Daily reports: `data/reports/YYYY-MM-DD/`
 - Evidence clips: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4`
 - Uploader spool: `data/uploader_spool/{pending,done,dead}/`
+- Planned helmet alerts: `data/alerts/YYYY-MM-DD/<alert_uid>/`
 
-Each `checklist.json` includes a generated `session_uid`, which is the primary key used by the web API and uploader.
+Each session `checklist.json` includes `session_uid`, used by the web API and uploader for idempotent sync.
 
-## Web Review MVP
+## Web Review
 
-- Set credentials:
-  - `SOP_ADMIN_USERNAME=admin`
-  - `SOP_ADMIN_PASSWORD=your_password`
-- Run web server:
-  - `uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data`
-- Open:
-  - `http://<WEB_SERVER_IP>:8000/`
+Run the review website:
 
-Current web behavior:
-- `/` redirects to `/ui/index.html`
-- viewer mode indexes local disk artifacts
-- ingestion mode accepts uploader/API pushes into UID-based session folders
-- auth is single-admin for now; per-reviewer audit history is not implemented yet
-- ops visibility is available via `/api/admin/ops`
+```bash
+SOP_ADMIN_USERNAME=admin \
+SOP_ADMIN_PASSWORD=your_password \
+uv run python -m Scripts.run_web_mvp --host 0.0.0.0 --port 8000 --data-dir data
+```
 
-## Jetson Sync (Uploader)
+Open:
 
-- One-shot upload:
-  - `python3 -m Scripts.sop_uploader --server http://<WEB_SERVER_IP>:8000 --data-dir data`
-- Continuous sync (recommended):
-  - `python3 -m Scripts.sop_uploader --server http://<WEB_SERVER_IP>:8000 --data-dir data --watch --poll-s 5 --retry-wait-s 2 --retry-backoff 2 --retry-wait-max-s 120 --max-attempts 0`
-- Spool folders:
-  - `data/uploader_spool/pending`
-  - `data/uploader_spool/done`
-  - `data/uploader_spool/dead`
+```text
+http://<WEB_SERVER_IP>:8000/
+```
 
-Uploader notes:
-- upserts `checklist.json` first, then uploads artifacts
-- retries transient failures with exponential backoff
-- leaves exhausted tasks in `dead/` for operator follow-up
-- writes spool heartbeat to `data/uploader_spool/state.json` each cycle
-- spool maintenance CLI:
-  - inspect: `python3 -m Scripts.spool_maintenance --data-dir data inspect`
-  - requeue dead (dry-run/apply): `python3 -m Scripts.spool_maintenance --data-dir data requeue-dead` / `--apply`
-  - prune old done records (dry-run/apply): `python3 -m Scripts.spool_maintenance --data-dir data prune-done --older-than-days 7` / `--apply`
+## Jetson Sync
+
+One-shot upload:
+
+```bash
+python3 -m Scripts.sop_uploader \
+  --server http://<WEB_SERVER_IP>:8000 \
+  --data-dir data
+```
+
+Continuous sync:
+
+```bash
+python3 -m Scripts.sop_uploader \
+  --server http://<WEB_SERVER_IP>:8000 \
+  --data-dir data \
+  --watch \
+  --poll-s 5 \
+  --retry-wait-s 2 \
+  --retry-backoff 2 \
+  --retry-wait-max-s 120 \
+  --max-attempts 0
+```
 
 ## Operations
 
-- Ops summary endpoint:
-  - `GET /api/admin/ops`
-- Retention cleanup dry-run:
-  - `python3 -m Scripts.cleanup_retention --data-dir data`
-- Retention cleanup apply:
-  - `python3 -m Scripts.cleanup_retention --data-dir data --apply`
+Ops summary endpoint:
 
-## Key References
+```text
+GET /api/admin/ops
+```
 
-- API contract: `docs/web_mvp_api_contract.md`
-- Operations runbook: `docs/operations_runbook.md`
-- Project roadmap: `plan.md`
+Retention cleanup:
+
+```bash
+python3 -m Scripts.cleanup_retention --data-dir data
+python3 -m Scripts.cleanup_retention --data-dir data --apply
+```

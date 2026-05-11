@@ -127,8 +127,16 @@ class YoloPostprocessor:
         if v.size == 0:
             return False
 
-        # Class IDs are discrete integers; allow tiny floating error.
+        # Class IDs are discrete integers; allow tiny floating error. Sparse class-score
+        # rows often contain many exact zeros, so judge non-zero values separately before
+        # treating a vector as class IDs.
         is_int = np.isclose(v, np.round(v), atol=1e-3)
+        non_zero = np.abs(v) > 1e-4
+        if np.any(non_zero):
+            frac_int_non_zero = float(np.mean(is_int[non_zero]))
+            if frac_int_non_zero < 0.98:
+                return False
+
         frac_int = float(np.mean(is_int))
         if frac_int < 0.98:
             return False
