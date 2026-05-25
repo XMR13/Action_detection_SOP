@@ -5,8 +5,9 @@ from typing import Optional, Tuple
 @dataclass
 class Detection:
     """
-    Generic detection object representation used across backends.
-    Using this dataclass, managing the object become easier
+    deskripsi generik representasi objek yang digunakan untuk menampilkan hasil deteksi
+    gunakan representasi ini sebagai datacalass, agar memungkinkan membuat pengaturan objek 
+    menjadi jauh lebih mudah
     """
     
     x1: float

@@ -76,6 +76,14 @@ def _normalize_labels(labels: Sequence[str]) -> Tuple[str, ...]:
     return tuple(out)
 
 
+def _labels_from_metadata(metadata: Optional[Path]) -> Tuple[str, ...]:
+    if metadata is None:
+        return ("class_0",)
+    class_names = load_class_names(str(metadata))
+    labels = [str(class_names[cid]).strip() for cid in sorted(class_names)]
+    return _normalize_labels(labels)
+
+
 def _parse_label_confs(raw_values: Sequence[str], *, labels: Sequence[str]) -> Dict[str, float]:
     allowed = set(labels)
     out: Dict[str, float] = {}
@@ -147,7 +155,9 @@ def _parse_args() -> ExportConfig:
     parser.add_argument("--model", default="Models/yolo10s-PPE.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument(
         "--metadata",
+        "--metada",
         default="configs/metadata_PPE.yaml",
+        dest="metadata",
         help="Path to class metadata yaml (names mapping). Set empty to skip name resolution.",
     )
     parser.add_argument("--backend", default=None, help="Force backend: onnxruntime / tensorrt / torchscript.")
@@ -169,8 +179,11 @@ def _parse_args() -> ExportConfig:
     parser.add_argument(
         "--label",
         action="append",
-        default=["person", "helmet"],
-        help="Class name to export from metadata (repeatable). Default: person + helmet.",
+        default=None,
+        help=(
+            "Class name to export from metadata (repeatable). "
+            "Default: all classes from --metadata, or class_0 when metadata is disabled."
+        ),
     )
     parser.add_argument(
         "--label-conf",
@@ -237,9 +250,9 @@ def _parse_args() -> ExportConfig:
     if not exts:
         raise ValueError("At least one --ext must be provided.")
 
-    labels = _normalize_labels(args.label)
+    labels = _normalize_labels(args.label) if args.label else _labels_from_metadata(metadata)
     if not labels:
-        raise ValueError("At least one --label must be provided.")
+        raise ValueError("No labels were selected. Check --metadata or provide at least one --label.")
     label_confs = _parse_label_confs(args.label_conf, labels=labels)
 
     return ExportConfig(

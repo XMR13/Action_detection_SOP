@@ -1,7 +1,9 @@
 import argparse
+from pathlib import Path
 
 import cv2
 
+from Action_Detection_SOP.roi import RoiPolygon, draw_roi, load_roi_json, resolve_roi_for_frame
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
 
 
@@ -33,6 +35,17 @@ def _processed_total_frames_from_capture(cap: cv2.VideoCapture, *, every: int):
     if total_i <= 0:
         return None
     return (total_i + every - 1) // every
+
+
+def _draw_roi_overlay(image_bgr, roi: RoiPolygon | None):
+    if roi is None:
+        return image_bgr
+    resolved = resolve_roi_for_frame(
+        roi,
+        frame_width=int(image_bgr.shape[1]),
+        frame_height=int(image_bgr.shape[0]),
+    )
+    return draw_roi(image_bgr, resolved)
 
 
 def main() -> int:
@@ -94,6 +107,11 @@ def main() -> int:
     )
     parser.add_argument("--show", action="store_true", help="Show a window with visualized detections.")
     parser.add_argument("--out", default=None, help="Optional output path (image or video) to save the visualization.")
+    parser.add_argument(
+        "--roi",
+        default=None,
+        help="Optional ROI polygon JSON to draw on the visualization (from Scripts/calibrate_roi.py).",
+    )
     parser.add_argument("--every", type=int, default=1, help="Process every Nth frame for video/webcam.")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0 = no limit).")
     parser.add_argument(
@@ -104,6 +122,7 @@ def main() -> int:
     args = parser.parse_args()
 
     class_names = load_class_names(args.metadata) if args.metadata else {}
+    roi = load_roi_json(Path(args.roi)) if args.roi else None
 
     if args.input_max_side < 0:
         raise ValueError("--input-max-side must be >= 0")
@@ -217,6 +236,7 @@ def main() -> int:
         else:
             detections = pipeline(img)
         vis = draw_detections(img, detections, class_names=class_names, show_score=True)
+        vis = _draw_roi_overlay(vis, roi)
         if args.out:
             ok = cv2.imwrite(args.out, vis)
             if not ok:
@@ -281,6 +301,7 @@ def main() -> int:
             frame = _maybe_resize_max_side(frame, max_side=int(args.input_max_side))
             detections = pipeline(frame)
             vis = draw_detections(frame, detections, class_names=class_names, show_score=True)
+            vis = _draw_roi_overlay(vis, roi)
 
             if args.out and writer is None:
                 fps = cap.get(cv2.CAP_PROP_FPS)
