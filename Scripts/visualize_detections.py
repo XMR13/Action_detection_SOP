@@ -1,10 +1,50 @@
 import argparse
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import cv2
 
 from Action_Detection_SOP.roi import RoiPolygon, draw_roi, load_roi_json, resolve_roi_for_frame
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
+
+
+def _parse_label_conf(raw_values, *, class_names):
+    if not raw_values:
+        return {}
+    if not class_names:
+        raise ValueError("--label-conf requires --metadata so label names can be resolved.")
+
+    by_name = {str(name).strip().lower(): int(class_id) for class_id, name in class_names.items()}
+    out = {}
+    for raw in raw_values:
+        if "=" not in str(raw):
+            raise ValueError(f"--label-conf must use label=value format, got: {raw!r}")
+        raw_label, raw_conf = str(raw).split("=", 1)
+        label = raw_label.strip().lower()
+        if not label:
+            raise ValueError(f"--label-conf has an empty label: {raw!r}")
+        if label not in by_name:
+            raise ValueError(f"--label-conf label {label!r} is not in metadata names: {sorted(by_name)}")
+        try:
+            conf = float(raw_conf)
+        except ValueError as exc:
+            raise ValueError(f"--label-conf value must be a number within [0, 1], got: {raw!r}") from exc
+        if conf < 0.0 or conf > 1.0:
+            raise ValueError(f"--label-conf value must be within [0, 1], got: {raw!r}")
+        out[int(by_name[label])] = conf
+    return out
+
+
+def _filter_by_class_conf(detections, *, default_conf: float, class_conf):
+    out = []
+    for det in detections:
+        class_id = int(det.class_id) if det.class_id is not None else None
+        min_conf = float(class_conf.get(class_id, default_conf))
+        if float(det.score) >= min_conf:
+            out.append(det)
+    return out
 
 
 def _maybe_resize_max_side(image_bgr, *, max_side: int):
@@ -48,6 +88,33 @@ def _draw_roi_overlay(image_bgr, roi: RoiPolygon | None):
     return draw_roi(image_bgr, resolved)
 
 
+def _compress_video_with_ffmpeg(src: Path, dst: Path, *, crf: int, preset: str) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return False
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(src),
+        "-c:v",
+        "libx264",
+        "-preset",
+        preset,
+        "-crf",
+        str(crf),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-an",
+        str(dst),
+    ]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run YOLO detection and visualize bounding boxes + labels.")
     src = parser.add_mutually_exclusive_group()
@@ -64,6 +131,15 @@ def main() -> int:
     )
     parser.add_argument("--imgsz", type=int, default=640, help="Letterbox input size (e.g., 640).")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold.")
+    parser.add_argument(
+        "--label-conf",
+        action="append",
+        default=[],
+        help=(
+            "Per-label confidence override, e.g. --label-conf cleaning_cloth=0.05. "
+            "Other classes keep --conf."
+        ),
+    )
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
     parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
     parser.add_argument("--max-det", type=int, default=50, help="Max detections to keep after NMS/top-K.")
@@ -108,6 +184,25 @@ def main() -> int:
     parser.add_argument("--show", action="store_true", help="Show a window with visualized detections.")
     parser.add_argument("--out", default=None, help="Optional output path (image or video) to save the visualization.")
     parser.add_argument(
+        "--out-max-side",
+        type=int,
+        default=0,
+        help="Optional resize for saved visualization only: max(H,W)=N (0=disabled).",
+    )
+    parser.add_argument(
+        "--out-codec",
+        default="mp4v",
+        help='OpenCV video writer codec for the intermediate/fallback output, e.g. "mp4v" or "XVID".',
+    )
+    parser.add_argument(
+        "--compress-out",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="For video outputs, transcode with ffmpeg/libx264 after writing when ffmpeg is available.",
+    )
+    parser.add_argument("--out-crf", type=int, default=30, help="ffmpeg CRF for --compress-out (higher = smaller/lower quality).")
+    parser.add_argument("--out-preset", default="veryfast", help="ffmpeg x264 preset for --compress-out.")
+    parser.add_argument(
         "--roi",
         default=None,
         help="Optional ROI polygon JSON to draw on the visualization (from Scripts/calibrate_roi.py).",
@@ -126,8 +221,16 @@ def main() -> int:
 
     if args.input_max_side < 0:
         raise ValueError("--input-max-side must be >= 0")
+    if args.out_max_side < 0:
+        raise ValueError("--out-max-side must be >= 0")
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
+    if args.conf < 0.0 or args.conf > 1.0:
+        raise ValueError("--conf must be within [0, 1]")
+    if not (0 <= int(args.out_crf) <= 51):
+        raise ValueError("--out-crf must be within [0, 51]")
+    if len(str(args.out_codec)) != 4:
+        raise ValueError("--out-codec must be a four-character OpenCV codec such as mp4v")
     onnx_providers = None
     if args.onnx_providers:
         onnx_providers = [p.strip() for p in str(args.onnx_providers).split(",") if p.strip()]
@@ -136,11 +239,23 @@ def main() -> int:
     if args.class_ids:
         class_ids = [int(x.strip()) for x in str(args.class_ids).split(",") if x.strip()]
 
+    class_conf = _parse_label_conf(args.label_conf, class_names=class_names)
+    if class_ids is not None:
+        selected = set(int(x) for x in class_ids)
+        unused_overrides = sorted(set(class_conf) - selected)
+        if unused_overrides:
+            names = [class_names.get(class_id, str(class_id)) for class_id in unused_overrides]
+            raise ValueError(
+                "--label-conf includes classes excluded by --class-ids: "
+                f"{names}. Add them to --class-ids or remove the override."
+            )
+    post_conf = min([float(args.conf), *[float(v) for v in class_conf.values()]])
+
     pipeline = load_pipeline(
         model_path=args.model,
         backend=args.backend,
         post_cfg=YoloPostConfig(
-            conf_threshold=args.conf,
+            conf_threshold=post_conf,
             iou_threshold=args.iou,
             apply_nms=not bool(args.no_nms),
             class_agnostic_nms=not bool(args.class_aware_nms),
@@ -235,8 +350,10 @@ def main() -> int:
             detections = pipeline.post.process(preds_np, orig_size=prep.orig_size, pad=prep.pad, ratio=prep.ratio)
         else:
             detections = pipeline(img)
+        detections = _filter_by_class_conf(detections, default_conf=float(args.conf), class_conf=class_conf)
         vis = draw_detections(img, detections, class_names=class_names, show_score=True)
         vis = _draw_roi_overlay(vis, roi)
+        vis = _maybe_resize_max_side(vis, max_side=int(args.out_max_side))
         if args.out:
             ok = cv2.imwrite(args.out, vis)
             if not ok:
@@ -270,11 +387,19 @@ def main() -> int:
             raise RuntimeError(f"Could not open webcam index: {cam_index}")
 
     writer = None
+    writer_path = Path(args.out) if args.out else None
+    final_out_path = Path(args.out) if args.out else None
     frame_idx = 0
     processed = 0
     pbar = None
 
     try:
+        if args.out and bool(args.compress_out):
+            suffix = final_out_path.suffix if final_out_path is not None and final_out_path.suffix else ".mp4"
+            tmp = tempfile.NamedTemporaryFile(prefix="visualize_raw_", suffix=suffix, delete=False)
+            tmp.close()
+            writer_path = Path(tmp.name)
+
         # Default: when writing a video output, show progress (best-effort).
         # For offline videos we can usually estimate total frames; for webcam the bar is indeterminate.
         if args.out:
@@ -300,18 +425,20 @@ def main() -> int:
 
             frame = _maybe_resize_max_side(frame, max_side=int(args.input_max_side))
             detections = pipeline(frame)
+            detections = _filter_by_class_conf(detections, default_conf=float(args.conf), class_conf=class_conf)
             vis = draw_detections(frame, detections, class_names=class_names, show_score=True)
             vis = _draw_roi_overlay(vis, roi)
+            vis = _maybe_resize_max_side(vis, max_side=int(args.out_max_side))
 
             if args.out and writer is None:
                 fps = cap.get(cv2.CAP_PROP_FPS)
                 if fps is None or fps <= 0:
                     fps = 30.0
                 h, w = vis.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                writer = cv2.VideoWriter(args.out, fourcc, fps, (w, h))
+                fourcc = cv2.VideoWriter_fourcc(*str(args.out_codec))
+                writer = cv2.VideoWriter(str(writer_path), fourcc, fps, (w, h))
                 if not writer.isOpened():
-                    raise RuntimeError(f"Failed to open video writer: {args.out}")
+                    raise RuntimeError(f"Failed to open video writer: {writer_path}")
 
             if writer is not None:
                 writer.write(vis)
@@ -332,6 +459,30 @@ def main() -> int:
         cap.release()
         if writer is not None:
             writer.release()
+            writer = None
+        if (
+            args.out
+            and bool(args.compress_out)
+            and writer_path is not None
+            and final_out_path is not None
+            and writer_path.exists()
+            and writer_path.stat().st_size > 0
+        ):
+            compressed = _compress_video_with_ffmpeg(
+                writer_path,
+                final_out_path,
+                crf=int(args.out_crf),
+                preset=str(args.out_preset),
+            )
+            if compressed:
+                try:
+                    writer_path.unlink()
+                except OSError:
+                    pass
+            else:
+                if writer_path != final_out_path:
+                    shutil.move(str(writer_path), str(final_out_path))
+                    print("Note: ffmpeg compression unavailable/failed; kept OpenCV mp4v output.")
         if pbar is not None:
             pbar.close()
         if args.show:
