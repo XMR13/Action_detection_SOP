@@ -34,7 +34,6 @@ except ModuleNotFoundError as exc:
     def get_capture_info(*args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
         raise RuntimeError("OpenCV (cv2) is not installed. Install opencv-python to use capture ingestion.")
 from .reporting import (
-    DailyReport,
     today_date_str,
     write_daily_csv,
     write_daily_report,
@@ -51,7 +50,6 @@ __all__ = [
     "open_capture",
     "SopProfile",
     "load_sop_profile",
-    "DailyReport",
     "today_date_str",
     "write_daily_csv",
     "write_daily_report",

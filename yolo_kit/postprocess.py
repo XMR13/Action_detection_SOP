@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Sequence, Tuple
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -13,6 +13,9 @@ class YoloPostConfig:
     Konfigturasi untuk YOLO post processing
     """
     conf_threshold: float = 0.25
+    # Optional per-class confidence thresholds. Keys are numeric class IDs.
+    # Classes not listed here use conf_threshold.
+    class_conf_thresholds: Optional[Dict[int, float]] = None
     iou_threshold: float = 0.4
     max_detections: int = 50
     # If False, skip NMS and only keep top `max_detections` by score.
@@ -76,8 +79,15 @@ class YoloPostprocessor:
 
         boxes_xyxy = self._maybe_denormalize_boxes_xyxy(boxes_xyxy, orig_size=orig_size, pad=pad, ratio=ratio)
 
-        # Filter by score
-        keep = scores >= self.cfg.conf_threshold
+        # Filter by score. Per-class thresholds allow weak small classes to use
+        # a lower threshold without lowering the gate for every class.
+        if self.cfg.class_conf_thresholds:
+            thresholds = np.full(scores.shape, float(self.cfg.conf_threshold), dtype=np.float32)
+            for cls_id, threshold in self.cfg.class_conf_thresholds.items():
+                thresholds[class_ids == int(cls_id)] = float(threshold)
+            keep = scores >= thresholds
+        else:
+            keep = scores >= self.cfg.conf_threshold
         boxes_xyxy, scores, class_ids = boxes_xyxy[keep], scores[keep], class_ids[keep]
         if boxes_xyxy.size == 0:
             return []
