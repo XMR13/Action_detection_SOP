@@ -182,6 +182,28 @@ class TestYoloPostprocessDecode(unittest.TestCase):
         self.assertAlmostEqual(dets[0].x2, 480.0, delta=1.0)
         self.assertAlmostEqual(dets[0].y2, 480.0, delta=1.0)
 
+    def test_process_applies_per_class_conf_thresholds(self) -> None:
+        p = np.array(
+            [
+                [10, 10, 20, 20, 0.20, 3],  # cleaning_cloth override keeps this
+                [30, 30, 40, 40, 0.20, 4],  # label uses global threshold and is dropped
+                [50, 50, 60, 60, 0.40, 2],  # roll uses global threshold and is kept
+            ],
+            dtype=np.float32,
+        )
+        post = YoloPostprocessor(
+            YoloPostConfig(
+                conf_threshold=0.35,
+                class_conf_thresholds={3: 0.10},
+                apply_nms=False,
+                decoded_box_format="xyxy",
+            )
+        )
+
+        dets = post.process(p, orig_size=(100, 100), pad=(0.0, 0.0), ratio=(1.0, 1.0))
+
+        self.assertEqual(sorted(d.class_id for d in dets), [2, 3])
+
 
 if __name__ == "__main__":
     unittest.main()
