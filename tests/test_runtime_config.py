@@ -44,8 +44,9 @@ def test_resolves_roll_profile_classes_and_timing_defaults(tmp_path: Path) -> No
     resolved = resolve_run_config(args)
 
     assert resolved.sop_profile.name == PROFILE_ROLL_SOP_V1
-    assert resolved.timing.start_s == 1.0
-    assert resolved.timing.end_s == 2.0
+    assert resolved.session_timing.start_s == 1.0
+    assert resolved.session_timing.end_s == 2.0
+    assert resolved.operator_rules is None
     assert resolved.classes.active_class_ids == (2, 3, 4)
     assert resolved.classes.roll_ids == (2,)
     assert resolved.classes.cleaning_cloth_ids == (3,)
@@ -75,10 +76,11 @@ def test_resolves_legacy_profile_path_timing(tmp_path: Path) -> None:
 
     assert resolved.sop_profile.name == PROFILE_OPERATOR_MVP_A
     assert resolved.sop_profile.path == profile
-    assert resolved.timing.start_s == 3.0
-    assert resolved.timing.end_s == 4.0
-    assert resolved.timing.min_session_s == 1.5
-    assert resolved.timing.roi_dwell_s == 9.0
+    assert resolved.session_timing.start_s == 3.0
+    assert resolved.session_timing.end_s == 4.0
+    assert resolved.session_timing.min_session_s == 1.5
+    assert resolved.operator_rules is not None
+    assert resolved.operator_rules.roi_dwell_s == 9.0
     assert resolved.classes.active_class_ids == (0, 1)
 
 

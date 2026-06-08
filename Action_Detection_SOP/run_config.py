@@ -28,7 +28,6 @@ def collect_cli_dests(parser: argparse.ArgumentParser, argv: Sequence[str]) -> S
                 break
     return dests
 
-
 def _coerce_str_list(value: object, key: str) -> List[str]:
     if isinstance(value, str):
         value = value.strip()
@@ -69,8 +68,11 @@ def apply_run_config(
         non_empty = [k for k in ("video", "webcam", "rtsp") if source.get(k) not in (None, "")]
         if len(non_empty) > 1:
             raise ValueError("run config 'source' must set only one of video/webcam/rtsp")
-        for key in ("video", "webcam", "rtsp"):
-            if key in source and key not in cli_dests:
+        cli_source_dests = cli_dests.intersection({"video", "webcam", "rtsp"})
+        if not cli_source_dests:
+            for key in ("video", "webcam", "rtsp"):
+                if key not in source:
+                    continue
                 value = source[key]
                 if value in (None, ""):
                     continue
