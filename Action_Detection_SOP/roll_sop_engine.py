@@ -18,7 +18,11 @@ class RollComplianceStatus(str, Enum):
 
 @dataclass(frozen=True)
 class RollEvidenceRuleConfig:
-    "This is the config needed for both the cleaning and the labeling session"
+    """
+    This is the config needed for both the cleaning and the labeling session
+    If you want to change the analysis frame and change the default of how much frame
+    this thing needed to run, you can change this
+    """
     required_seconds: float = 1.0
     analysis_fps: float = 5.0
     max_gap_frames: int = 1
@@ -40,6 +44,8 @@ class RollEvidenceRuleConfig:
 
     @property
     def required_frames(self) -> int:
+        #how much frame for a given action of the SOP
+        # so it will worked liek this some_object.required_frames 
         return max(1, int(round(self.required_seconds * self.analysis_fps)))
 
 
@@ -66,7 +72,8 @@ class RollSessionResult:
     """output data dari session rol setelah proses"""
     session_id: str
     sop_profile: str
-    start_time: float
+    start_time_s: float
+    end_time_s: float
     cleaned: StepStatus
     labeled: StepStatus
     overall_status: RollComplianceStatus
@@ -74,9 +81,11 @@ class RollSessionResult:
     roll_present_frames: int
     cleaning_positive_frames: int
     labeling_positive_frames: int
+    start_time_iso: Optional[str] = None
+    end_time_iso: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     notes: Tuple[str, ...] = ()
-
-
 
 @dataclass
 class _TemporalEvidence:
@@ -87,6 +96,7 @@ class _TemporalEvidence:
     _positive_streak: int = 0
     _gap_streak: int = 0
 
+    #update frame positive
     def update(self, positive: bool) -> bool:
         if positive:
             self.positive_frames += 1
@@ -109,7 +119,6 @@ class _TemporalEvidence:
             self.achieved = True
         return self.achieved
 
-
 @dataclass
 class _ActiveRollSession:
     session_id: str
@@ -123,10 +132,8 @@ class _ActiveRollSession:
     labeling_done: bool = False
     notes: List[str] = field(default_factory=list)
 
-
 def _area(d: Detection) -> float:
     return max(0.0, d.x2 - d.x1) * max(0.0, d.y2 - d.y1)
-
 
 def _intersection_area(a: Detection, b: Detection) -> float:
     x1 = max(a.x1, b.x1)
@@ -211,6 +218,22 @@ class RollSopEngine:
     @property
     def active_session_id(self) -> Optional[str]:
         return None if self._active is None else self._active.session_id
+
+    @property
+    def active_cleaning_positive_frames(self) -> int:
+        return 0 if self._active is None else self._active.cleaning.positive_frames
+
+    @property
+    def active_labeling_positive_frames(self) -> int:
+        return 0 if self._active is None else self._active.labeling.positive_frames
+
+    @property
+    def active_cleaning_done(self) -> bool:
+        return False if self._active is None else self._active.cleaning_done
+
+    @property
+    def active_labeling_done(self) -> bool:
+        return False if self._active is None else self._active.labeling_done
 
     def pop_events(self) -> Tuple[EvidenceEvent, ...]:
         if not self._events:

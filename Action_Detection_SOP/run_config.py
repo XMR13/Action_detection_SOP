@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Set
+from typing import  Dict, List, Sequence, Set
 
 
 def load_run_config(path: Path) -> Dict[str, object]:
@@ -94,6 +94,8 @@ def apply_run_config(
         "out_dir",
         "onnx_providers",
         "trt_output_name",
+        "out_codec",
+        "out_preset",
     }
     int_keys = {
         "webcam",
@@ -110,6 +112,9 @@ def apply_run_config(
         "max_frames",
         "progress_bar_width",
         "trt_output_index",
+        "cleaning_max_gap",
+        "labeling_max_gap",
+        "out_crf",
     }
     float_keys = {
         "reconnect_wait_s",
@@ -134,6 +139,8 @@ def apply_run_config(
         "evidence_post_s",
         "evidence_max_s",
         "progress_every_s",
+        "cleaning_s",
+        "labeling_s",
     }
     bool_keys = {
         "loop_video",
@@ -151,6 +158,7 @@ def apply_run_config(
         "no_evidence",
         "show",
         "progress",
+        "compress_out",
     }
 
     for key, value in payload.items():
@@ -162,7 +170,15 @@ def apply_run_config(
             continue
         if key not in allowed:
             continue
-        if key in ("person_label", "helmet_label", "require_onnx_provider"):
+        if key in (
+            "person_label",
+            "helmet_label",
+            "roll_label",
+            "cleaning_cloth_label",
+            "paper_label",
+            "label_conf",
+            "require_onnx_provider",
+        ):
             value = _coerce_str_list(value, key)
             setattr(args, key, value)
             continue
