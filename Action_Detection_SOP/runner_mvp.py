@@ -4,12 +4,14 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import cv2
 
@@ -18,12 +20,12 @@ try:
 except ModuleNotFoundError:
     tqdm = None  # type: ignore[assignment]
 
-from Action_Detection_SOP.config import load_sop_profile
 from Action_Detection_SOP.evidence import EvidenceClipConfig, EvidenceClipper
 from Action_Detection_SOP.evidence_io import write_evidence_clip, write_evidence_manifest
 from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capture
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
 from Action_Detection_SOP.reporting import (
+    SessionReportResult,
     today_date_str,
     write_daily_csv,
     write_daily_report,
@@ -32,6 +34,11 @@ from Action_Detection_SOP.reporting import (
     write_session_run_config,
 )
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json, resolve_roi_for_frame
+from Action_Detection_SOP.runtime_config import (
+    PROFILE_OPERATOR_MVP_A,
+    PROFILE_ROLL_SOP_V1,
+    resolve_run_config,
+)
 from Action_Detection_SOP.sop_engine import (
     HelmetRuleConfig,
     RoiDwellRuleConfig,
@@ -41,12 +48,14 @@ from Action_Detection_SOP.sop_engine import (
     SopEngineConfig,
     helmet_associated_with_person,
 )
-from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_class_names, load_pipeline
+from Action_Detection_SOP.roll_sop_engine import (
+    RollEvidenceRuleConfig,
+    RollSopEngine,
+    RollSopEngineConfig,
+)
+from Action_Detection_SOP.session import RollSessionConfig
+from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
 from yolo_kit.types import Detection
-
-DEFAULT_SESSION_START_S = 2.0
-DEFAULT_SESSION_END_S = 3.0
-DEFAULT_ROI_DWELL_S = 8.0
 
 
 @dataclass
@@ -101,15 +110,6 @@ def _format_stage_summary(label: str, values_s: Sequence[float]) -> str:
     )
 
 
-def _name_to_ids(class_names: Dict[int, str], labels: Sequence[str]) -> List[int]:
-    wanted = {s.strip().lower() for s in labels if s.strip()}
-    ids: List[int] = []
-    for cid, name in class_names.items():
-        if str(name).strip().lower() in wanted:
-            ids.append(int(cid))
-    return ids
-
-
 def _offset_detections(dets: Sequence[Detection], *, dx: float, dy: float, inv_scale: float) -> List[Detection]:
     out: List[Detection] = []
     for d in dets:
@@ -152,6 +152,15 @@ def _split_classes(
         if cid in helmet_set:
             helmets.append(d)
     return persons, helmets
+
+
+def _filter_class_ids(dets: Sequence[Detection], class_ids: Sequence[int]) -> List[Detection]:
+    wanted = {int(x) for x in class_ids}
+    out: List[Detection] = []
+    for d in dets:
+        if d.class_id is not None and int(d.class_id) in wanted:
+            out.append(d)
+    return out
 
 
 def _sha256_path(path: Path) -> Optional[str]:
@@ -235,10 +244,54 @@ def _format_progress(
     return f"frames={frame_idx} read_fps={read_fps:5.1f} proc_fps={proc_fps:5.1f}"
 
 
+# this is for the rtsp portion to check 
 def _rtsp_option_or_none(value: Optional[int]) -> Optional[int]:
     if value is None:
         return None
     return int(value) if int(value) > 0 else None
+
+
+def _compress_video_with_ffmpeg(src: Path, *, crf: int, preset: str) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None or not src.exists() or src.stat().st_size <= 0:
+        return False
+
+    tmp = tempfile.NamedTemporaryFile(
+        prefix=f"{src.stem}_compressed_",
+        suffix=src.suffix or ".mp4",
+        dir=src.parent,
+        delete=False,
+    )
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(src),
+        "-c:v",
+        "libx264",
+        "-preset",
+        str(preset),
+        "-crf",
+        str(crf),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-an",
+        str(tmp_path),
+    ]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ok = proc.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0
+    if ok:
+        tmp_path.replace(src)
+        return True
+    try:
+        tmp_path.unlink()
+    except OSError:
+        pass
+    return False
 
 
 @dataclass(frozen=True)
@@ -257,49 +310,31 @@ def run_mvp(
     config_path: Optional[Path],
     config_payload: Optional[Dict[str, object]],
 ) -> int:
-    def _session_duration_s(session: SessionResult) -> float:
+    def _session_duration_s(session: SessionReportResult) -> float:
         return max(0.0, float(session.end_time_s) - float(session.start_time_s))
 
-    source_count = int(args.video is not None) + int(args.webcam is not None) + int(args.rtsp is not None)
-    if source_count != 1:
-        raise ValueError("Exactly one source must be set: --video or --webcam or --rtsp (or via --config).")
+    #run the mvp from the configuration
+    runtime = resolve_run_config(args)
+    sop_profile_name = runtime.sop_profile.name
+    sop_profile_path = runtime.sop_profile.path
+    sop_profile = runtime.sop_profile.profile
+    class_names = runtime.classes.class_names
+    class_conf_thresholds = runtime.classes.class_conf_thresholds
+    person_ids = list(runtime.classes.person_ids)
+    helmet_disabled = runtime.classes.helmet_disabled
+    helmet_ids = list(runtime.classes.helmet_ids)
+    roll_ids = list(runtime.classes.roll_ids)
+    cleaning_cloth_ids = list(runtime.classes.cleaning_cloth_ids)
+    paper_label_ids = list(runtime.classes.paper_label_ids)
+    class_ids = list(runtime.classes.active_class_ids)
+    for warning in runtime.classes.warnings:
+        print(warning)
 
-    sop_profile = None
-    sop_profile_path = Path(args.sop_profile) if args.sop_profile else None
-    if sop_profile_path is not None:
-        sop_profile = load_sop_profile(sop_profile_path)
-
-    def _resolve_seconds(cli_value: Optional[float], profile_value: Optional[float], default_value: float) -> float:
-        if cli_value is not None:
-            return float(cli_value)
-        if profile_value is not None:
-            return float(profile_value)
-        return float(default_value)
-
-    start_s = _resolve_seconds(
-        args.start_s,
-        sop_profile.session_start_seconds if sop_profile else None,
-        DEFAULT_SESSION_START_S,
-    )
-    end_s = _resolve_seconds(
-        args.end_s,
-        sop_profile.session_end_seconds if sop_profile else None,
-        DEFAULT_SESSION_END_S,
-    )
-    min_session_s = _resolve_seconds(
-        args.min_session_s,
-        sop_profile.min_session_seconds if sop_profile else None,
-        0.0,
-    )
-    roi_dwell_s = _resolve_seconds(
-        args.roi_dwell_s,
-        sop_profile.roi_dwell_seconds if sop_profile else None,
-        DEFAULT_ROI_DWELL_S,
-    )
-    args.start_s = start_s
-    args.end_s = end_s
-    args.min_session_s = min_session_s
-    args.roi_dwell_s = roi_dwell_s
+    args.start_s = runtime.session_timing.start_s
+    args.end_s = runtime.session_timing.end_s
+    args.min_session_s = runtime.session_timing.min_session_s
+    if runtime.operator_rules is not None:
+        args.roi_dwell_s = runtime.operator_rules.roi_dwell_s
 
     roi_path = Path(args.roi)
     roi_base = load_roi_json(roi_path)
@@ -312,28 +347,10 @@ def run_mvp(
     out_dir = Path(args.out_dir)
     date = today_date_str()
 
-    class_names = load_class_names(args.metadata) if args.metadata else {}
-    person_ids = _name_to_ids(class_names, args.person_label)
-    helmet_disabled = bool(args.skip_helmet)
-    helmet_ids = [] if helmet_disabled else _name_to_ids(class_names, args.helmet_label)
-    if not person_ids:
-        raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")
-    if not helmet_ids and not helmet_disabled:
-        if args.require_helmet_class:
-            raise ValueError(
-                f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
-                "Provide a metadata.yaml that includes a helmet class (or pass --skip-helmet)."
-            )
-        print(
-            f"WARNING: Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
-            "Helmet check will be disabled (helmet=UNKNOWN)."
-        )
-        helmet_disabled = True
-
-    class_ids = sorted(set(person_ids + helmet_ids))
-
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
+    if args.conf < 0.0 or args.conf > 1.0:
+        raise ValueError("--conf must be within [0, 1]")
     if args.source_fps < 0:
         raise ValueError("--source-fps must be >= 0")
     if args.video_fps_out < 0:
@@ -353,6 +370,7 @@ def run_mvp(
         backend=args.backend,
         post_cfg=YoloPostConfig(
             conf_threshold=float(args.conf),
+            class_conf_thresholds=class_conf_thresholds or None,
             iou_threshold=float(args.iou),
             apply_nms=not bool(args.no_nms),
             class_ids=class_ids,
@@ -413,30 +431,40 @@ def run_mvp(
         raise ValueError("--rtsp-buffer-size must be >= 0")
     if args.trt_output_index < 0:
         raise ValueError("--trt-output-index must be >= 0")
+    if sop_profile_name == PROFILE_ROLL_SOP_V1:
+        if args.cleaning_s <= 0:
+            raise ValueError("--cleaning-s must be > 0")
+        if args.labeling_s <= 0:
+            raise ValueError("--labeling-s must be > 0")
+        if args.cleaning_max_gap < 0:
+            raise ValueError("--cleaning-max-gap must be >= 0")
+        if args.labeling_max_gap < 0:
+            raise ValueError("--labeling-max-gap must be >= 0")
 
     if args.roi_upscale < 1.0:
         raise ValueError("--roi-upscale must be >= 1.0")
     if args.roi_expand < 0:
         raise ValueError("--roi-expand must be >= 0")
-    if args.roi_dwell_s <= 0:
-        raise ValueError("--roi-dwell-s must be > 0")
-    if args.roi_dwell_max_gap < 0:
-        raise ValueError("--roi-dwell-max-gap must be >= 0 seconds")
-    if not (0.05 <= args.roi_dwell_iou <= 0.95):
-        raise ValueError("--roi-dwell-iou must be within [0.05, 0.95]")
-    if args.roi_dwell_miss is None:
-        args.roi_dwell_miss = float(args.roi_dwell_max_gap)
-    if args.roi_dwell_miss < 0:
-        raise ValueError("--roi-dwell-miss must be >= 0 seconds")
-    if args.roi_dwell_miss + 1e-9 < args.roi_dwell_max_gap:
-        raise ValueError("--roi-dwell-miss must be >= --roi-dwell-max-gap (seconds)")
-    if args.roi_min_person_height < 0:
-        raise ValueError("--roi-min-person-height must be >= 0")
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
+        if args.roi_dwell_s <= 0:
+            raise ValueError("--roi-dwell-s must be > 0")
+        if args.roi_dwell_max_gap < 0:
+            raise ValueError("--roi-dwell-max-gap must be >= 0 seconds")
+        if not (0.05 <= args.roi_dwell_iou <= 0.95):
+            raise ValueError("--roi-dwell-iou must be within [0.05, 0.95]")
+        if args.roi_dwell_miss is None:
+            args.roi_dwell_miss = float(args.roi_dwell_max_gap)
+        if args.roi_dwell_miss < 0:
+            raise ValueError("--roi-dwell-miss must be >= 0 seconds")
+        if args.roi_dwell_miss + 1e-9 < args.roi_dwell_max_gap:
+            raise ValueError("--roi-dwell-miss must be >= --roi-dwell-max-gap (seconds)")
+        if args.roi_min_person_height < 0:
+            raise ValueError("--roi-min-person-height must be >= 0")
     if args.start_s <= 0 or args.end_s <= 0:
         raise ValueError("--start-s/--end-s must be > 0")
     if args.min_session_s < 0:
         raise ValueError("--min-session-s must be >= 0")
-    if not helmet_disabled:
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not helmet_disabled:
         if args.helmet_s <= 0:
             raise ValueError("--helmet-s must be > 0")
         if args.helmet_max_gap < 0:
@@ -448,6 +476,10 @@ def run_mvp(
             raise ValueError("--evidence-post-s must be >= 0")
         if args.evidence_max_s <= 0:
             raise ValueError("--evidence-max-s must be > 0")
+    if len(str(args.out_codec)) != 4:
+        raise ValueError("--out-codec must be a four-character OpenCV codec such as mp4v")
+    if not (0 <= int(args.out_crf) <= 51):
+        raise ValueError("--out-crf must be within [0, 51]")
 
     reconnect_tries = 0
     reconnect_events = 0
@@ -525,7 +557,7 @@ def run_mvp(
         evidence_clipper = EvidenceClipper(evidence_cfg)
 
     helmet_cfg = None
-    if not helmet_disabled:
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not helmet_disabled:
         helmet_cfg = HelmetRuleConfig(
             required_seconds=float(args.helmet_s),
             analysis_fps=analysis_fps,
@@ -533,28 +565,53 @@ def run_mvp(
             min_person_height_px=int(args.min_person_height),
             max_gap_frames=int(args.helmet_max_gap),
         )
-    roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
-    roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
-    if roi_miss_frames < roi_gap_frames:
-        roi_miss_frames = roi_gap_frames
-    roi_dwell_cfg = RoiDwellRuleConfig(
-        required_seconds=float(args.roi_dwell_s),
-        analysis_fps=analysis_fps,
-        max_gap_frames=roi_gap_frames,
-        max_track_missed=roi_miss_frames,
-        iou_match_threshold=float(args.roi_dwell_iou),
-        min_person_height_px=int(args.roi_min_person_height),
-    )
-    engine_cfg = SopEngineConfig(
-        session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
-        helmet=helmet_cfg,
-        roi_dwell=roi_dwell_cfg,
-    )
-    engine = SopEngine(engine_cfg)
+    roi_gap_frames: Optional[int] = None
+    roi_miss_frames: Optional[int] = None
+    roi_dwell_cfg: Optional[RoiDwellRuleConfig] = None
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
+        roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
+        roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
+        if roi_miss_frames < roi_gap_frames:
+            roi_miss_frames = roi_gap_frames
+        roi_dwell_cfg = RoiDwellRuleConfig(
+            required_seconds=float(args.roi_dwell_s),
+            analysis_fps=analysis_fps,
+            max_gap_frames=roi_gap_frames,
+            max_track_missed=roi_miss_frames,
+            iou_match_threshold=float(args.roi_dwell_iou),
+            min_person_height_px=int(args.roi_min_person_height),
+        )
+    if sop_profile_name == PROFILE_ROLL_SOP_V1:
+        engine: Union[SopEngine, RollSopEngine] = RollSopEngine(
+            RollSopEngineConfig(
+                session=RollSessionConfig(
+                    start_seconds=float(args.start_s),
+                    end_seconds=float(args.end_s),
+                    analysis_fps=analysis_fps,
+                ),
+                cleaning=RollEvidenceRuleConfig(
+                    required_seconds=float(args.cleaning_s),
+                    analysis_fps=analysis_fps,
+                    max_gap_frames=int(args.cleaning_max_gap),
+                ),
+                labeling=RollEvidenceRuleConfig(
+                    required_seconds=float(args.labeling_s),
+                    analysis_fps=analysis_fps,
+                    max_gap_frames=int(args.labeling_max_gap),
+                ),
+            )
+        )
+    else:
+        engine_cfg = SopEngineConfig(
+            session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
+            helmet=helmet_cfg,
+            roi_dwell=roi_dwell_cfg,
+        )
+        engine = SopEngine(engine_cfg)
 
     frame_idx = 0
     processed = 0
-    sessions: List[SessionResult] = []
+    sessions: List[SessionReportResult] = []
     session_dirs: List[Path] = []
     roi_for_frame: Optional[RoiPolygon] = None
     save_thumb = not bool(args.no_thumb)
@@ -572,6 +629,7 @@ def run_mvp(
         "analysis_fps": float(analysis_fps),
         "every": int(every),
         "sessionization": {
+            "sop_profile": sop_profile_name,
             "start_seconds": float(args.start_s),
             "end_seconds": float(args.end_s),
             "min_session_seconds": float(args.min_session_s),
@@ -582,33 +640,48 @@ def run_mvp(
             "points": list(roi_base.points),
             "sha256": _sha256_path(roi_path),
         },
-        "roi_dwell": {
-            "required_seconds": float(args.roi_dwell_s),
-            "max_gap_seconds": float(args.roi_dwell_max_gap),
-            "max_gap_frames": int(roi_gap_frames),
-            "max_track_missed_seconds": float(args.roi_dwell_miss),
-            "max_track_missed_frames": int(roi_miss_frames),
-            "iou_match_threshold": float(args.roi_dwell_iou),
-            "min_person_height_px": int(args.roi_min_person_height),
-        },
         "evidence": {
             "enabled": bool(evidence_enabled),
             "pre_seconds": float(args.evidence_pre_s),
             "post_seconds": float(args.evidence_post_s),
             "max_seconds": float(args.evidence_max_s),
             "analysis_fps": float(analysis_fps),
-            "events": ["roi_dwell_done", "helmet_done"],
+            "events": (
+                ["roll_entered", "cleaned_done", "labeled_done", "roll_left"]
+                if sop_profile_name == PROFILE_ROLL_SOP_V1
+                else ["roi_dwell_done", "helmet_done"]
+            ),
         },
         "model": _file_metadata(Path(args.model)),
         "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
         "postprocess": {
             "conf": float(args.conf),
+            "label_conf": {
+                str(class_names.get(class_id, class_id)): float(threshold)
+                for class_id, threshold in sorted(class_conf_thresholds.items())
+            },
             "iou": float(args.iou),
             "no_nms": bool(args.no_nms),
         },
         "detect_roi_only": bool(args.detect_roi_only),
         "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
+        "video_output": {
+            "codec": str(args.out_codec),
+            "compress_out": bool(args.compress_out),
+            "ffmpeg_crf": int(args.out_crf),
+            "ffmpeg_preset": str(args.out_preset),
+        },
     }
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
+        run_config["roi_dwell"] = {
+            "required_seconds": float(args.roi_dwell_s),
+            "max_gap_seconds": float(args.roi_dwell_max_gap),
+            "max_gap_frames": int(roi_gap_frames or 0),
+            "max_track_missed_seconds": float(args.roi_dwell_miss),
+            "max_track_missed_frames": int(roi_miss_frames or 0),
+            "iou_match_threshold": float(args.roi_dwell_iou),
+            "min_person_height_px": int(args.roi_min_person_height),
+        }
     if config_path is None:
         run_config["config"] = {"path": None}
     else:
@@ -624,12 +697,26 @@ def run_mvp(
         run_config["evidence"]["resolved_post_seconds"] = float(post_s)
 
     if sop_profile_path is None:
-        run_config["sop_profile"] = {"path": None}
+        run_config["sop_profile"] = {"name": sop_profile_name, "path": None}
     else:
         run_config["sop_profile"] = {
+            "name": sop_profile_name,
             "path": str(sop_profile_path),
             "data": asdict(sop_profile) if sop_profile is not None else None,
             "file": _file_metadata(sop_profile_path),
+        }
+    if sop_profile_name == PROFILE_ROLL_SOP_V1:
+        run_config["roll_sop_v1"] = {
+            "roll_labels": list(args.roll_label),
+            "roll_class_ids": list(roll_ids),
+            "cleaning_cloth_labels": list(args.cleaning_cloth_label),
+            "cleaning_cloth_class_ids": list(cleaning_cloth_ids),
+            "paper_label_labels": list(args.paper_label),
+            "paper_label_class_ids": list(paper_label_ids),
+            "cleaning_required_seconds": float(args.cleaning_s),
+            "cleaning_max_gap_frames": int(args.cleaning_max_gap),
+            "labeling_required_seconds": float(args.labeling_s),
+            "labeling_max_gap_frames": int(args.labeling_max_gap),
         }
 
     warnings: List[str] = []
@@ -661,13 +748,17 @@ def run_mvp(
     writer: Optional[cv2.VideoWriter] = None
     run_writer: Optional[cv2.VideoWriter] = None
     run_video_path: Optional[Path] = None
+    active_video_path: Optional[Path] = None
     active_session_dir: Optional[Path] = None
     last_dets_global: List[Detection] = []
     last_dets_roi: List[Detection] = []
     last_persons_all: List[Detection] = []
     last_helmets_all: List[Detection] = []
+    last_rolls_roi: List[Detection] = []
+    last_cleaning_roi: List[Detection] = []
+    last_labels_roi: List[Detection] = []
 
-    win = "SOP MVP-A"
+    win = "SOP roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else "SOP MVP-A"
     if args.show:
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
 
@@ -836,14 +927,30 @@ def run_mvp(
                 dets_roi = _filter_by_roi(dets_global, roi_for_frame)
                 persons_all, helmets_all = _split_classes(dets_global, person_ids=person_ids, helmet_ids=helmet_ids)
                 persons_roi = _filter_by_roi(persons_all, roi_for_frame)
-
-                result = engine.update(
-                    time_s=float(t_s),
-                    frame_idx=processed,
-                    persons_in_roi=persons_roi,
-                    persons_all=persons_all,
-                    helmets_all=helmets_all,
-                )
+                if sop_profile_name == PROFILE_ROLL_SOP_V1:
+                    rolls_roi = _filter_class_ids(dets_roi, roll_ids)
+                    cleaning_roi = _filter_class_ids(dets_roi, cleaning_cloth_ids)
+                    labels_roi = _filter_class_ids(dets_roi, paper_label_ids)
+                    assert isinstance(engine, RollSopEngine)
+                    result = engine.update(
+                        time_s=float(t_s),
+                        frame_idx=processed,
+                        rolls=rolls_roi,
+                        cleaning_cloths=cleaning_roi,
+                        labels=labels_roi,
+                    )
+                    last_rolls_roi = list(rolls_roi)
+                    last_cleaning_roi = list(cleaning_roi)
+                    last_labels_roi = list(labels_roi)
+                else:
+                    assert isinstance(engine, SopEngine)
+                    result = engine.update(
+                        time_s=float(t_s),
+                        frame_idx=processed,
+                        persons_in_roi=persons_roi,
+                        persons_all=persons_all,
+                        helmets_all=helmets_all,
+                    )
                 last_dets_global = list(dets_global)
                 last_dets_roi = list(dets_roi)
                 last_persons_all = list(persons_all)
@@ -870,7 +977,7 @@ def run_mvp(
                         fps_out = float(args.video_fps_out)
                     else:
                         fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
-                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    fourcc = cv2.VideoWriter_fourcc(*str(args.out_codec))
                     h, w = frame.shape[:2]
                     writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
                     if not writer.isOpened():
@@ -892,32 +999,50 @@ def run_mvp(
                 vis = draw_detections(vis, dets_vis, class_names=class_names, show_score=True)
 
                 sid = engine.active_session_id or "-"
-                helmet_status = "-"
-                roi_status = "-"
-                if engine.active_session_id is not None:
-                    if engine.cfg.roi_dwell is not None:
-                        required_frames = engine.cfg.roi_dwell.required_frames
-                        dwell_frames = engine.active_roi_dwell_frames
-                        if required_frames > 0 and dwell_frames >= required_frames:
-                            roi_status = "OK"
+                if sop_profile_name == PROFILE_ROLL_SOP_V1:
+                    assert isinstance(engine, RollSopEngine)
+                    clean_req = engine.cfg.cleaning.required_frames
+                    label_req = engine.cfg.labeling.required_frames
+                    clean_status = (
+                        "OK"
+                        if engine.active_cleaning_done
+                        else f"{engine.active_cleaning_positive_frames}/{clean_req}f"
+                    )
+                    label_status = (
+                        "OK"
+                        if engine.active_labeling_done
+                        else f"{engine.active_labeling_positive_frames}/{label_req}f"
+                    )
+                    overlay_text = f"session={sid} clean={clean_status} label={label_status}"
+                else:
+                    assert isinstance(engine, SopEngine)
+                    helmet_status = "-"
+                    roi_status = "-"
+                    if engine.active_session_id is not None:
+                        if engine.cfg.roi_dwell is not None:
+                            required_frames = engine.cfg.roi_dwell.required_frames
+                            dwell_frames = engine.active_roi_dwell_frames
+                            if required_frames > 0 and dwell_frames >= required_frames:
+                                roi_status = "OK"
+                            else:
+                                dwell_s = dwell_frames / analysis_fps if analysis_fps else float(dwell_frames)
+                                req_s = required_frames / analysis_fps if analysis_fps else float(required_frames)
+                                roi_status = f"{dwell_s:.1f}/{req_s:.1f}s"
+                        if helmet_disabled or engine.cfg.helmet is None:
+                            helmet_status = "UNKNOWN"
                         else:
-                            dwell_s = dwell_frames / analysis_fps if analysis_fps else float(dwell_frames)
-                            req_s = required_frames / analysis_fps if analysis_fps else float(required_frames)
-                            roi_status = f"{dwell_s:.1f}/{req_s:.1f}s"
-                    if helmet_disabled or engine.cfg.helmet is None:
-                        helmet_status = "UNKNOWN"
-                    else:
-                        helmet_status = (
-                            "OK"
-                            if helmet_associated_with_person(
-                                last_persons_all, last_helmets_all, head_top_fraction=engine.cfg.helmet.head_top_fraction
+                            helmet_status = (
+                                "OK"
+                                if helmet_associated_with_person(
+                                    last_persons_all, last_helmets_all, head_top_fraction=engine.cfg.helmet.head_top_fraction
+                                )
+                                else "..."
                             )
-                            else "..."
-                        )
+                    overlay_text = f"session={sid} roi={roi_status} helmet={helmet_status}"
                 font_scale, thickness = _overlay_style(int(vis.shape[0]))
                 cv2.putText(
                     vis,
-                    f"session={sid} roi={roi_status} helmet={helmet_status}",
+                    overlay_text,
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     font_scale,
@@ -933,7 +1058,7 @@ def run_mvp(
                     fps_out = float(args.video_fps_out)
                 else:
                     fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                fourcc = cv2.VideoWriter_fourcc(*str(args.out_codec))
                 h, w = frame.shape[:2]
                 run_writer = cv2.VideoWriter(str(run_video_path), fourcc, fps_out, (w, h))
                 if not run_writer.isOpened():
@@ -1005,6 +1130,7 @@ def run_mvp(
                     if writer is not None:
                         writer.release()
                         writer = None
+                    active_video_path = None
                     discard_dir = out_dir / "sessions" / date / f"session_{result.session_id}"
                     if discard_dir.exists():
                         shutil.rmtree(discard_dir, ignore_errors=True)
@@ -1044,11 +1170,26 @@ def run_mvp(
                 if writer is not None:
                     writer.release()
                     writer = None
+                    if bool(args.compress_out) and active_video_path is not None:
+                        compressed = _compress_video_with_ffmpeg(
+                            active_video_path,
+                            crf=int(args.out_crf),
+                            preset=str(args.out_preset),
+                        )
+                        if not compressed:
+                            print(f"Note: ffmpeg compression unavailable/failed; kept OpenCV output: {active_video_path}")
+                    active_video_path = None
                 active_session_dir = None
 
         # End-of-stream flush
         end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
-        tail = engine.flush(time_s=float(end_time_s))
+        if sop_profile_name == PROFILE_ROLL_SOP_V1:
+            assert isinstance(engine, RollSopEngine)
+            tail = engine.flush(time_s=float(end_time_s), frame_idx=int(processed))
+        else:
+            assert isinstance(engine, SopEngine)
+            tail = engine.flush(time_s=float(end_time_s))
+        tail_events = engine.pop_events() if tail is not None else ()
         if tail is not None:
             if run_start_dt is not None:
                 start_dt = run_start_dt + timedelta(seconds=float(tail.start_time_s))
@@ -1069,6 +1210,10 @@ def run_mvp(
                         "reason": "min_session_seconds",
                     }
                 )
+                if writer is not None:
+                    writer.release()
+                    writer = None
+                active_video_path = None
                 discard_dir = out_dir / "sessions" / date / f"session_{tail.session_id}"
                 if discard_dir.exists():
                     shutil.rmtree(discard_dir, ignore_errors=True)
@@ -1084,6 +1229,14 @@ def run_mvp(
                 run_config["reconnect_events"] = int(reconnect_events)
                 write_session_run_config(session_dir=session_dir, run_config=run_config)
                 if evidence_enabled and evidence_clipper is not None and evidence_session_id == tail.session_id:
+                    for ev in tail_events:
+                        if ev.session_id != evidence_session_id:
+                            continue
+                        evidence_clipper.trigger(
+                            name=ev.name,
+                            time_s=float(ev.time_s),
+                            frame_idx=int(ev.frame_idx),
+                        )
                     pending = evidence_clipper.flush()
                     for clip_data in pending:
                         idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
@@ -1106,8 +1259,24 @@ def run_mvp(
         cap.release()
         if writer is not None:
             writer.release()
+            if bool(args.compress_out) and active_video_path is not None:
+                compressed = _compress_video_with_ffmpeg(
+                    active_video_path,
+                    crf=int(args.out_crf),
+                    preset=str(args.out_preset),
+                )
+                if not compressed:
+                    print(f"Note: ffmpeg compression unavailable/failed; kept OpenCV output: {active_video_path}")
         if run_writer is not None:
             run_writer.release()
+            if bool(args.compress_out) and run_video_path is not None:
+                compressed = _compress_video_with_ffmpeg(
+                    run_video_path,
+                    crf=int(args.out_crf),
+                    preset=str(args.out_preset),
+                )
+                if not compressed:
+                    print(f"Note: ffmpeg compression unavailable/failed; kept OpenCV output: {run_video_path}")
         if args.show:
             cv2.destroyAllWindows()
         if printed_progress:
