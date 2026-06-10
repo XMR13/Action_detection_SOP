@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 import re
-from dataclasses import dataclass
 from datetime import datetime, date as Date
 import hashlib
 import uuid
@@ -21,14 +20,19 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import BasicAuthConfig, BasicAuthMiddleware, issue_session_token
-from .review_store import ReviewRecord, get_review, get_reviews_by_uid, init_db, upsert_review
+from .review_store import get_review, get_reviews_by_uid, init_db, upsert_review
 from .session_index import SessionArtifact, SessionIndex
 from .settings import WebMvpSettings
+from .sop_status import (
+    ReviewOverrideError,
+    evaluate_sop_status,
+    effective_review_for_session,
+    normalize_session_checklist_payload,
+    validate_review_overrides,
+)
 from ..shifts import assign_shift_for_interval, parse_iso_datetime
 
 API_CONTRACT_VERSION = "2026-03-03.v1"
-_REVIEW_OVERRIDE_KEYS = {"operator_present", "roi_dwell", "helmet"}
-_STEP_STATUS_VALUES = {"DONE", "NOT_DONE", "UNKNOWN"}
 _MAX_REVIEW_NOTE_LEN = 4000
 
 
@@ -382,158 +386,6 @@ def _session_storage_breakdown(sessions: List[SessionArtifact]) -> Dict[str, Any
     }
 
 
-def _machine_helmet_status(session: SessionArtifact) -> str:
-    helmet = session.checklist.get("helmet")
-    return str(helmet) if isinstance(helmet, str) and helmet else "UNKNOWN"
-
-
-def _machine_roi_status(session: SessionArtifact) -> str:
-    roi = session.checklist.get("roi_dwell")
-    return str(roi) if isinstance(roi, str) and roi else "UNKNOWN"
-
-
-def _machine_operator_status(session: SessionArtifact) -> str:
-    operator = session.checklist.get("operator_present")
-    return str(operator) if isinstance(operator, str) and operator else "UNKNOWN"
-
-
-def _normalize_step_status(value: Any) -> str:
-    if not isinstance(value, str):
-        return "UNKNOWN"
-    v = value.strip().upper()
-    if v in {"DONE", "NOT_DONE", "UNKNOWN"}:
-        return v
-    return "UNKNOWN"
-
-
-def _sop_status_from_steps(*, operator_present: str, roi_dwell: str, helmet: str) -> str:
-    steps = [
-        _normalize_step_status(operator_present),
-        _normalize_step_status(roi_dwell),
-        _normalize_step_status(helmet),
-    ]
-    if any(step == "NOT_DONE" for step in steps):
-        return "NOT_DONE"
-    if all(step == "DONE" for step in steps):
-        return "DONE"
-    return "UNKNOWN"
-
-
-def _final_step_status(*, machine_status: str, review: Optional[ReviewRecord], step_key: str) -> str:
-    final_status = _normalize_step_status(machine_status)
-    if review is None or not isinstance(review.overrides, dict):
-        return final_status
-    override = review.overrides.get(step_key)
-    if isinstance(override, str) and override:
-        return _normalize_step_status(override)
-    return final_status
-
-
-def _machine_sop_status(session: SessionArtifact) -> str:
-    return _sop_status_from_steps(
-        operator_present=_machine_operator_status(session),
-        roi_dwell=_machine_roi_status(session),
-        helmet=_machine_helmet_status(session),
-    )
-
-
-def _final_sop_status(*, session: SessionArtifact, review: Optional[ReviewRecord]) -> str:
-    final_operator = _final_step_status(
-        machine_status=_machine_operator_status(session),
-        review=review,
-        step_key="operator_present",
-    )
-    final_roi = _final_step_status(
-        machine_status=_machine_roi_status(session),
-        review=review,
-        step_key="roi_dwell",
-    )
-    final_helmet = _final_step_status(
-        machine_status=_machine_helmet_status(session),
-        review=review,
-        step_key="helmet",
-    )
-    return _sop_status_from_steps(
-        operator_present=final_operator,
-        roi_dwell=final_roi,
-        helmet=final_helmet,
-    )
-
-
-@dataclass(frozen=True)
-class EffectiveReview:
-    status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]
-    source: Literal["MANUAL", "AUTO", "PENDING"]
-    auto_reason: Optional[str] = None
-
-
-def _session_duration_s(session: SessionArtifact) -> float:
-    start_s = float(session.checklist.get("start_time_s") or 0.0)
-    end_s = float(session.checklist.get("end_time_s") or 0.0)
-    return max(0.0, end_s - start_s)
-
-
-def _auto_approve_blocker(notes: Any) -> Optional[str]:
-    if not isinstance(notes, list):
-        return None
-    for raw in notes:
-        if not isinstance(raw, str):
-            continue
-        tag = raw.strip().lower()
-        if not tag:
-            continue
-        if ("too_short" in tag) or ("too_small" in tag) or ("disabled" in tag):
-            return tag
-    return None
-
-
-def _should_auto_approve_session(*, session: SessionArtifact, settings: WebMvpSettings) -> Tuple[bool, Optional[str]]:
-    if not settings.auto_approve_done_enabled:
-        return False, "auto_approve_disabled"
-
-    helmet = _normalize_step_status(_machine_helmet_status(session))
-    if helmet != "DONE":
-        return False, "helmet_not_done"
-
-    roi = _normalize_step_status(_machine_roi_status(session))
-    if roi != "DONE":
-        return False, "roi_not_done"
-
-    duration_s = _session_duration_s(session)
-    if duration_s < float(settings.auto_approve_min_duration_s):
-        return False, "duration_too_short"
-
-    blocker = _auto_approve_blocker(session.checklist.get("notes"))
-    if blocker:
-        return False, f"blocked_by_note:{blocker}"
-
-    has_evidence = _clip_count(session) > 0 or session.paths.thumbnail_jpg.exists()
-    if not has_evidence:
-        return False, "no_evidence"
-
-    return True, "policy_pass"
-
-
-def _effective_review_for_session(
-    *,
-    session: SessionArtifact,
-    review: Optional[ReviewRecord],
-    settings: WebMvpSettings,
-) -> EffectiveReview:
-    if review is not None:
-        manual_status = str(review.review_status).upper()
-        if manual_status == "QUALIFIED":
-            return EffectiveReview(status="QUALIFIED", source="MANUAL")
-        if manual_status == "NOT_QUALIFIED":
-            return EffectiveReview(status="NOT_QUALIFIED", source="MANUAL")
-        return EffectiveReview(status="PENDING", source="MANUAL")
-
-    allow_auto, reason = _should_auto_approve_session(session=session, settings=settings)
-    if allow_auto:
-        return EffectiveReview(status="QUALIFIED", source="AUTO", auto_reason=reason)
-    return EffectiveReview(status="PENDING", source="PENDING", auto_reason=reason)
-
-
 def _clip_count(session: SessionArtifact) -> int:
     clips = session.evidence.get("clips")
     if isinstance(clips, list):
@@ -564,6 +416,20 @@ def _matches_evidence_filter(*, clip_count: int, has_thumbnail: bool, evidence_f
     if mode == "THUMB_ONLY":
         return clip_count <= 0 and has_thumbnail
     return True
+
+
+def _has_review_evidence(session: SessionArtifact) -> bool:
+    return _clip_count(session) > 0 or session.paths.thumbnail_jpg.exists()
+
+
+def _effective_review_for_web(*, session: SessionArtifact, review: Any, settings: WebMvpSettings) -> Any:
+    return effective_review_for_session(
+        session=session,
+        review=review,
+        auto_approve_done_enabled=settings.auto_approve_done_enabled,
+        auto_approve_min_duration_s=settings.auto_approve_min_duration_s,
+        has_evidence=_has_review_evidence(session),
+    )
 
 
 def _safe_session_dir(data_dir: Path, session: SessionArtifact, rel_path: str) -> Path:
@@ -763,21 +629,11 @@ def _validate_review_note(review_note: str) -> None:
         raise HTTPException(status_code=400, detail=f"review_note too long (max {_MAX_REVIEW_NOTE_LEN})")
 
 
-def _validate_review_overrides(raw: Dict[str, Any]) -> Dict[str, str]:
-    validated: Dict[str, str] = {}
-    for key, value in raw.items():
-        if key not in _REVIEW_OVERRIDE_KEYS:
-            allowed = ", ".join(sorted(_REVIEW_OVERRIDE_KEYS))
-            raise HTTPException(status_code=400, detail=f"Invalid override key `{key}` (allowed: {allowed})")
-        if not isinstance(value, str):
-            raise HTTPException(status_code=400, detail=f"Invalid override value type for `{key}`")
-        normalized = _normalize_step_status(value)
-        if normalized not in _STEP_STATUS_VALUES:
-            raise HTTPException(status_code=400, detail=f"Invalid override value for `{key}`")
-        if normalized == "UNKNOWN" and value.strip().upper() != "UNKNOWN":
-            raise HTTPException(status_code=400, detail=f"Invalid override value for `{key}`")
-        validated[key] = normalized
-    return validated
+def _validate_review_overrides(*, checklist: Dict[str, Any], raw: Dict[str, Any]) -> Dict[str, str]:
+    try:
+        return validate_review_overrides(checklist=checklist, raw=raw)
+    except ReviewOverrideError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def _resolve_date_window(
@@ -1121,6 +977,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         manual_overrides = 0
         manual_helmet_overrides = 0
 
+        helmet_sessions = 0
+        helmet_decided = 0
         machine_done = 0
         machine_not_done = 0
         machine_unknown = 0
@@ -1137,7 +995,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
         for s in sessions:
             r = reviews.get(s.session_uid)
-            eff = _effective_review_for_session(session=s, review=r, settings=settings)
+            sop_status = evaluate_sop_status(session=s, review=r)
+            eff = _effective_review_for_web(session=s, review=r, settings=settings)
             status = eff.status
             if status == "QUALIFIED":
                 approved += 1
@@ -1148,35 +1007,40 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             else:
                 pending += 1
 
-            machine_helmet = _normalize_step_status(_machine_helmet_status(s))
-            if machine_helmet == "DONE":
-                machine_done += 1
-            elif machine_helmet == "NOT_DONE":
-                machine_not_done += 1
-            else:
-                machine_unknown += 1
-
-            final_helmet = machine_helmet
             if r is not None:
                 human_reviewed += 1
                 if r.overrides:
                     manual_overrides += 1
-                override = r.overrides.get("helmet")
-                if isinstance(override, str) and override:
-                    final_helmet = _normalize_step_status(override)
-                    if final_helmet != machine_helmet:
-                        manual_helmet_overrides += 1
             elif eff.source == "AUTO" and status == "QUALIFIED":
                 auto_approved += 1
 
-            if final_helmet == "DONE":
-                final_done += 1
-            elif final_helmet == "NOT_DONE":
-                final_not_done += 1
-            else:
-                final_unknown += 1
+            if sop_status.profile == "operator_mvp_a":
+                helmet_sessions += 1
+                if status in {"QUALIFIED", "NOT_QUALIFIED"}:
+                    helmet_decided += 1
 
-            machine_sop = _normalize_step_status(_machine_sop_status(s))
+                machine_helmet = sop_status.machine_helmet
+                if machine_helmet == "DONE":
+                    machine_done += 1
+                elif machine_helmet == "NOT_DONE":
+                    machine_not_done += 1
+                else:
+                    machine_unknown += 1
+
+                final_helmet = sop_status.final_helmet
+                override = r.overrides.get("helmet") if r is not None else None
+                if isinstance(override, str) and override:
+                    if final_helmet != machine_helmet:
+                        manual_helmet_overrides += 1
+
+                if final_helmet == "DONE":
+                    final_done += 1
+                elif final_helmet == "NOT_DONE":
+                    final_not_done += 1
+                else:
+                    final_unknown += 1
+
+            machine_sop = sop_status.machine_sop
             if machine_sop == "DONE":
                 machine_sop_done += 1
             elif machine_sop == "NOT_DONE":
@@ -1184,7 +1048,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             else:
                 machine_sop_unknown += 1
 
-            final_sop = _normalize_step_status(_final_sop_status(session=s, review=r))
+            final_sop = sop_status.final_sop
             if final_sop == "DONE":
                 final_sop_done += 1
             elif final_sop == "NOT_DONE":
@@ -1194,8 +1058,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
         total = len(sessions)
         review_completion_pct = (float(decided) * 100.0 / float(total)) if total > 0 else 0.0
-        final_unknown_pct = (float(final_unknown) * 100.0 / float(total)) if total > 0 else 0.0
-        reviewed_final_done_pct = (float(final_done) * 100.0 / float(decided)) if decided > 0 else 0.0
+        final_unknown_pct = (float(final_unknown) * 100.0 / float(helmet_sessions)) if helmet_sessions > 0 else 0.0
+        reviewed_final_done_pct = (float(final_done) * 100.0 / float(helmet_decided)) if helmet_decided > 0 else 0.0
         final_sop_unknown_pct = (float(final_sop_unknown) * 100.0 / float(total)) if total > 0 else 0.0
         reviewed_final_sop_done_pct = (float(final_sop_done) * 100.0 / float(decided)) if decided > 0 else 0.0
         return {
@@ -1211,6 +1075,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "review_completion_pct": review_completion_pct,
             "manual_overrides": manual_overrides,
             "manual_helmet_overrides": manual_helmet_overrides,
+            "helmet_session_count": helmet_sessions,
             "machine_helmet_done": machine_done,
             "machine_helmet_not_done": machine_not_done,
             "machine_helmet_unknown": machine_unknown,
@@ -1257,7 +1122,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         out: List[Dict[str, Any]] = []
         for s in sessions:
             r = reviews.get(s.session_uid)
-            eff = _effective_review_for_session(session=s, review=r, settings=settings)
+            eff = _effective_review_for_web(session=s, review=r, settings=settings)
             rs = eff.status
             if review_status and rs != review_status:
                 continue
@@ -1289,10 +1154,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             if shift_filter != "ALL" and resolved_shift_id != shift_filter:
                 continue
 
-            machine_helmet = _normalize_step_status(_machine_helmet_status(s))
-            machine_sop = _machine_sop_status(s)
-            final_helmet = _final_step_status(machine_status=machine_helmet, review=r, step_key="helmet")
-            final_sop = _final_sop_status(session=s, review=r)
+            sop_status = evaluate_sop_status(session=s, review=r)
 
             out.append(
                 {
@@ -1305,13 +1167,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
                     "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
                     "duration_s": duration_s,
-                    "machine_helmet": machine_helmet,
-                    "machine_sop": machine_sop,
-                    "machine_roi_dwell": _machine_roi_status(s),
+                    "machine_helmet": sop_status.machine_helmet,
+                    "machine_sop": sop_status.machine_sop,
+                    "machine_roi_dwell": sop_status.machine_roi_dwell,
                     "review_status": rs,
                     "review_source": eff.source,
-                    "final_helmet": final_helmet,
-                    "final_sop": final_sop,
+                    "final_helmet": sop_status.final_helmet,
+                    "final_sop": sop_status.final_sop,
+                    "sop": sop_status.summary,
                     "has_thumbnail": has_thumbnail,
                     "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if has_thumbnail else None,
                     "clip_count": clip_count,
@@ -1376,11 +1239,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
         r = get_review(settings.db_path, session_uid)
-        eff = _effective_review_for_session(session=s, review=r, settings=settings)
-        machine_helmet = _normalize_step_status(_machine_helmet_status(s))
-        machine_sop = _machine_sop_status(s)
-        final_helmet = _final_step_status(machine_status=machine_helmet, review=r, step_key="helmet")
-        final_sop = _final_sop_status(session=s, review=r)
+        eff = _effective_review_for_web(session=s, review=r, settings=settings)
+        sop_status = evaluate_sop_status(session=s, review=r)
 
         start_iso = s.checklist.get("start_time_iso")
         end_iso = s.checklist.get("end_time_iso")
@@ -1430,11 +1290,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "shift_id": str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or ""),
             "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
             "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
-            "machine_helmet": machine_helmet,
-            "machine_sop": machine_sop,
-            "machine_roi_dwell": _machine_roi_status(s),
-            "final_helmet": final_helmet,
-            "final_sop": final_sop,
+            "machine_helmet": sop_status.machine_helmet,
+            "machine_sop": sop_status.machine_sop,
+            "machine_roi_dwell": sop_status.machine_roi_dwell,
+            "final_helmet": sop_status.final_helmet,
+            "final_sop": sop_status.final_sop,
+            "sop": sop_status.summary,
             "review_status": eff.status,
             "review_source": eff.source,
             "auto_review_reason": eff.auto_reason,
@@ -1467,7 +1328,11 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         session_dir.mkdir(parents=True, exist_ok=True)
 
         checklist_path = session_dir / "checklist.json"
-        _atomic_write_json(checklist_path, payload.model_dump(mode="json"))
+        try:
+            checklist_payload = normalize_session_checklist_payload(payload.model_dump(mode="json"))
+        except ReviewOverrideError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        _atomic_write_json(checklist_path, checklist_payload)
 
         index.refresh()
         return {
@@ -1484,7 +1349,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
         _validate_review_note(payload.review_note)
-        validated_overrides = _validate_review_overrides(payload.overrides)
+        validated_overrides = _validate_review_overrides(checklist=s.checklist, raw=payload.overrides)
         rec = upsert_review(
             db_path=settings.db_path,
             session_uid=session_uid,

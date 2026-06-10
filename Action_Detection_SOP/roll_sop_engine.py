@@ -9,12 +9,10 @@ from yolo_kit.types import Detection
 from .session import RollSessionConfig, RollSessionizer
 from .sop_engine import EvidenceEvent, StepStatus
 
-
 class RollComplianceStatus(str, Enum):
     COMPLIANT = "SESUAI SOP"
     NON_COMPLIANT = "TIDAK SESUAI SOP"
     UNKNOWN = "UNKNOWN"
-
 
 @dataclass(frozen=True)
 class RollEvidenceRuleConfig:
@@ -47,7 +45,6 @@ class RollEvidenceRuleConfig:
         #how much frame for a given action of the SOP
         # so it will worked liek this some_object.required_frames 
         return max(1, int(round(self.required_seconds * self.analysis_fps)))
-
 
 @dataclass(frozen=True)
 class RollSopEngineConfig:

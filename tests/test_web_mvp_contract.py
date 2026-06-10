@@ -52,6 +52,29 @@ def _put_min_session(
     assert res.status_code == 200
 
 
+def _put_roll_session(
+    client: TestClient,
+    *,
+    session_uid: str,
+    cleaned: str = "DONE",
+    labeled: str = "DONE",
+    overall_status: str = "SESUAI SOP",
+) -> None:
+    payload = {
+        "session_uid": session_uid,
+        "session_id": "roll001",
+        "start_date": "2026-06-10",
+        "sop_profile": "roll_sop_v1",
+        "start_time_s": 1.0,
+        "end_time_s": 6.0,
+        "cleaned": cleaned,
+        "labeled": labeled,
+        "overall_status": overall_status,
+    }
+    res = client.put(f"/api/sessions/{session_uid}", headers=_auth_headers(), json=payload)
+    assert res.status_code == 200
+
+
 def _post_artifact(client: TestClient, *, session_uid: str, rel_path: str, body: bytes) -> None:
     res = client.post(
         f"/api/sessions/{session_uid}/artifacts",
@@ -184,6 +207,124 @@ def test_put_review_enforces_override_keys_and_values(tmp_path: Path) -> None:
         review = res_good.json()["review"]
         assert review["overrides"]["helmet"] == "DONE"
         assert review["overrides"]["roi_dwell"] == "UNKNOWN"
+
+
+def test_roll_session_api_exposes_structured_sop_and_auto_approves_with_evidence(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(client, session_uid="uid_roll_done")
+        _post_artifact(client, session_uid="uid_roll_done", rel_path="thumbnail.jpg", body=b"fakejpg")
+
+        rows = client.get("/api/sessions", headers=_auth_headers(), params={"page": 1, "page_size": 25})
+        assert rows.status_code == 200
+        row = rows.json()["sessions"][0]
+        assert row["session_uid"] == "uid_roll_done"
+        assert row["machine_sop"] == "DONE"
+        assert row["final_sop"] == "DONE"
+        assert row["review_status"] == "QUALIFIED"
+        assert row["review_source"] == "AUTO"
+        assert row["machine_helmet"] == "UNKNOWN"
+        assert row["sop"]["profile"] == "roll_sop_v1"
+        assert row["sop"]["machine"]["cleaned"] == "DONE"
+        assert row["sop"]["machine"]["labeled"] == "DONE"
+        assert row["sop"]["machine"]["overall_status"] == "SESUAI SOP"
+        assert row["sop"]["machine"]["labels"]["cleaned"] == "Sudah dibersihkan"
+        assert row["sop"]["inconsistent"] is False
+
+        detail = client.get("/api/sessions/uid_roll_done", headers=_auth_headers())
+        assert detail.status_code == 200
+        payload = detail.json()
+        assert payload["sop"]["final"]["overall_status"] == "SESUAI SOP"
+        assert payload["auto_review_reason"] == "roll_policy_pass"
+
+
+def test_roll_sessions_do_not_count_as_unknown_helmet_stats(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(client, session_uid="uid_roll_stats")
+        _post_artifact(client, session_uid="uid_roll_stats", rel_path="thumbnail.jpg", body=b"fakejpg")
+
+        stats = client.get("/api/stats", headers=_auth_headers())
+        assert stats.status_code == 200
+        payload = stats.json()
+        assert payload["total_sessions"] == 1
+        assert payload["helmet_session_count"] == 0
+        assert payload["machine_helmet_unknown"] == 0
+        assert payload["final_helmet_unknown"] == 0
+        assert payload["unknown"] == 0
+        assert payload["final_sop_done"] == 1
+
+def test_roll_review_allows_step_and_overall_overrides(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(
+            client,
+            session_uid="uid_roll_review",
+            cleaned="DONE",
+            labeled="NOT_DONE",
+            overall_status="TIDAK SESUAI SOP",
+        )
+
+        step_override = {
+            "review_status": "QUALIFIED",
+            "review_note": "label was visible in evidence",
+            "overrides": {"labeled": "DONE"},
+        }
+        res_step = client.put("/api/sessions/uid_roll_review/review", headers=_auth_headers(), json=step_override)
+        assert res_step.status_code == 200
+        detail_step = client.get("/api/sessions/uid_roll_review", headers=_auth_headers())
+        assert detail_step.status_code == 200
+        sop_step = detail_step.json()["sop"]
+        assert sop_step["final"]["labeled"] == "DONE"
+        assert sop_step["final"]["overall_status"] == "SESUAI SOP"
+        assert sop_step["final"]["status"] == "DONE"
+
+        overall_override = {
+            "review_status": "NOT_QUALIFIED",
+            "review_note": "operator says result differs from evidence",
+            "overrides": {"labeled": "DONE", "overall_status": "TIDAK SESUAI SOP"},
+        }
+        res_overall = client.put("/api/sessions/uid_roll_review/review", headers=_auth_headers(), json=overall_override)
+        assert res_overall.status_code == 200
+        detail_overall = client.get("/api/sessions/uid_roll_review", headers=_auth_headers())
+        assert detail_overall.status_code == 200
+        sop_overall = detail_overall.json()["sop"]
+        assert sop_overall["final"]["labeled"] == "DONE"
+        assert sop_overall["final"]["overall_status"] == "TIDAK SESUAI SOP"
+        assert sop_overall["final"]["status"] == "NOT_DONE"
+
+
+def test_roll_review_rejects_legacy_keys_and_noncanonical_overall_status(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(client, session_uid="uid_roll_strict")
+
+        bad_key = {
+            "review_status": "QUALIFIED",
+            "review_note": "",
+            "overrides": {"helmet": "DONE"},
+        }
+        res_bad_key = client.put("/api/sessions/uid_roll_strict/review", headers=_auth_headers(), json=bad_key)
+        assert res_bad_key.status_code == 400
+
+        bad_overall = {
+            "review_status": "QUALIFIED",
+            "review_note": "",
+            "overrides": {"overall_status": "DONE"},
+        }
+        res_bad_overall = client.put("/api/sessions/uid_roll_strict/review", headers=_auth_headers(), json=bad_overall)
+        assert res_bad_overall.status_code == 400
+
+
+def test_put_roll_session_rejects_noncanonical_overall_status(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        payload = {
+            "session_uid": "uid_roll_bad_overall",
+            "session_id": "roll001",
+            "start_date": "2026-06-10",
+            "sop_profile": "roll_sop_v1",
+            "cleaned": "DONE",
+            "labeled": "DONE",
+            "overall_status": "DONE",
+        }
+        res = client.put("/api/sessions/uid_roll_bad_overall", headers=_auth_headers(), json=payload)
+        assert res.status_code == 400
 
 
 def test_artifact_upload_rejects_path_traversal(tmp_path: Path) -> None:
