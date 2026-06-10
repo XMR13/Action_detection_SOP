@@ -303,6 +303,81 @@ class RunOutputs:
     daily_report_csv: Path
 
 
+@dataclass(frozen=True)
+class EngineSetup:
+    engine: Union[SopEngine, RollSopEngine]
+    roi_gap_frames: Optional[int] = None
+    roi_miss_frames: Optional[int] = None
+
+
+def _build_sop_engine(
+    *,
+    args: argparse.Namespace,
+    sop_profile_name: str,
+    helmet_disabled: bool,
+    analysis_fps: float,
+) -> EngineSetup:
+    if sop_profile_name == PROFILE_ROLL_SOP_V1:
+        return EngineSetup(
+            engine=RollSopEngine(
+                RollSopEngineConfig(
+                    session=RollSessionConfig(
+                        start_seconds=float(args.start_s),
+                        end_seconds=float(args.end_s),
+                        analysis_fps=analysis_fps,
+                    ),
+                    cleaning=RollEvidenceRuleConfig(
+                        required_seconds=float(args.cleaning_s),
+                        analysis_fps=analysis_fps,
+                        max_gap_frames=int(args.cleaning_max_gap),
+                    ),
+                    labeling=RollEvidenceRuleConfig(
+                        required_seconds=float(args.labeling_s),
+                        analysis_fps=analysis_fps,
+                        max_gap_frames=int(args.labeling_max_gap),
+                    ),
+                )
+            )
+        )
+
+    helmet_cfg = None
+    if not helmet_disabled:
+        helmet_cfg = HelmetRuleConfig(
+            required_seconds=float(args.helmet_s),
+            analysis_fps=analysis_fps,
+            head_top_fraction=float(args.head_top_frac),
+            min_person_height_px=int(args.min_person_height),
+            max_gap_frames=int(args.helmet_max_gap),
+        )
+
+    roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
+    roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
+    if roi_miss_frames < roi_gap_frames:
+        roi_miss_frames = roi_gap_frames
+    roi_dwell_cfg = RoiDwellRuleConfig(
+        required_seconds=float(args.roi_dwell_s),
+        analysis_fps=analysis_fps,
+        max_gap_frames=roi_gap_frames,
+        max_track_missed=roi_miss_frames,
+        iou_match_threshold=float(args.roi_dwell_iou),
+        min_person_height_px=int(args.roi_min_person_height),
+    )
+    engine_cfg = SopEngineConfig(
+        session=SessionizationConfig(
+            start_seconds=float(args.start_s),
+            end_seconds=float(args.end_s),
+            analysis_fps=analysis_fps,
+        ),
+        helmet=helmet_cfg,
+        roi_dwell=roi_dwell_cfg,
+    )
+    return EngineSetup(
+        engine=SopEngine(engine_cfg),
+        roi_gap_frames=roi_gap_frames,
+        roi_miss_frames=roi_miss_frames,
+    )
+
+
 def run_mvp(
     args: argparse.Namespace,
     *,
@@ -556,58 +631,15 @@ def run_mvp(
         )
         evidence_clipper = EvidenceClipper(evidence_cfg)
 
-    helmet_cfg = None
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not helmet_disabled:
-        helmet_cfg = HelmetRuleConfig(
-            required_seconds=float(args.helmet_s),
-            analysis_fps=analysis_fps,
-            head_top_fraction=float(args.head_top_frac),
-            min_person_height_px=int(args.min_person_height),
-            max_gap_frames=int(args.helmet_max_gap),
-        )
-    roi_gap_frames: Optional[int] = None
-    roi_miss_frames: Optional[int] = None
-    roi_dwell_cfg: Optional[RoiDwellRuleConfig] = None
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
-        roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
-        roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
-        if roi_miss_frames < roi_gap_frames:
-            roi_miss_frames = roi_gap_frames
-        roi_dwell_cfg = RoiDwellRuleConfig(
-            required_seconds=float(args.roi_dwell_s),
-            analysis_fps=analysis_fps,
-            max_gap_frames=roi_gap_frames,
-            max_track_missed=roi_miss_frames,
-            iou_match_threshold=float(args.roi_dwell_iou),
-            min_person_height_px=int(args.roi_min_person_height),
-        )
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        engine: Union[SopEngine, RollSopEngine] = RollSopEngine(
-            RollSopEngineConfig(
-                session=RollSessionConfig(
-                    start_seconds=float(args.start_s),
-                    end_seconds=float(args.end_s),
-                    analysis_fps=analysis_fps,
-                ),
-                cleaning=RollEvidenceRuleConfig(
-                    required_seconds=float(args.cleaning_s),
-                    analysis_fps=analysis_fps,
-                    max_gap_frames=int(args.cleaning_max_gap),
-                ),
-                labeling=RollEvidenceRuleConfig(
-                    required_seconds=float(args.labeling_s),
-                    analysis_fps=analysis_fps,
-                    max_gap_frames=int(args.labeling_max_gap),
-                ),
-            )
-        )
-    else:
-        engine_cfg = SopEngineConfig(
-            session=SessionizationConfig(start_seconds=float(args.start_s), end_seconds=float(args.end_s), analysis_fps=analysis_fps),
-            helmet=helmet_cfg,
-            roi_dwell=roi_dwell_cfg,
-        )
-        engine = SopEngine(engine_cfg)
+    engine_setup = _build_sop_engine(
+        args=args,
+        sop_profile_name=sop_profile_name,
+        helmet_disabled=helmet_disabled,
+        analysis_fps=analysis_fps,
+    )
+    engine = engine_setup.engine
+    roi_gap_frames = engine_setup.roi_gap_frames
+    roi_miss_frames = engine_setup.roi_miss_frames
 
     frame_idx = 0
     processed = 0
