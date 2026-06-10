@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from Action_Detection_SOP.run_config import apply_run_config, collect_cli_dests, load_run_config
 from Action_Detection_SOP.runner_mvp import run_mvp
-
+from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
 
 def _add_bool_optional_flag(
     parser: argparse.ArgumentParser,
@@ -26,7 +26,7 @@ def _add_bool_optional_flag(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="MVP-A SOP runner (operator session in ROI + helmet compliance).")
+    parser = argparse.ArgumentParser(description="SOP runner (operator MVP-A by default, roll_sop_v1 optional).")
     parser.add_argument("--config", default=None, help="Optional JSON config to reduce CLI args (CLI overrides config).")
     src = parser.add_mutually_exclusive_group(required=False)
     src.add_argument("--video", default=None, help="Path to input video file.")
@@ -112,7 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sop-profile",
         default=None,
-        help="Optional SOP timing profile JSON (admin-tuned). CLI timing flags override values in this profile.",
+        help=(
+            f"SOP profile selector ({PROFILE_OPERATOR_MVP_A} or {PROFILE_ROLL_SOP_V1}). "
+            "For backward compatibility, a JSON path is treated as the MVP-A timing profile."
+        ),
     )
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="configs/metadata.yaml", help="Class metadata yaml (names mapping).")
@@ -145,12 +148,34 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help='Shortcut for --require-onnx-provider CUDAExecutionProvider and forcing --onnx-providers CUDAExecutionProvider.',
     )
-    parser.add_argument("--conf", type=float, default=0.45, help="Confidence threshold.")
+    parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold.")
+    parser.add_argument(
+        "--label-conf",
+        action="append",
+        default=[],
+        help=(
+            "Per-label confidence override, e.g. --label-conf cleaning_cloth=0.08. "
+            "Classes not listed here keep --conf."
+        ),
+    )
     parser.add_argument("--iou", type=float, default=0.45, help="IoU threshold for NMS.")
     parser.add_argument("--no-nms", action="store_true", help="Disable NMS and only keep top-K detections by score.")
 
     parser.add_argument("--person-label", action="append", default=["person"], help="Class name for person (repeatable).")
     parser.add_argument("--helmet-label", action="append", default=["helmet"], help="Class name for helmet (repeatable).")
+    parser.add_argument("--roll-label", action="append", default=["roll"], help="Class name for roll (repeatable).")
+    parser.add_argument(
+        "--cleaning-cloth-label",
+        action="append",
+        default=["cleaning_cloth"],
+        help="Class name for cleaning cloth evidence (repeatable).",
+    )
+    parser.add_argument(
+        "--paper-label",
+        action="append",
+        default=["label"],
+        help="Class name for attached paper label evidence (repeatable).",
+    )
     parser.add_argument(
         "--skip-helmet",
         action="store_true",
@@ -223,6 +248,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Head region height fraction of the person box used to associate helmets (0.05..0.8).",
     )
     parser.add_argument("--min-person-height", type=int, default=0, help="If >0, short/small person sessions become UNKNOWN.")
+    parser.add_argument(
+        "--cleaning-s",
+        type=float,
+        default=0.4,
+        help="roll_sop_v1: cleaned DONE after sustained cleaning cloth evidence (seconds).",
+    )
+    parser.add_argument(
+        "--cleaning-max-gap",
+        type=int,
+        default=3,
+        help="roll_sop_v1: allow up to N missing analyzed frames inside cleaning evidence streak.",
+    )
+    parser.add_argument(
+        "--labeling-s",
+        type=float,
+        default=1.0,
+        help="roll_sop_v1: labeled DONE after sustained attached-label evidence (seconds).",
+    )
+    parser.add_argument(
+        "--labeling-max-gap",
+        type=int,
+        default=1,
+        help="roll_sop_v1: allow up to N missing analyzed frames inside labeling evidence streak.",
+    )
 
     parser.add_argument("--roi-upscale", type=float, default=1.0, help="Optional ROI crop upscale factor (>=1.0).")
     parser.add_argument("--roi-expand", type=int, default=0, help="Expand ROI bounding box crop by N pixels (>=0).")
@@ -239,6 +288,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Save a full-run annotated MP4 under reports/<date>/run_annotated.mp4.",
     )
+    parser.add_argument(
+        "--out-codec",
+        default="mp4v",
+        help='OpenCV video writer codec for the intermediate/fallback output, e.g. "mp4v" or "XVID".',
+    )
+    _add_bool_optional_flag(
+        parser,
+        "--compress-out",
+        default=True,
+        help_text="Transcode annotated video outputs with ffmpeg/libx264 after writing when ffmpeg is available.",
+    )
+    parser.add_argument("--out-crf", type=int, default=30, help="ffmpeg CRF for --compress-out (higher = smaller/lower quality).")
+    parser.add_argument("--out-preset", default="veryfast", help="ffmpeg x264 preset for --compress-out.")
     parser.add_argument("--no-thumb", action="store_true", help="Disable per-session thumbnail image.")
     parser.add_argument("--no-evidence", action="store_true", help="Disable evidence clips around DONE events.")
     parser.add_argument("--evidence-pre-s", type=float, default=2.0, help="Seconds of evidence before DONE events.")
