@@ -1,6 +1,6 @@
 import argparse
 
-from Action_Detection_SOP.run_config import apply_run_config, collect_cli_dests
+from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests
 
 
 def _parser() -> argparse.ArgumentParser:

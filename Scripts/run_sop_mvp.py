@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-from Action_Detection_SOP.run_config import apply_run_config, collect_cli_dests, load_run_config
+from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests, load_run_config
 from Action_Detection_SOP.runner_mvp import run_mvp
 from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
 
