@@ -37,6 +37,7 @@ from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, 
 from Action_Detection_SOP.runtime_config import (
     PROFILE_OPERATOR_MVP_A,
     PROFILE_ROLL_SOP_V1,
+    ResolvedRunConfig,
     resolve_run_config,
 )
 from Action_Detection_SOP.sop_engine import (
@@ -310,6 +311,29 @@ class EngineSetup:
     roi_miss_frames: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class RunConfigPayloadInput:
+    args: argparse.Namespace
+    args_raw: Dict[str, object]
+    config_path: Optional[Path]
+    config_payload: Optional[Dict[str, object]]
+    date: str
+    info: CaptureInfo
+    source_fps: Optional[float]
+    analysis_fps: float
+    every: int
+    roi_path: Path
+    roi_base: RoiPolygon
+    evidence_enabled: bool
+    evidence_cfg: Optional[EvidenceClipConfig]
+    runtime: ResolvedRunConfig
+    engine_setup: EngineSetup
+    rtsp_prefer_ffmpeg: bool
+    rtsp_open_timeout_ms: Optional[int]
+    rtsp_read_timeout_ms: Optional[int]
+    rtsp_buffer_size: Optional[int]
+
+
 def _build_sop_engine(
     *,
     args: argparse.Namespace,
@@ -317,6 +341,11 @@ def _build_sop_engine(
     helmet_disabled: bool,
     analysis_fps: float,
 ) -> EngineSetup:
+    """
+    Build the active SOP engine plus any report metadata derived from its config.
+    apabila tidak merupakan PROFILE_ROLL_SOP_V1, maka akan kembali menggunakan
+    MVP yang sebelumnya yakni menggunakan waktu (PROFILE_OPERATOR_MVP_A)
+    """
     if sop_profile_name == PROFILE_ROLL_SOP_V1:
         return EngineSetup(
             engine=RollSopEngine(
@@ -378,6 +407,140 @@ def _build_sop_engine(
     )
 
 
+def _build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object]:
+    args = payload.args
+    runtime = payload.runtime
+    sop_profile = runtime.sop_profile
+    classes = runtime.classes
+    sop_profile_name = sop_profile.name
+
+    evidence_payload: Dict[str, object] = {
+        "enabled": bool(payload.evidence_enabled),
+        "pre_seconds": float(args.evidence_pre_s),
+        "post_seconds": float(args.evidence_post_s),
+        "max_seconds": float(args.evidence_max_s),
+        "analysis_fps": float(payload.analysis_fps),
+        "events": (
+            ["roll_entered", "cleaned_done", "labeled_done", "roll_left"]
+            if sop_profile_name == PROFILE_ROLL_SOP_V1
+            else ["roi_dwell_done", "helmet_done"]
+        ),
+    }
+    if payload.evidence_cfg is not None:
+        pre_s, post_s = payload.evidence_cfg.resolved_window()
+        evidence_payload["resolved_pre_seconds"] = float(pre_s)
+        evidence_payload["resolved_post_seconds"] = float(post_s)
+
+    run_config: Dict[str, object] = {
+        "date": payload.date,
+        "args": payload.args_raw,
+        "source": {
+            "video": args.video,
+            "webcam": args.webcam,
+            "rtsp": args.rtsp,
+        },
+        "source_fps_raw": float(payload.info.fps) if payload.info.fps else None,
+        "source_fps": float(payload.source_fps) if payload.source_fps else None,
+        "analysis_fps": float(payload.analysis_fps),
+        "every": int(payload.every),
+        "sessionization": {
+            "sop_profile": sop_profile_name,
+            "start_seconds": float(args.start_s),
+            "end_seconds": float(args.end_s),
+            "min_session_seconds": float(args.min_session_s),
+        },
+        "roi": {
+            "path": str(payload.roi_path),
+            "frame_size": payload.roi_base.frame_size,
+            "points": list(payload.roi_base.points),
+            "sha256": _sha256_path(payload.roi_path),
+        },
+        "evidence": evidence_payload,
+        "model": _file_metadata(Path(args.model)),
+        "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
+        "postprocess": {
+            "conf": float(args.conf),
+            "label_conf": {
+                str(classes.class_names.get(class_id, class_id)): float(threshold)
+                for class_id, threshold in sorted(classes.class_conf_thresholds.items())
+            },
+            "iou": float(args.iou),
+            "no_nms": bool(args.no_nms),
+        },
+        "detect_roi_only": bool(args.detect_roi_only),
+        "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
+        "video_output": {
+            "codec": str(args.out_codec),
+            "compress_out": bool(args.compress_out),
+            "ffmpeg_crf": int(args.out_crf),
+            "ffmpeg_preset": str(args.out_preset),
+        },
+        "stream_sim": {
+            "loop_video": bool(args.loop_video),
+            "realtime": bool(args.realtime),
+            "reconnect": bool(args.reconnect),
+            "reconnect_wait_s": float(args.reconnect_wait_s),
+            "reconnect_wait_max_s": float(args.reconnect_wait_max_s),
+            "reconnect_backoff": float(args.reconnect_backoff),
+            "reconnect_max_tries": int(args.reconnect_max_tries),
+            "rtsp_prefer_ffmpeg": bool(payload.rtsp_prefer_ffmpeg),
+            "rtsp_open_timeout_ms": (
+                int(payload.rtsp_open_timeout_ms) if payload.rtsp_open_timeout_ms is not None else None
+            ),
+            "rtsp_read_timeout_ms": (
+                int(payload.rtsp_read_timeout_ms) if payload.rtsp_read_timeout_ms is not None else None
+            ),
+            "rtsp_buffer_size": int(payload.rtsp_buffer_size) if payload.rtsp_buffer_size is not None else None,
+        },
+    }
+
+    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
+        run_config["roi_dwell"] = {
+            "required_seconds": float(args.roi_dwell_s),
+            "max_gap_seconds": float(args.roi_dwell_max_gap),
+            "max_gap_frames": int(payload.engine_setup.roi_gap_frames or 0),
+            "max_track_missed_seconds": float(args.roi_dwell_miss),
+            "max_track_missed_frames": int(payload.engine_setup.roi_miss_frames or 0),
+            "iou_match_threshold": float(args.roi_dwell_iou),
+            "min_person_height_px": int(args.roi_min_person_height),
+        }
+
+    if payload.config_path is None:
+        run_config["config"] = {"path": None}
+    else:
+        run_config["config"] = {
+            "path": str(payload.config_path),
+            "data": payload.config_payload,
+            "file": _file_metadata(payload.config_path),
+        }
+
+    if sop_profile.path is None:
+        run_config["sop_profile"] = {"name": sop_profile_name, "path": None}
+    else:
+        run_config["sop_profile"] = {
+            "name": sop_profile_name,
+            "path": str(sop_profile.path),
+            "data": asdict(sop_profile.profile) if sop_profile.profile is not None else None,
+            "file": _file_metadata(sop_profile.path),
+        }
+
+    if sop_profile_name == PROFILE_ROLL_SOP_V1:
+        run_config["roll_sop_v1"] = {
+            "roll_labels": list(args.roll_label),
+            "roll_class_ids": list(classes.roll_ids),
+            "cleaning_cloth_labels": list(args.cleaning_cloth_label),
+            "cleaning_cloth_class_ids": list(classes.cleaning_cloth_ids),
+            "paper_label_labels": list(args.paper_label),
+            "paper_label_class_ids": list(classes.paper_label_ids),
+            "cleaning_required_seconds": float(args.cleaning_s),
+            "cleaning_max_gap_frames": int(args.cleaning_max_gap),
+            "labeling_required_seconds": float(args.labeling_s),
+            "labeling_max_gap_frames": int(args.labeling_max_gap),
+        }
+
+    return run_config
+
+
 def run_mvp(
     args: argparse.Namespace,
     *,
@@ -391,8 +554,6 @@ def run_mvp(
     #run the mvp from the configuration
     runtime = resolve_run_config(args)
     sop_profile_name = runtime.sop_profile.name
-    sop_profile_path = runtime.sop_profile.path
-    sop_profile = runtime.sop_profile.profile
     class_names = runtime.classes.class_names
     class_conf_thresholds = runtime.classes.class_conf_thresholds
     person_ids = list(runtime.classes.person_ids)
@@ -638,8 +799,6 @@ def run_mvp(
         analysis_fps=analysis_fps,
     )
     engine = engine_setup.engine
-    roi_gap_frames = engine_setup.roi_gap_frames
-    roi_miss_frames = engine_setup.roi_miss_frames
 
     frame_idx = 0
     processed = 0
@@ -648,108 +807,29 @@ def run_mvp(
     roi_for_frame: Optional[RoiPolygon] = None
     save_thumb = not bool(args.no_thumb)
 
-    run_config: Dict[str, object] = {
-        "date": date,
-        "args": args_raw,
-        "source": {
-            "video": args.video,
-            "webcam": args.webcam,
-            "rtsp": args.rtsp,
-        },
-        "source_fps_raw": float(info.fps) if info.fps else None,
-        "source_fps": float(source_fps) if source_fps else None,
-        "analysis_fps": float(analysis_fps),
-        "every": int(every),
-        "sessionization": {
-            "sop_profile": sop_profile_name,
-            "start_seconds": float(args.start_s),
-            "end_seconds": float(args.end_s),
-            "min_session_seconds": float(args.min_session_s),
-        },
-        "roi": {
-            "path": str(roi_path),
-            "frame_size": roi_base.frame_size,
-            "points": list(roi_base.points),
-            "sha256": _sha256_path(roi_path),
-        },
-        "evidence": {
-            "enabled": bool(evidence_enabled),
-            "pre_seconds": float(args.evidence_pre_s),
-            "post_seconds": float(args.evidence_post_s),
-            "max_seconds": float(args.evidence_max_s),
-            "analysis_fps": float(analysis_fps),
-            "events": (
-                ["roll_entered", "cleaned_done", "labeled_done", "roll_left"]
-                if sop_profile_name == PROFILE_ROLL_SOP_V1
-                else ["roi_dwell_done", "helmet_done"]
-            ),
-        },
-        "model": _file_metadata(Path(args.model)),
-        "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
-        "postprocess": {
-            "conf": float(args.conf),
-            "label_conf": {
-                str(class_names.get(class_id, class_id)): float(threshold)
-                for class_id, threshold in sorted(class_conf_thresholds.items())
-            },
-            "iou": float(args.iou),
-            "no_nms": bool(args.no_nms),
-        },
-        "detect_roi_only": bool(args.detect_roi_only),
-        "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
-        "video_output": {
-            "codec": str(args.out_codec),
-            "compress_out": bool(args.compress_out),
-            "ffmpeg_crf": int(args.out_crf),
-            "ffmpeg_preset": str(args.out_preset),
-        },
-    }
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
-        run_config["roi_dwell"] = {
-            "required_seconds": float(args.roi_dwell_s),
-            "max_gap_seconds": float(args.roi_dwell_max_gap),
-            "max_gap_frames": int(roi_gap_frames or 0),
-            "max_track_missed_seconds": float(args.roi_dwell_miss),
-            "max_track_missed_frames": int(roi_miss_frames or 0),
-            "iou_match_threshold": float(args.roi_dwell_iou),
-            "min_person_height_px": int(args.roi_min_person_height),
-        }
-    if config_path is None:
-        run_config["config"] = {"path": None}
-    else:
-        run_config["config"] = {
-            "path": str(config_path),
-            "data": config_payload,
-            "file": _file_metadata(config_path),
-        }
-
-    if evidence_cfg is not None:
-        pre_s, post_s = evidence_cfg.resolved_window()
-        run_config["evidence"]["resolved_pre_seconds"] = float(pre_s)
-        run_config["evidence"]["resolved_post_seconds"] = float(post_s)
-
-    if sop_profile_path is None:
-        run_config["sop_profile"] = {"name": sop_profile_name, "path": None}
-    else:
-        run_config["sop_profile"] = {
-            "name": sop_profile_name,
-            "path": str(sop_profile_path),
-            "data": asdict(sop_profile) if sop_profile is not None else None,
-            "file": _file_metadata(sop_profile_path),
-        }
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        run_config["roll_sop_v1"] = {
-            "roll_labels": list(args.roll_label),
-            "roll_class_ids": list(roll_ids),
-            "cleaning_cloth_labels": list(args.cleaning_cloth_label),
-            "cleaning_cloth_class_ids": list(cleaning_cloth_ids),
-            "paper_label_labels": list(args.paper_label),
-            "paper_label_class_ids": list(paper_label_ids),
-            "cleaning_required_seconds": float(args.cleaning_s),
-            "cleaning_max_gap_frames": int(args.cleaning_max_gap),
-            "labeling_required_seconds": float(args.labeling_s),
-            "labeling_max_gap_frames": int(args.labeling_max_gap),
-        }
+    run_config = _build_run_config_payload(
+        RunConfigPayloadInput(
+            args=args,
+            args_raw=args_raw,
+            config_path=config_path,
+            config_payload=config_payload,
+            date=date,
+            info=info,
+            source_fps=source_fps,
+            analysis_fps=analysis_fps,
+            every=every,
+            roi_path=roi_path,
+            roi_base=roi_base,
+            evidence_enabled=evidence_enabled,
+            evidence_cfg=evidence_cfg,
+            runtime=runtime,
+            engine_setup=engine_setup,
+            rtsp_prefer_ffmpeg=rtsp_prefer_ffmpeg,
+            rtsp_open_timeout_ms=rtsp_open_timeout_ms,
+            rtsp_read_timeout_ms=rtsp_read_timeout_ms,
+            rtsp_buffer_size=rtsp_buffer_size,
+        )
+    )
 
     warnings: List[str] = []
     discarded_sessions: List[Dict[str, object]] = []
@@ -762,20 +842,6 @@ def run_mvp(
     evidence_session_id: Optional[str] = None
     evidence_clip_counts: Dict[str, int] = {}
     evidence_clips: List[Dict[str, object]] = []
-
-    run_config["stream_sim"] = {
-        "loop_video": bool(args.loop_video),
-        "realtime": bool(args.realtime),
-        "reconnect": bool(args.reconnect),
-        "reconnect_wait_s": float(args.reconnect_wait_s),
-        "reconnect_wait_max_s": float(args.reconnect_wait_max_s),
-        "reconnect_backoff": float(args.reconnect_backoff),
-        "reconnect_max_tries": int(args.reconnect_max_tries),
-        "rtsp_prefer_ffmpeg": bool(rtsp_prefer_ffmpeg),
-        "rtsp_open_timeout_ms": int(rtsp_open_timeout_ms) if rtsp_open_timeout_ms is not None else None,
-        "rtsp_read_timeout_ms": int(rtsp_read_timeout_ms) if rtsp_read_timeout_ms is not None else None,
-        "rtsp_buffer_size": int(rtsp_buffer_size) if rtsp_buffer_size is not None else None,
-    }
 
     writer: Optional[cv2.VideoWriter] = None
     run_writer: Optional[cv2.VideoWriter] = None
