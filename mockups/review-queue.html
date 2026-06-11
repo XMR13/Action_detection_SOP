@@ -52,15 +52,15 @@
 	          <div class="timeline compact">
 	            <div class="tl-item">
 	              <span class="t">Table-first triage</span>
-	              <span class="d">User dapat Reviewers can sort and scan sessions quickly before opening details.</span>
+	              <span class="d">
+                  User bisa mereview dan memfilter sesi SOP secara sepat sebelum menganalisa detail.
+                </span>
 	            </div>
 	            <div class="tl-item">
 	              <span class="t">Decision in detail page</span>
-	              <span class="d">Approve/reject/unknown only after evidence is inspected in Session Detail.</span>
-	            </div>
-	            <div class="tl-item">
-	              <span class="t">Audit-safe</span>
-	              <span class="d">Comments and overrides are attached to the machine result, not replacing it.</span>
+	              <span class="d">
+                  Approve/Rejet untuk SOP yang masih ambigu dapat dilakukan di Session Detail.
+                </span>
 	            </div>
 	          </div>
 	        </section>
@@ -104,7 +104,7 @@
             </span>
           </div>
 	            <div class="mode-tags">
-	            <span class="pill brand">unknown helmet</span>
+	            <span class="pill brand">SOP unknown</span>
 	            <span class="pill" id="queue-pending-pill">pending --</span>
 	          </div>
 	        </section>
@@ -142,8 +142,8 @@
               <div class="field">
 	                <label for="queue-status">Status</label>
 	                <select id="queue-status" name="queue-status">
-	                  <option value="PENDING" selected>Pending review</option>
-	                  <option value="ALL">All statuses</option>
+		                  <option value="PENDING" selected>Pending review</option>
+		                  <option value="ALL">All statuses</option>
 	                  <option value="NOT_QUALIFIED">Rejected only</option>
 	                  <option value="QUALIFIED">Approved only</option>
 	                </select>
@@ -191,11 +191,9 @@
                   <col class="queue-col-shift" />
                   <col class="queue-col-start" />
                   <col class="queue-col-duration" />
-                  <col class="queue-col-machine" />
-                  <col class="queue-col-human" />
-                  <col class="queue-col-final" />
-                  <col class="queue-col-evidence">
-                  <col class="queue-col-action" />
+	                  <col class="queue-col-decision" />
+	                  <col class="queue-col-evidence">
+	                  <col class="queue-col-action" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -204,16 +202,14 @@
                     <th scope="col">Shift</th>
                     <th scope="col">Start</th>
                     <th scope="col">Dur</th>
-                    <th scope="col">AI SOP</th>
-                    <th scope="col">Human<br>review</th>
-                    <th scope="col">Final</th>
-                    <th scope="col">Evidence</th>
-                    <th scope="col">Action</th>
+	                    <th scope="col">Decision</th>
+	                    <th scope="col">Evidence</th>
+	                    <th scope="col">Action</th>
 	                  </tr>
 	                </thead>
                 <tbody>
                   <tr>
-                    <td colspan="10">
+	                    <td colspan="8">
                       <span class="pill pending">Loading sessions…</span>
                     </td>
                   </tr>
@@ -264,14 +260,10 @@
                   <span class="key">AI SOP</span>
                   <span class="val" id="selected-machine-status">-</span>
                 </div>
-	                <div class="row">
-	                  <span class="key">Human Review</span>
-	                  <span class="val" id="selected-human-status">-</span>
-	                </div>
-	                <div class="row">
-	                  <span class="key">Review Source</span>
-	                  <span class="val" id="selected-review-source">-</span>
-	                </div>
+		                <div class="row">
+		                  <span class="key">Decision</span>
+		                  <span class="val" id="selected-human-status">-</span>
+		                </div>
                 <div class="row">
                   <span class="key">Final</span>
                   <span class="val" id="selected-final-status">-</span>

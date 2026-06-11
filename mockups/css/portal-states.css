@@ -44,7 +44,6 @@
 .page-review-queue #selected-session-date,
 .page-review-queue #selected-machine-status,
 .page-review-queue #selected-human-status,
-.page-review-queue #selected-review-source,
 .page-review-queue #selected-final-status,
 .page-review-queue #selected-evidence {
   transition: opacity 180ms ease, transform 180ms ease;
@@ -61,7 +60,6 @@
 .page-review-queue.is-hydrating #selected-session-date,
 .page-review-queue.is-hydrating #selected-machine-status,
 .page-review-queue.is-hydrating #selected-human-status,
-.page-review-queue.is-hydrating #selected-review-source,
 .page-review-queue.is-hydrating #selected-final-status,
 .page-review-queue.is-hydrating #selected-evidence {
   opacity: 0.45;

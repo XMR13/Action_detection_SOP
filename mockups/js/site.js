@@ -29,6 +29,14 @@
     return String(raw).replaceAll("_", " ").toUpperCase();
   };
 
+  const escapeHtml = (raw) =>
+    String(raw ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+
   const pillClassForStepStatus = (raw) => {
     const v = String(raw || "").toUpperCase();
     if (v === "DONE") return "yes";
@@ -51,18 +59,217 @@
     return "pending";
   };
 
-  const displayReviewSource = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "AUTO") return "AUTO";
-    if (v === "MANUAL") return "MANUAL";
-    return "PENDING";
+  const structuredSop = (row) => {
+    const sop = row && row.sop && typeof row.sop === "object" ? row.sop : null;
+    return sop && sop.profile ? sop : null;
   };
 
-  const pillClassForReviewSource = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "AUTO") return "auto";
-    if (v === "MANUAL") return "ink";
-    return "pending";
+  const sopScope = (row, scope) => {
+    const sop = structuredSop(row);
+    const data = sop && sop[scope] && typeof sop[scope] === "object" ? sop[scope] : null;
+    return data || {};
+  };
+
+  const sopStatusValue = (row, scope) => {
+    const data = sopScope(row, scope);
+    const fallback =
+      scope === "final"
+        ? row && (row.final_sop || row.final_helmet || row.machine_sop || row.machine_helmet)
+        : row && (row.machine_sop || row.machine_helmet);
+    return String(data.status || fallback || "UNKNOWN").toUpperCase();
+  };
+
+  const rollOverallDisplay = (raw) => {
+    const v = String(raw || "UNKNOWN").toUpperCase();
+    if (v === "SESUAI SOP") return "Sesuai SOP";
+    if (v === "TIDAK SESUAI SOP") return "Tidak sesuai SOP";
+    return "Unknown";
+  };
+
+  const sopQueueSummary = (row, scope) => {
+    const sop = structuredSop(row);
+    if (!sop || sop.profile !== "roll_sop_v1") return "";
+    const data = sopScope(row, scope);
+    return [
+      `Cleaned ${displayStepStatus(data.cleaned || "UNKNOWN")}`,
+      `Labeled ${displayStepStatus(data.labeled || "UNKNOWN")}`,
+    ].join(" · ");
+  };
+
+  const queueDecision = (row) => {
+    const machine = sopStatusValue(row, "machine");
+    const final = sopStatusValue(row, "final");
+    const review = String((row && row.review_status) || "PENDING").toUpperCase();
+    const summary = sopQueueSummary(row, "final") || sopQueueSummary(row, "machine");
+
+    if (review === "PENDING") {
+      return {
+        label: "Pending review",
+        className: "pending",
+        meta: summary || `AI ${displayStepStatus(machine)}`,
+      };
+    }
+
+    if (review === "NOT_QUALIFIED") {
+      const changed = machine !== final;
+      return {
+        label: "Rejected",
+        className: "no",
+        meta:
+          final === "DONE"
+            ? `Reviewer rejected; AI ${displayStepStatus(machine)}`
+            : changed
+            ? `AI ${displayStepStatus(machine)} -> Final ${displayStepStatus(final)}`
+            : summary || `AI ${displayStepStatus(machine)}`,
+      };
+    }
+
+    const changed = machine !== final;
+    return {
+      label: displayStepStatus(final),
+      className: pillClassForStepStatus(final),
+      meta: changed ? `AI ${displayStepStatus(machine)} -> Final ${displayStepStatus(final)}` : summary || `AI ${displayStepStatus(machine)}`,
+    };
+  };
+
+  const dashboardSopPills = (session) => {
+    const sop = structuredSop(session);
+    if (sop && sop.profile === "roll_sop_v1") {
+      const final = sopScope(session, "final");
+      const cleaned = String(final.cleaned || "UNKNOWN");
+      const labeled = String(final.labeled || "UNKNOWN");
+      const finalStatus = sopStatusValue(session, "final");
+      return [
+        `<span class="pill ${pillClassForStepStatus(cleaned)}">Cleaned ${displayStepStatus(cleaned)}</span>`,
+        `<span class="pill ${pillClassForStepStatus(labeled)}">Labeled ${displayStepStatus(labeled)}</span>`,
+        `<span class="pill ${pillClassForStepStatus(finalStatus)}">Final ${displayStepStatus(finalStatus)}</span>`,
+      ].join(" ");
+    }
+    const roi = String(session.machine_roi_dwell || "UNKNOWN");
+    const sopStatus = String(session.final_sop || session.machine_sop || "UNKNOWN");
+    return `<span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(sopStatus)}">SOP ${displayStepStatus(sopStatus)}</span>`;
+  };
+
+  const renderOverrideSelect = ({ key, label, machineValue, finalValue, overrideValue, values, displayValue }) => {
+    const options = [
+      `<option value="">Ikuti AI (${escapeHtml(displayValue(machineValue))})</option>`,
+      ...values.map((value) => {
+        const selected = String(overrideValue || "") === String(value) ? " selected" : "";
+        return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(displayValue(value))}</option>`;
+      }),
+    ].join("");
+    return `
+      <div class="sop-override-row">
+        <div>
+          <span class="sop-override-label">${escapeHtml(label)}</span>
+          <span class="sop-override-machine">AI: ${escapeHtml(displayValue(machineValue))}</span>
+          <span class="sop-override-final">Final: ${escapeHtml(displayValue(finalValue))}</span>
+        </div>
+        <select data-override-key="${escapeHtml(key)}" aria-label="${escapeHtml(label)} override">
+          ${options}
+        </select>
+      </div>
+    `;
+  };
+
+  const renderSopPanel = (payload) => {
+    const panel = document.getElementById("detail-sop-panel");
+    if (!(panel instanceof HTMLElement)) return;
+
+    const reviewOverrides =
+      payload && payload.review && payload.review.overrides && typeof payload.review.overrides === "object"
+        ? payload.review.overrides
+        : {};
+    const sop = structuredSop(payload);
+
+    if (sop && sop.profile === "roll_sop_v1") {
+      const machine = sopScope(payload, "machine");
+      const final = sopScope(payload, "final");
+      const rows = [
+        renderOverrideSelect({
+          key: "cleaned",
+          label: "Cleaned",
+          machineValue: machine.cleaned || "UNKNOWN",
+          finalValue: final.cleaned || "UNKNOWN",
+          overrideValue: reviewOverrides.cleaned || "",
+          values: ["DONE", "NOT_DONE", "UNKNOWN"],
+          displayValue: displayStepStatus,
+        }),
+        renderOverrideSelect({
+          key: "labeled",
+          label: "Labeled",
+          machineValue: machine.labeled || "UNKNOWN",
+          finalValue: final.labeled || "UNKNOWN",
+          overrideValue: reviewOverrides.labeled || "",
+          values: ["DONE", "NOT_DONE", "UNKNOWN"],
+          displayValue: displayStepStatus,
+        }),
+        renderOverrideSelect({
+          key: "overall_status",
+          label: "Final status",
+          machineValue: machine.overall_status || "UNKNOWN",
+          finalValue: final.overall_status || "UNKNOWN",
+          overrideValue: reviewOverrides.overall_status || "",
+          values: ["SESUAI SOP", "TIDAK SESUAI SOP", "UNKNOWN"],
+          displayValue: rollOverallDisplay,
+        }),
+      ].join("");
+      const inconsistent = sop.inconsistent
+        ? `<span class="pill no">AI overall berbeda dari cleaned/labeled</span>`
+        : `<span class="pill yes">Roll SOP konsisten</span>`;
+      panel.innerHTML = `
+        <div class="detail-sop-head">
+          <div>
+            <strong>Roll SOP</strong>
+            <p class="caption">Override hanya jika bukti menunjukkan hasil AI perlu dikoreksi.</p>
+          </div>
+          ${inconsistent}
+        </div>
+        <div class="sop-override-grid">${rows}</div>
+      `;
+      return;
+    }
+
+    const machine = sopScope(payload, "machine");
+    const final = sopScope(payload, "final");
+    const legacyRows = [
+      renderOverrideSelect({
+        key: "operator_present",
+        label: "Operator present",
+        machineValue: machine.operator_present || payload.machine_operator || "UNKNOWN",
+        finalValue: final.operator_present || "UNKNOWN",
+        overrideValue: reviewOverrides.operator_present || "",
+        values: ["DONE", "NOT_DONE", "UNKNOWN"],
+        displayValue: displayStepStatus,
+      }),
+      renderOverrideSelect({
+        key: "roi_dwell",
+        label: "ROI dwell",
+        machineValue: machine.roi_dwell || payload.machine_roi_dwell || "UNKNOWN",
+        finalValue: final.roi_dwell || "UNKNOWN",
+        overrideValue: reviewOverrides.roi_dwell || "",
+        values: ["DONE", "NOT_DONE", "UNKNOWN"],
+        displayValue: displayStepStatus,
+      }),
+      renderOverrideSelect({
+        key: "helmet",
+        label: "Helmet",
+        machineValue: machine.helmet || payload.machine_helmet || "UNKNOWN",
+        finalValue: final.helmet || payload.final_helmet || "UNKNOWN",
+        overrideValue: reviewOverrides.helmet || "",
+        values: ["DONE", "NOT_DONE", "UNKNOWN"],
+        displayValue: displayStepStatus,
+      }),
+    ].join("");
+    panel.innerHTML = `
+      <div class="detail-sop-head">
+        <div>
+          <strong>Legacy operator MVP-A</strong>
+          <p class="caption">Kompatibilitas untuk sesi lama.</p>
+        </div>
+      </div>
+      <div class="sop-override-grid">${legacyRows}</div>
+    `;
   };
 
   const formatHmsFromIso = (iso) => {
@@ -443,7 +650,6 @@
   const selectedSessionShift = document.getElementById("selected-session-shift");
   const selectedMachineStatus = document.getElementById("selected-machine-status");
   const selectedHumanStatus = document.getElementById("selected-human-status");
-  const selectedReviewSource = document.getElementById("selected-review-source");
   const selectedFinalStatus = document.getElementById("selected-final-status");
   const selectedEvidence = document.getElementById("selected-evidence");
   const selectedDetailLink = document.getElementById("selected-detail-link");
@@ -498,12 +704,11 @@
       return;
     }
 
-    const { sessionId, sessionUid, date, shift, machine, human, reviewSource, final, evidence } = row.dataset;
+    const { sessionId, sessionUid, date, shift, machine, human, final, evidence } = row.dataset;
     const resolvedSessionId = sessionId || link.textContent?.trim() || "UNKNOWN";
     const resolvedShift = shift || "-";
     const resolvedMachine = machine || "-";
     const resolvedHuman = human || "-";
-    const resolvedReviewSource = reviewSource || "-";
     const resolvedFinal = final || "-";
     const resolvedEvidence = evidence || "-";
     const resolvedSessionUid = sessionUid || "-";
@@ -531,9 +736,6 @@
     }
     if (selectedHumanStatus) {
       selectedHumanStatus.textContent = resolvedHuman;
-    }
-    if (selectedReviewSource) {
-      selectedReviewSource.textContent = resolvedReviewSource;
     }
     if (selectedFinalStatus) {
       selectedFinalStatus.textContent = resolvedFinal;
@@ -811,7 +1013,7 @@
       payload = await apiFetchJson(url);
     } catch (err) {
       syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="10"><span class="pill no">Failed to load sessions</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><span class="pill no">Failed to load sessions</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -835,7 +1037,7 @@
     });
 
     if (sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10"><span class="pill">No sessions found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><span class="pill">No sessions found</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -845,11 +1047,11 @@
     const rowsHtml = sessions
       .map((s, index) => {
         const uid = String(s.session_uid || "");
-        const sid = String(s.session_id || uid || "-");
-        const machine = String(s.machine_sop || s.machine_helmet || "UNKNOWN");
-        const review = String(s.review_status || "PENDING");
-        const reviewSource = String(s.review_source || "PENDING");
-        const final = String(s.final_sop || s.final_helmet || machine);
+        const rawSid = String(s.session_id || "").trim();
+        const sid = rawSid || (uid ? `Session ${String((queuePage - 1) * queuePageSize + index + 1).padStart(2, "0")}` : "-");
+        const machine = sopStatusValue(s, "machine");
+        const final = sopStatusValue(s, "final");
+        const decision = queueDecision(s);
         const date = String(s.date || "-");
         const shift = shiftLabel(s.shift_id, s.shift_name);
         const start = formatHmsFromIso(s.start_time_iso);
@@ -868,27 +1070,28 @@
 
         return `
           <tr class="${rowActive.trim()}"
-            data-session-id="${sid}"
-            data-session-uid="${uid}"
-            data-date="${date}"
-            data-shift="${shift}"
+            data-session-id="${escapeHtml(sid)}"
+            data-session-uid="${escapeHtml(uid)}"
+            data-date="${escapeHtml(date)}"
+            data-shift="${escapeHtml(shift)}"
             data-machine="${displayStepStatus(machine)}"
-            data-human="${displayReviewStatus(review)}"
-            data-review-source="${displayReviewSource(reviewSource)}"
+            data-human="${escapeHtml(decision.label)}"
             data-final="${displayStepStatus(final)}"
-            data-evidence="${evidenceLabel}"
+            data-evidence="${escapeHtml(evidenceLabel)}"
           >
             <td>
-              <a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-queue-link>${sid}</a>
-              <div class="table-sub">${uid}</div>
+              <a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" title="${uid ? `UID ${escapeHtml(uid)}` : ""}" data-queue-link>${escapeHtml(sid)}</a>
             </td>
-            <td>${date}</td>
-            <td><span class="pill ink">${shift}</span></td>
-            <td>${start}</td>
-            <td>${dur}</td>
-            <td><span class="pill ${pillClassForStepStatus(machine)}">${displayStepStatus(machine)}</span></td>
-            <td><div class="queue-review-cell"><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span><span class="pill ${pillClassForReviewSource(reviewSource)}">${displayReviewSource(reviewSource)}</span></div></td>
-            <td><span class="pill ${pillClassForStepStatus(final)}">${displayStepStatus(final)}</span></td>
+            <td>${escapeHtml(date)}</td>
+            <td><span class="pill ink">${escapeHtml(shift)}</span></td>
+            <td>${escapeHtml(start)}</td>
+            <td>${escapeHtml(dur)}</td>
+            <td>
+              <div class="queue-decision-cell">
+                <span class="pill ${decision.className}">${escapeHtml(decision.label)}</span>
+                ${decision.meta ? `<div class="table-sub queue-decision-meta">${escapeHtml(decision.meta)}</div>` : ""}
+              </div>
+            </td>
             <td>
               <div class="queue-evidence-cell">
                 <div class="queue-evidence-preview ${thumbUrl ? "" : "queue-evidence-empty"}">
@@ -1014,10 +1217,12 @@
       }
     }
 
-    const machine = String(payload.machine_sop || payload.machine_helmet || "UNKNOWN");
+    const machine = sopStatusValue(payload, "machine");
+    const final = sopStatusValue(payload, "final");
     const review = String(payload.review_status || (payload.review && payload.review.review_status) || "PENDING");
     const machinePill = document.getElementById("detail-machine-status");
     const reviewPill = document.getElementById("detail-review-status");
+    const finalPill = document.getElementById("detail-final-status");
     if (overviewAi) {
       overviewAi.textContent = displayStepStatus(machine);
     }
@@ -1036,6 +1241,12 @@
       reviewPill.className = `pill ${pillClassForReviewStatus(review)}`;
       reviewPill.textContent = `Review ${displayReviewStatus(review)}`;
     }
+    if (finalPill) {
+      finalPill.className = `pill ${pillClassForStepStatus(final)}`;
+      finalPill.textContent = `Final ${displayStepStatus(final)}`;
+    }
+
+    renderSopPanel(payload);
 
     const noteBox = document.getElementById("review-note");
     if (noteBox instanceof HTMLTextAreaElement) {
@@ -1071,7 +1282,7 @@
       const annotatedUrl = payload.annotated_url ? String(payload.annotated_url) : "";
       const annotatedPlaybackUrl = payload.annotated_playback_url ? String(payload.annotated_playback_url) : annotatedUrl;
       const hasAnnotated = Boolean(annotatedUrl);
-      const finalSopStatus = String(payload.final_sop || payload.machine_sop || payload.final_helmet || payload.machine_helmet || "UNKNOWN").toUpperCase();
+      const finalSopStatus = sopStatusValue(payload, "final");
       const preferAnnotated = hasAnnotated && finalSopStatus === "UNKNOWN";
 
       const setEvidenceState = () => {
@@ -1204,10 +1415,21 @@
         event.preventDefault();
         const reviewStatus = statusInput instanceof HTMLInputElement ? statusInput.value : "PENDING";
         const note = noteBox instanceof HTMLTextAreaElement ? noteBox.value : "";
+        const overrides = {};
+        form.querySelectorAll("select[data-override-key]").forEach((node) => {
+          if (!(node instanceof HTMLSelectElement)) return;
+          const key = node.getAttribute("data-override-key") || "";
+          const value = String(node.value || "").trim();
+          if (key && value) overrides[key] = value;
+        });
+        const body = { review_status: reviewStatus, review_note: note };
+        if (Object.keys(overrides).length > 0) {
+          body.overrides = overrides;
+        }
         try {
           await apiFetchJson(`/api/sessions/${encodeURIComponent(sessionUid)}/review`, {
             method: "PUT",
-            body: JSON.stringify({ review_status: reviewStatus, review_note: note }),
+            body: JSON.stringify(body),
           });
           if (reviewPill) {
             reviewPill.className = `pill ${pillClassForReviewStatus(reviewStatus)}`;
@@ -1816,7 +2038,7 @@
             if (Number.isNaN(dt.getTime())) return;
             const idx = dt.getHours();
             if (idx < 0 || idx >= 24) return;
-            const status = String(row.machine_sop || row.final_sop || row.final_helmet || row.machine_helmet || "UNKNOWN").toUpperCase();
+            const status = sopStatusValue(row, "machine");
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else unknown[idx] += 1;
@@ -1857,7 +2079,7 @@
             const d = row && row.date ? String(row.date) : "";
             const idx = idxByDate.get(d);
             if (idx == null) return;
-            const status = String(row.machine_sop || row.final_sop || row.final_helmet || row.machine_helmet || "UNKNOWN").toUpperCase();
+            const status = sopStatusValue(row, "machine");
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else unknown[idx] += 1;
@@ -1970,8 +2192,6 @@
                 const uid = String(session.session_uid || "");
                 const sid = String(session.session_id || uid || "-");
                 const start = formatHmsFromIso(session.start_time_iso);
-                const roi = String(session.machine_roi_dwell || "UNKNOWN");
-                const sop = String(session.final_sop || session.machine_sop || "UNKNOWN");
                 const review = String(session.review_status || "PENDING");
                 const remark =
                   Number(session.clip_count || 0) > 0
@@ -1981,17 +2201,9 @@
                     : "No evidence attached";
                 return `
                   <tr>
-                    <td>
-                      <div class="session-cell">
-                        <span class="thumb" aria-hidden="true"></span>
-                        <div>
-                          <strong>${sid}</strong>
-                          <div class="table-sub">${uid}</div>
-                        </div>
-                      </div>
-                    </td>
+                    <td> <strong>${sid}</strong></td>
                     <td>${start}</td>
-                    <td><span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(sop)}">SOP ${displayStepStatus(sop)}</span></td>
+                    <td>${dashboardSopPills(session)}</td>
                     <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
                     <td>${remark}</td>
                     <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Inspect</a></td>

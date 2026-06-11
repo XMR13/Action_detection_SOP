@@ -378,6 +378,12 @@ form.filters.event-browser-filters .btn {
   margin-top: 18px;
 }
 
+.sidebar-note-copy {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .sidebar-note .btn {
   width: 100%;
 }

@@ -111,14 +111,11 @@
 	                <span class="pill brand" id="detail-evidence-state">clip available</span>
 	              </div>
 
-              <div class="big-thumb detail-thumb detail-player">
-                <div class="bbox" aria-hidden="true"></div>
-                <div class="line" aria-hidden="true"></div>
-                <div class="frame-overlay">
-                  <span class="pill">thumbnail.jpg</span>
-                  <span class="pill">clip 00:10.8</span>
-                </div>
-              </div>
+	              <div class="big-thumb detail-thumb detail-player">
+	                <div class="frame-overlay">
+	                  <span class="pill">Memuat bukti...</span>
+	                </div>
+	              </div>
 
 	              <div class="detail-evidence-strip" id="detail-evidence-strip">
 	                <span class="pill">Memuat bukti...</span>
@@ -138,12 +135,16 @@
 	              <div class="detail-status-row">
 	                <span class="pill dir-b" id="detail-machine-status">AI -</span>
 	                <span class="pill pending" id="detail-review-status">Review -</span>
+	                <span class="pill" id="detail-final-status">Final -</span>
 	                <span class="pill" id="detail-evidence-pill">Bukti -</span>
 	              </div>
 
               <form id="review-form" class="detail-decision-form" data-disable-on-submit>
                 <input id="review-status" name="review_status" type="hidden" value="PENDING" />
                 <input id="selected-session-id" name="selected_session_id" type="hidden" value="" />
+                <div class="detail-sop-panel" id="detail-sop-panel">
+                  <span class="pill">Memuat status SOP...</span>
+                </div>
 	                <div class="field">
 	                  <label for="review-note">Reviewer note</label>
 	                  <textarea

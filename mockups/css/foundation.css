@@ -829,28 +829,6 @@ input[type="text"] {
   letter-spacing: 0.3px;
 }
 
-.big-thumb .bbox {
-  position: absolute;
-  left: 18%;
-  top: 22%;
-  width: 50%;
-  height: 44%;
-  border: 3px solid rgba(232, 24, 32, 0.9);
-  border-radius: 16px;
-  box-shadow: 0 0 0 6px rgba(232, 24, 32, 0.1);
-}
-
-.big-thumb .line {
-  position: absolute;
-  left: 8%;
-  top: 70%;
-  width: 84%;
-  height: 2px;
-  background: rgba(64, 64, 64, 0.82);
-  transform: rotate(-10deg);
-  box-shadow: 0 0 0 4px rgba(64, 64, 64, 0.14);
-}
-
 .panel {
   border: 1px solid var(--card-border);
   border-radius: var(--radius-lg);

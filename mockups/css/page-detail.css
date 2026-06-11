@@ -188,6 +188,77 @@
   gap: 12px;
 }
 
+.detail-sop-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(45, 55, 72, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px;
+}
+
+.detail-sop-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-sop-head strong {
+  display: block;
+  color: var(--brand-ink-deep);
+  font-size: 13px;
+}
+
+.detail-sop-head .caption {
+  margin: 3px 0 0;
+}
+
+.sop-override-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.sop-override-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.72fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(248, 249, 251, 0.82);
+}
+
+.sop-override-label,
+.sop-override-machine,
+.sop-override-final {
+  display: block;
+}
+
+.sop-override-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.sop-override-machine,
+.sop-override-final {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.sop-override-row select {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(45, 55, 72, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 8px 9px;
+  font-size: 12px;
+}
+
 .detail-decision-form textarea {
   min-height: 100px;
 }
@@ -258,7 +329,8 @@
   }
 
   .detail-decision-grid,
-  .detail-nav-row {
+  .detail-nav-row,
+  .sop-override-row {
     grid-template-columns: 1fr;
   }
 }
