@@ -1,0 +1,21 @@
+# Draft retention policy for generated SOP review artifacts.
+# Ubah angka ini setelah diskusi terkait storage dan audit dengan users
+
+
+data_dir: data/roll_sop_v1
+
+retention:
+  # Disposable browser-playback cache. Safe to regenerate from source evidence.
+  transcoded_cache_days: 7
+
+  # Full annotated session videos can be large; keep shorter than core metadata.
+  annotated_video_days: 14
+
+  # Review evidence clips are higher-value than cache/annotated full video.
+  evidence_clip_days: 30
+
+  # Completed uploader task records are operational bookkeeping.
+  uploader_done_days: 14
+
+  # Dead uploader task records are useful briefly for debugging failed uploads.
+  uploader_dead_days: 14

@@ -150,8 +150,8 @@ GET /api/admin/ops
 ```
 
 Retention cleanup:
-
+This is for running the retention_cleanup script :
 ```bash
-python3 -m Scripts.cleanup_retention --data-dir data
-python3 -m Scripts.cleanup_retention --data-dir data --apply
+python3 -m Scripts.cleanup_retention --config configs/retention.yaml
+python3 -m Scripts.cleanup_retention --config configs/retention.yaml --apply
 ```

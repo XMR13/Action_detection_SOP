@@ -13,7 +13,8 @@ Media/
 datasets/
 docs/
 data/
-configs/
+configs/*
+!configs/retention.yaml
 
 #sigular file
 
