@@ -119,7 +119,7 @@ class TensorRTBackend:
 
     Supports both classic binding-based execution (`execute_async_v2`) and the
     newer tensor-name API (`set_tensor_address` + `execute_async_v3`) depending
-    on what the installed TensorRT version exposes. Please ennsure your engine 
+    on what the installed TensorRT version exposes. Please ennsure your engine
     is built in a way that is compatible with the API available in your environment.
     """
 

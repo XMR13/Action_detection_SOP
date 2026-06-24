@@ -21,7 +21,7 @@ KNOWN_SOP_PROFILES = {PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1}
 """
 ----------------------------
 CONFIG
----------------------------- 
+----------------------------
 """
 @dataclass(frozen=True)
 class ResolvedSessionTimingConfig:
@@ -42,7 +42,7 @@ class ResolvedSopProfileConfig:
 
 @dataclass(frozen=True)
 class ResolvedClassConfig:
-    #all configuration for the class side 
+    #all configuration for the class side
     #or detection of thins
     class_names: Dict[int, str]
     class_conf_thresholds: Dict[int, float]
@@ -68,10 +68,10 @@ def _resolve_seconds(cli_value: Optional[float], profile_value: Optional[float],
     """This is for choosing the values in the order of cli_value --> profile_value --> default value"""
     if cli_value is not None:
         return float(cli_value)
-    
+
     if profile_value is not None:
         return float(profile_value)
-    
+
     return float(default_value)
 
 def _name_to_ids(class_names: Dict[int, str], labels: Sequence[str]) -> List[int]:
@@ -120,7 +120,7 @@ def _resolve_sop_profile(args: argparse.Namespace) -> ResolvedSopProfileConfig:
         else:
             path = Path(raw)
             profile = load_sop_profile(path)
-    
+
     return ResolvedSopProfileConfig(name=name, path=path, profile=profile)
 
 def _resolve_session_timing(args: argparse.Namespace, sop_profile: ResolvedSopProfileConfig) -> ResolvedSessionTimingConfig:

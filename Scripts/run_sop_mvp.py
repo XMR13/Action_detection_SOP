@@ -20,7 +20,7 @@ def _add_bool_optional_flag(
     Python 3.8-compatible replacement for argparse.BooleanOptionalAction.
     """
 
-    dest = name.lstrip("-").replace("-", "_")   
+    dest = name.lstrip("-").replace("-", "_")
     parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
     parser.add_argument(f"--no-{dest.replace('_', '-')}", dest=dest, action="store_false", help=argparse.SUPPRESS)
 

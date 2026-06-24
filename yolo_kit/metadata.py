@@ -26,7 +26,7 @@ def load_class_names(metadata_path: str) -> Dict[int, str]:
             #if the metada starts with the notghing or comment
             if not line or line.startswith("#"):
                 continue
-            
+
             #check fot the names: metadata
             if line in ("names", "names:"):
                 in_names= True
@@ -37,7 +37,7 @@ def load_class_names(metadata_path: str) -> Dict[int, str]:
             # parse "id" label"
             if ":" not in line:
                 continue
-            
+
             #split into left and right for the id and the class
             left, right = line.split(":", 1)
             left = left.strip()

@@ -217,7 +217,7 @@ def _spool_pending_retry_stats(path: Path, *, now_ts: Optional[float] = None) ->
     oldest_task_created_ts = 0.0
     next_retry_ts = 0.0
 
-    
+
     if path.exists() and path.is_dir():
         try:
             #ts stand for timestamp
@@ -843,7 +843,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         sessions = index.list()
         disk = shutil.disk_usage(settings.data_dir)
         disk_health = _disk_health(
-            disk, 
+            disk,
             warning_used_pct=settings.disk_warning_used_pct,
             critical_used_pct=settings.disk_critical_used_pct,
         )
@@ -1328,9 +1328,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         shift: str = Query(default="ALL"),
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
     ) -> Response:
-        
+
         """
-        Function for expoerting csv from sessions data 
+        Function for expoerting csv from sessions data
         that is filtered to match the data from review queue page.
         """
         rows, _, _, _ = _filtered_session_rows(
@@ -1365,7 +1365,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "clip_count",
             "has_thumbnail",
         ]
-        
+
         #create a temporary object files
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
@@ -1399,7 +1399,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "has_thumbnail": row.get("has_thumbnail"),
                 }
             )
-        
+
         #return it as a object response
         return Response(
             content=buf.getvalue(),

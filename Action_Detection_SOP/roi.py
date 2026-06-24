@@ -72,14 +72,14 @@ def load_roi_json(path: Path) -> RoiPolygon:
     poly = raw.get("polygon")
     if not isinstance(poly, list) or len(poly) < 3:
         raise ValueError("ROI JSON Must include 'polygon' as a list of >=3 [x, y] points.")
-    
+
     frame_size: Optional[Tuple[int, int]] = None
     frame_size_raw = raw.get("frame_size")
     if isinstance(frame_size_raw, dict):
         w = frame_size_raw.get("width")
         h = frame_size_raw.get("height")
         if isinstance(w, (int, float)) and isinstance(h, (int, float)):
-            frame_size = (int(w), int(h)) 
+            frame_size = (int(w), int(h))
     else:
         fw = raw.get("frame_width")
         fh = raw.get("frame_height")

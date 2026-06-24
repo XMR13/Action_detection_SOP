@@ -245,7 +245,7 @@ def _format_progress(
     return f"frames={frame_idx} read_fps={read_fps:5.1f} proc_fps={proc_fps:5.1f}"
 
 
-# this is for the rtsp portion to check 
+# this is for the rtsp portion to check
 def _rtsp_option_or_none(value: Optional[int]) -> Optional[int]:
     if value is None:
         return None

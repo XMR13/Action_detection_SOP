@@ -43,7 +43,7 @@ class RollEvidenceRuleConfig:
     @property
     def required_frames(self) -> int:
         #how much frame for a given action of the SOP
-        # so it will worked liek this some_object.required_frames 
+        # so it will worked liek this some_object.required_frames
         return max(1, int(round(self.required_seconds * self.analysis_fps)))
 
 @dataclass(frozen=True)

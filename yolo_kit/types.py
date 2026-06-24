@@ -6,10 +6,10 @@ from typing import Optional, Tuple
 class Detection:
     """
     deskripsi generik representasi objek yang digunakan untuk menampilkan hasil deteksi
-    gunakan representasi ini sebagai datacalass, agar memungkinkan membuat pengaturan objek 
+    gunakan representasi ini sebagai datacalass, agar memungkinkan membuat pengaturan objek
     menjadi jauh lebih mudah
     """
-    
+
     x1: float
     y1: float
     x2: float
