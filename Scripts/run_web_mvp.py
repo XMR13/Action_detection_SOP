@@ -47,6 +47,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=float(os.environ.get("SOP_AUTO_APPROVE_MIN_DURATION_S", "8.0")),
         help="Minimum session duration (seconds) before DONE can be auto-qualified.",
     )
+    parser.add_argument(
+        "--disk-warning-used-pct",
+        type=float,
+        default=float(os.environ.get("SOP_DISK_WARNING_USED_PCT", "75.0")),
+        help="Mark disk health warning when used percentage is at or above this value.",
+    )
+    parser.add_argument(
+        "--disk-critical-used-pct",
+        type=float,
+        default=float(os.environ.get("SOP_DISK_CRITICAL_USED_PCT", "85.0")),
+        help="Mark disk health critical when used percentage is at or above this value.",
+    )
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (dev only).")
     args = parser.parse_args(argv)
 
@@ -63,6 +75,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         auto_rescan_seconds=float(args.auto_rescan_seconds),
         auto_approve_done_enabled=not bool(args.disable_auto_approve_done),
         auto_approve_min_duration_s=float(args.auto_approve_min_duration_s),
+        disk_warning_used_pct=float(args.disk_warning_used_pct),
+        disk_critical_used_pct=float(args.disk_critical_used_pct),
     )
     app = create_app(settings)
     uvicorn.run(app, host=str(args.host), port=int(args.port), reload=bool(args.reload))

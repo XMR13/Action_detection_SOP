@@ -16,7 +16,12 @@ def _auth_headers(username: str = "admin", password: str = "secret") -> Dict[str
     return {"Authorization": f"Basic {token}"}
 
 
-def _build_client(tmp_path: Path) -> TestClient:
+def _build_client(
+    tmp_path: Path,
+    *,
+    disk_warning_used_pct: float = 75.0,
+    disk_critical_used_pct: float = 85.0,
+) -> TestClient:
     ui_dir = tmp_path / "ui"
     ui_dir.mkdir(parents=True, exist_ok=True)
     (ui_dir / "index.html").write_text("<html><body>ok</body></html>", encoding="utf-8")
@@ -27,6 +32,8 @@ def _build_client(tmp_path: Path) -> TestClient:
         ui_dir=ui_dir,
         admin_username="admin",
         admin_password="secret",
+        disk_warning_used_pct=disk_warning_used_pct,
+        disk_critical_used_pct=disk_critical_used_pct,
     )
     return TestClient(create_app(settings))
 
@@ -143,14 +150,33 @@ def test_admin_ops_reports_spool_and_storage_state(tmp_path: Path) -> None:
         assert payload["uploader_spool"]["state_file"]["watch_mode"] is True
         assert payload["uploader_spool"]["health"]["status"] == "error"
         assert "dead_tasks_present" in payload["uploader_spool"]["health"]["issues"]
+        assert payload["disk"]["health"]["status"] in {"ok", "warning", "critical"}
+        assert "used_pct" in payload["disk"]["health"]
+        assert "free_pct" in payload["disk"]["health"]
+        assert payload["settings"]["disk_warning_used_pct"] == 75.0
+        assert payload["settings"]["disk_critical_used_pct"] == 85.0
         assert payload["cache"]["files"] == 1
         assert payload["reports"]["path"].endswith("/data/reports")
         assert payload["managed_storage"]["total_bytes"] > 0
+        assert payload["managed_storage"]["percent_of_disk"] >= 0.0
         assert payload["managed_storage"]["total_files"] >= 6
         assert payload["managed_storage"]["sessions"]["categories"]["thumbnails"]["files"] == 1
         assert payload["managed_storage"]["sessions"]["categories"]["run_configs"]["files"] == 1
         assert payload["managed_storage"]["sessions"]["categories"]["evidence_manifests"]["files"] == 1
         assert payload["managed_storage"]["sessions"]["categories"]["evidence_clips"]["files"] == 1
+
+
+def test_admin_ops_reports_critical_disk_health_when_threshold_is_crossed(tmp_path: Path) -> None:
+    with _build_client(tmp_path, disk_warning_used_pct=0.0, disk_critical_used_pct=0.0) as client:
+        ops = client.get("/api/admin/ops", headers=_auth_headers())
+        assert ops.status_code == 200
+        payload = ops.json()
+        assert payload["disk"]["health"]["status"] == "critical"
+        assert "disk_used_pct_critical" in payload["disk"]["health"]["issues"]
+
+        storage = client.get("/api/admin/storage", headers=_auth_headers())
+        assert storage.status_code == 200
+        assert storage.json()["disk_health"]["status"] == "critical"
 
 
 def test_contract_endpoints_require_auth(tmp_path: Path) -> None:

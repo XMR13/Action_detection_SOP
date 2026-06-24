@@ -335,6 +335,42 @@ def _safe_file_size(path: Path) -> int:
     return 0
 
 
+def _disk_health(
+    disk: Any,
+    *,
+    warning_used_pct: float,
+    critical_used_pct: float,
+) -> Dict[str, Any]:
+    total = max(0, int(disk.total))
+    used = max(0, int(disk.used))
+    free = max(0, int(disk.free))
+    used_pct = (used / total * 100.0) if total > 0 else 0.0
+    free_pct = (free / total * 100.0) if total > 0 else 0.0
+    warning = float(warning_used_pct)
+    critical = float(critical_used_pct)
+    if critical < warning:
+        critical = warning
+
+    #the issues as a list of string
+    issues: List[str] = []
+    status = "ok"
+    if used_pct >= critical:
+        status = "critical"
+        issues.append("penggunaan disk mencapai kritikal")
+    elif used_pct >= warning:
+        status = "warning"
+        issues.append("WARNING: Penggunaan disk mencapai sudah banyak")
+
+    return {
+        "status": status,
+        "issues": issues,
+        "used_pct": round(float(used_pct), 3),
+        "free_pct": round(float(free_pct), 3),
+        "warning_used_pct": round(float(warning), 3),
+        "critical_used_pct": round(float(critical), 3),
+    }
+
+
 def _session_storage_breakdown(sessions: List[SessionArtifact]) -> Dict[str, Any]:
     checklist_bytes = 0
     run_config_bytes = 0
@@ -800,6 +836,11 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     def storage() -> Dict[str, Any]:
         sessions = index.list()
         disk = shutil.disk_usage(settings.data_dir)
+        disk_health = _disk_health(
+            disk, 
+            warning_used_pct=settings.disk_warning_used_pct,
+            critical_used_pct=settings.disk_critical_used_pct,
+        )
         clip_count = sum(_clip_count(s) for s in sessions)
         thumb_count = sum(1 for s in sessions if s.paths.thumbnail_jpg.exists())
         annotated_count = sum(1 for s in sessions if (s.paths.session_dir / "annotated.mp4").exists())
@@ -815,12 +856,18 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "disk_total_bytes": int(disk.total),
             "disk_used_bytes": int(disk.used),
             "disk_free_bytes": int(disk.free),
+            "disk_health": disk_health,
         }
 
     @app.get("/api/admin/ops")
     def ops() -> Dict[str, Any]:
         sessions = index.list()
         disk = shutil.disk_usage(settings.data_dir)
+        disk_health = _disk_health(
+            disk=disk,
+            warning_used_pct=settings.disk_warning_used_pct,
+            critical_used_pct=settings.disk_critical_used_pct,
+        )
         now_ts = time.time()
         spool_root = settings.data_dir / "uploader_spool"
         cache_root = settings.data_dir / "_web_cache"
@@ -884,6 +931,11 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             + int(db_size)
             + int(spool_total_bytes)
         )
+        managed_storage_pct_of_disk = (
+            (float(managed_total_bytes) / float(disk.total) * 100.0)
+            if int(disk.total) > 0
+            else 0.0
+        )
 
         return {
             "status": "ok",
@@ -894,6 +946,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 "total_bytes": int(disk.total),
                 "used_bytes": int(disk.used),
                 "free_bytes": int(disk.free),
+                "health": disk_health,
             },
             "database": {
                 "path": str(settings.db_path),
@@ -904,6 +957,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "managed_storage": {
                 "total_files": int(managed_total_files),
                 "total_bytes": int(managed_total_bytes),
+                "percent_of_disk": round(float(managed_storage_pct_of_disk), 3),
                 "sessions": session_storage,
                 "reports": reports,
                 "cache": cache,
@@ -926,6 +980,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),
                 "auto_approve_done_enabled": settings.auto_approve_done_enabled,
                 "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
+                "disk_warning_used_pct": settings.disk_warning_used_pct,
+                "disk_critical_used_pct": settings.disk_critical_used_pct,
             },
         }
 

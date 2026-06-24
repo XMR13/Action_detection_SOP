@@ -149,6 +149,13 @@ Ops summary endpoint:
 GET /api/admin/ops
 ```
 
+The ops payload includes disk health fields:
+
+- `disk.health.status`: `ok`, `warning`, or `critical`
+- default warning threshold: `disk.health.used_pct >= 75`
+- default critical threshold: `disk.health.used_pct >= 85`
+- tune with `--disk-warning-used-pct` / `--disk-critical-used-pct`
+
 Retention cleanup:
 This is for running the retention_cleanup script :
 ```bash
