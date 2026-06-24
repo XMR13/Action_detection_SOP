@@ -26,6 +26,13 @@
   min-width: 0;
 }
 
+.queue-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .queue-table {
   width: 100%;
   min-width: 0;
@@ -33,11 +40,11 @@
 }
 
 .queue-table col.queue-col-session {
-  width: 16%;
+  width: 15%;
 }
 
 .queue-table col.queue-col-date {
-  width: 10%;
+  width: 9%;
 }
 
 .queue-table col.queue-col-shift {
@@ -48,12 +55,16 @@
   width: 8%;
 }
 
+.queue-table col.queue-col-end {
+  width: 8%;
+}
+
 .queue-table col.queue-col-duration {
   width: 7%;
 }
 
 .queue-table col.queue-col-decision {
-  width: 29%;
+  width: 25%;
 }
 
 .queue-table col.queue-col-evidence {
@@ -71,10 +82,10 @@
 
 .queue-table th:first-child,
 .queue-table td:first-child,
-.queue-table th:nth-child(6),
-.queue-table td:nth-child(6),
 .queue-table th:nth-child(7),
-.queue-table td:nth-child(7) {
+.queue-table td:nth-child(7),
+.queue-table th:nth-child(8),
+.queue-table td:nth-child(8) {
   white-space: normal;
 }
 

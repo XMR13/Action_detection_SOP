@@ -654,6 +654,7 @@
   const selectedEvidence = document.getElementById("selected-evidence");
   const selectedDetailLink = document.getElementById("selected-detail-link");
   const queueOpenSelected = document.getElementById("queue-open-selected");
+  const queueExportCsv = document.getElementById("queue-export-csv");
   let queuePage = 1;
   let queuePageSize = 20;
 
@@ -671,6 +672,41 @@
 
   const resetQueuePage = () => {
     queuePage = 1;
+  };
+
+  const buildQueueDataUrl = (baseUrl, { includePagination } = { includePagination: true }) => {
+    const statusSel = document.getElementById("queue-status");
+    const evidenceSel = document.getElementById("queue-evidence");
+    const shiftSel = document.getElementById("queue-shift");
+    const sortSel = document.getElementById("queue-sort");
+    const pageSizeSel = document.getElementById("queue-page-size");
+
+    const reviewStatus = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
+    const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "ANY") : "ANY";
+    const shiftFilter = shiftSel instanceof HTMLSelectElement ? String(shiftSel.value || "ALL") : "ALL";
+    const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
+    queuePageSize = pageSizeSel instanceof HTMLSelectElement ? readQueuePageSize() : queuePageSize;
+
+    const params = new URLSearchParams();
+    if (includePagination) {
+      params.set("page", String(queuePage));
+      params.set("page_size", String(queuePageSize));
+    }
+    params.set("sort", sort || "NEWEST");
+    params.set("evidence", evidenceFilter || "ANY");
+    params.set("shift", shiftFilter || "ALL");
+    if (reviewStatus && reviewStatus !== "ALL") {
+      params.set("review_status", reviewStatus);
+    }
+
+    const query = params.toString();
+    return withDateApiQuery(`${baseUrl}${query ? `?${query}` : ""}`);
+  };
+
+  const syncQueueExportHref = () => {
+    if (queueExportCsv instanceof HTMLAnchorElement) {
+      queueExportCsv.href = buildQueueDataUrl("/api/sessions/export.csv", { includePagination: false });
+    }
   };
 
   const syncQueuePaginationUi = ({ total, page, pageSize, totalPages, hasPrev, hasNext }) => {
@@ -985,35 +1021,15 @@
       // ignore stats failures; queue list still loads
     }
 
-    const statusSel = document.getElementById("queue-status");
-    const evidenceSel = document.getElementById("queue-evidence");
-    const shiftSel = document.getElementById("queue-shift");
-    const sortSel = document.getElementById("queue-sort");
-    const pageSizeSel = document.getElementById("queue-page-size");
-
-    const reviewStatus = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
-    const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "ANY") : "ANY";
-    const shiftFilter = shiftSel instanceof HTMLSelectElement ? String(shiftSel.value || "ALL") : "ALL";
-    const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
-    queuePageSize = pageSizeSel instanceof HTMLSelectElement ? readQueuePageSize() : queuePageSize;
-
-    let url = withDateApiQuery(
-      `/api/sessions?page=${encodeURIComponent(String(queuePage))}&page_size=${encodeURIComponent(
-        String(queuePageSize)
-      )}&sort=${encodeURIComponent(sort || "NEWEST")}&evidence=${encodeURIComponent(evidenceFilter || "ANY")}&shift=${encodeURIComponent(
-        shiftFilter || "ALL"
-      )}`
-    );
-    if (reviewStatus && reviewStatus !== "ALL") {
-      url += `&review_status=${encodeURIComponent(reviewStatus)}`;
-    }
+    syncQueueExportHref();
+    const url = buildQueueDataUrl("/api/sessions", { includePagination: true });
 
     let payload;
     try {
       payload = await apiFetchJson(url);
     } catch (err) {
       syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="8"><span class="pill no">Failed to load sessions</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill no">Failed to load sessions</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -1037,7 +1053,7 @@
     });
 
     if (sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><span class="pill">No sessions found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill">No sessions found</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -1055,6 +1071,7 @@
         const date = String(s.date || "-");
         const shift = shiftLabel(s.shift_id, s.shift_name);
         const start = formatHmsFromIso(s.start_time_iso);
+        const end = formatHmsFromIso(s.end_time_iso);
         const dur = formatDuration(s.duration_s);
         const thumbUrl = s.thumbnail_url
           ? String(s.thumbnail_url)
@@ -1085,6 +1102,7 @@
             <td>${escapeHtml(date)}</td>
             <td><span class="pill ink">${escapeHtml(shift)}</span></td>
             <td>${escapeHtml(start)}</td>
+            <td>${escapeHtml(end)}</td>
             <td>${escapeHtml(dur)}</td>
             <td>
               <div class="queue-decision-cell">
@@ -1245,6 +1263,19 @@
       finalPill.className = `pill ${pillClassForStepStatus(final)}`;
       finalPill.textContent = `Final ${displayStepStatus(final)}`;
     }
+
+    actionButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      const action = String(button.getAttribute("data-review-status") || "").toUpperCase();
+      const shouldDisableApprove = action === "QUALIFIED" && String(machine || "").toUpperCase() === "DONE";
+      button.disabled = shouldDisableApprove;
+      button.setAttribute("aria-disabled", shouldDisableApprove ? "true" : "false");
+      if (shouldDisableApprove) {
+        button.title = "AI already marked this session DONE; use Reject or Unknown only if it needs correction.";
+      } else {
+        button.removeAttribute("title");
+      }
+    });
 
     renderSopPanel(payload);
 

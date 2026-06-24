@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import csv
+import io
 import shutil
 import subprocess
 import threading
@@ -15,7 +17,7 @@ import uuid
 import cv2
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,7 +66,11 @@ def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> Dict[str, Any]:
 
 
 def _normalize_shift_filter(value: Any) -> str:
+    """
+    Normalze filter data
+    """
     raw = str(value or "").strip().upper().replace(" ", "").replace("_", "")
+    #basics if staement for normalziing the if statements
     if raw in {"S1", "SHIFT1", "1"}:
         return "S1"
     if raw in {"S2", "SHIFT2", "2"}:
@@ -1152,20 +1158,16 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "date_to": applied_date_to,
         }
 
-    @app.get("/api/sessions")
-    def list_sessions(
+    def _filtered_session_rows(
         *,
-        date: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
-        evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
-        shift: str = Query(default="ALL"),
-        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
-        page: int = Query(default=1, ge=1),
-        page_size: Optional[int] = Query(default=None, ge=1, le=2000),
-        limit: int = Query(default=200, ge=1, le=2000),
-    ) -> Dict[str, Any]:
+        date: Optional[str],
+        date_from: Optional[str],
+        date_to: Optional[str],
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]],
+        evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"],
+        shift: str,
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"],
+    ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], str]:
         sessions = index.list()
         sessions, applied_date_from, applied_date_to = _filter_sessions_by_date_window(
             sessions,
@@ -1262,6 +1264,32 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         else:
             out.sort(key=lambda x: (-float(x.get("_sort_start_ts") or 0.0), str(x.get("session_uid") or "")))
 
+        return out, applied_date_from, applied_date_to, shift_filter
+
+    @app.get("/api/sessions")
+    def list_sessions(
+        *,
+        date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
+        shift: str = Query(default="ALL"),
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
+        page: int = Query(default=1, ge=1),
+        page_size: Optional[int] = Query(default=None, ge=1, le=2000),
+        limit: int = Query(default=200, ge=1, le=2000),
+    ) -> Dict[str, Any]:
+        out, applied_date_from, applied_date_to, shift_filter = _filtered_session_rows(
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            review_status=review_status,
+            evidence=evidence,
+            shift=shift,
+            sort=sort,
+        )
+
         effective_page_size = int(page_size) if page_size is not None else int(limit)
         total = len(out)
         start_idx = (int(page) - 1) * effective_page_size
@@ -1287,6 +1315,97 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "has_prev": has_prev,
             "has_next": has_next,
         }
+
+    #export csv capabilites
+    @app.get("/api/sessions/export.csv")
+    def export_sessions_csv(
+        *,
+        date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
+        shift: str = Query(default="ALL"),
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
+    ) -> Response:
+        
+        """
+        Function for expoerting csv from sessions data 
+        that is filtered to match the data from review queue page.
+        """
+        rows, _, _, _ = _filtered_session_rows(
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            review_status=review_status,
+            evidence=evidence,
+            shift=shift,
+            sort=sort,
+        )
+
+        #write headers for the output
+        headers = [
+            "session_uid",
+            "session_id",
+            "date",
+            "shift",
+            "start_time",
+            "end_time",
+            "duration_s",
+            "machine_sop",
+            "review_status",
+            "review_source",
+            "final_sop",
+            "machine_cleaned",
+            "machine_labeled",
+            "machine_overall_status",
+            "final_cleaned",
+            "final_labeled",
+            "final_overall_status",
+            "clip_count",
+            "has_thumbnail",
+        ]
+        
+        #create a temporary object files
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            sop = row.get("sop") if isinstance(row.get("sop"), dict) else {}
+            machine = sop.get("machine") if isinstance(sop.get("machine"), dict) else {}
+            final = sop.get("final") if isinstance(sop.get("final"), dict) else {}
+            shift_label = str(row.get("shift_name") or row.get("shift_id") or "")
+            #write in csv
+            writer.writerow(
+                {
+                    "session_uid": row.get("session_uid"),
+                    "session_id": row.get("session_id"),
+                    "date": row.get("date"),
+                    "shift": shift_label,
+                    "start_time": row.get("start_time_iso"),
+                    "end_time": row.get("end_time_iso"),
+                    "duration_s": round(float(row.get("duration_s") or 0.0), 3),
+                    "machine_sop": row.get("machine_sop"),
+                    "review_status": row.get("review_status"),
+                    "review_source": row.get("review_source"),
+                    "final_sop": row.get("final_sop"),
+                    "machine_cleaned": machine.get("cleaned"),
+                    "machine_labeled": machine.get("labeled"),
+                    "machine_overall_status": machine.get("overall_status"),
+                    "final_cleaned": final.get("cleaned"),
+                    "final_labeled": final.get("labeled"),
+                    "final_overall_status": final.get("overall_status"),
+                    "clip_count": row.get("clip_count"),
+                    "has_thumbnail": row.get("has_thumbnail"),
+                }
+            )
+        
+        #return it as a object response
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="sop_review_queue.csv"'},
+        )
 
     @app.get("/api/sessions/{session_uid}")
     def get_session(session_uid: str) -> Dict[str, Any]:

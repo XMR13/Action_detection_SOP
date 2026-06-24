@@ -50,7 +50,6 @@ def default_times_shitft() -> Tuple[ShiftDef, ShiftDef, ShiftDef]: #return back 
     )
 
 
-
 def parse_iso_datetime(value: object) -> Optional[datetime]:
     #get the parse iso datetime
     if not isinstance(value, str):

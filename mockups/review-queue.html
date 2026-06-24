@@ -135,7 +135,10 @@
 	                <h3>Tabel sesi</h3>
 	                <p class="caption"> Event hasil pengecekan, hasil review ditangani sebagai berikut.</p>
 	              </div>
-	              <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
+	              <div class="queue-table-actions">
+	                <a class="pill" id="queue-export-csv" href="/api/sessions/export.csv" download>Download CSV</a>
+	                <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
+	              </div>
 	            </div>
 
 	            <form class="filters queue-table-filters" aria-label="Queue table filters">
@@ -190,6 +193,7 @@
                   <col class="queue-col-date" />
                   <col class="queue-col-shift" />
                   <col class="queue-col-start" />
+                  <col class="queue-col-end" />
                   <col class="queue-col-duration" />
 	                  <col class="queue-col-decision" />
 	                  <col class="queue-col-evidence">
@@ -201,15 +205,16 @@
                     <th scope="col">Date</th>
                     <th scope="col">Shift</th>
                     <th scope="col">Start</th>
+                    <th scope="col">End</th>
                     <th scope="col">Dur</th>
                     <th scope="col">Decision</th>
                     <th scope="col">Evidence</th>
                     <th scope="col">Action</th>
 	                  </tr>
 	                </thead>
-                <tbody>
+	                <tbody>
                   <tr>
-	                    <td colspan="8">
+	                    <td colspan="9">
                       <span class="pill pending">Loading sessions…</span>
                     </td>
                   </tr>

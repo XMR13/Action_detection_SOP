@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import json
 from pathlib import Path
 from typing import Dict, Optional
@@ -391,6 +392,50 @@ def test_sessions_pagination_metadata_and_slicing(tmp_path: Path) -> None:
         assert body_2["has_prev"] is True
         assert body_2["has_next"] is False
         assert len(body_2["sessions"]) == 5
+
+
+def test_sessions_csv_export_uses_filters_but_not_pagination(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        for idx in range(3):
+            _put_min_session(
+                client,
+                session_uid=f"uid_csv_match_{idx}",
+                start_date="2026-06-19",
+                extra={
+                    "start_time_iso": f"2026-06-19T08:0{idx}:00+00:00",
+                    "end_time_iso": f"2026-06-19T08:0{idx}:30+00:00",
+                    "start_time_s": 10.0,
+                    "end_time_s": 40.0,
+                    "shift_id": "S1",
+                    "shift_name": "Shift 1",
+                },
+            )
+        _put_min_session(client, session_uid="uid_csv_other_date", start_date="2026-06-20")
+
+        res = client.get(
+            "/api/sessions/export.csv",
+            headers=_auth_headers(),
+            params={
+                "date": "2026-06-19",
+                "review_status": "PENDING",
+                "shift": "S1",
+                "page": 1,
+                "page_size": 1,
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/csv")
+        assert "sop_review_queue.csv" in res.headers["content-disposition"]
+
+        rows = list(csv.DictReader(res.text.splitlines()))
+        assert {row["session_uid"] for row in rows} == {
+            "uid_csv_match_0",
+            "uid_csv_match_1",
+            "uid_csv_match_2",
+        }
+        assert {row["duration_s"] for row in rows} == {"30.0"}
+        assert all(row["shift"] == "Shift 1" for row in rows)
+        assert all(row["review_status"] == "PENDING" for row in rows)
 
 
 def test_sessions_evidence_filter_modes(tmp_path: Path) -> None:
