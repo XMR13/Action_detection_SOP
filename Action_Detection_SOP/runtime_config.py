@@ -169,11 +169,23 @@ def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> Resolve
     class_conf_thresholds = _parse_label_conf(args.label_conf, class_names=class_names)
     person_ids = tuple(_name_to_ids(class_names, args.person_label))
     helmet_disabled = bool(args.skip_helmet)
-    helmet_ids = () if helmet_disabled else tuple(_name_to_ids(class_names, args.helmet_label))
+    helmet_alerts_enabled = bool(getattr(args, "enable_helmet_alerts", False))
+    helmet_label_ids = tuple(_name_to_ids(class_names, args.helmet_label))
+    helmet_ids = helmet_label_ids if helmet_alerts_enabled or not helmet_disabled else ()
     roll_ids = tuple(_name_to_ids(class_names, args.roll_label))
     cleaning_cloth_ids = tuple(_name_to_ids(class_names, args.cleaning_cloth_label))
     paper_label_ids = tuple(_name_to_ids(class_names, args.paper_label))
     warnings: List[str] = []
+
+    if helmet_alerts_enabled:
+        "jika kelas helmet dan person tidak tersedia di config maka trhow an errors"
+        if not person_ids:
+            raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")
+        if not helmet_label_ids:
+            raise ValueError(
+                f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
+                "Helmet alerts require a helmet-capable metadata/model pair."
+            )
 
     if sop_profile_name == PROFILE_OPERATOR_MVP_A and not person_ids:
         raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")
@@ -200,7 +212,11 @@ def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> Resolve
         helmet_ids = ()
 
     if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        active_class_ids = tuple(sorted(set(roll_ids + cleaning_cloth_ids + paper_label_ids)))
+        active = set(roll_ids + cleaning_cloth_ids + paper_label_ids)
+        if helmet_alerts_enabled:
+            active.update(person_ids)
+            active.update(helmet_label_ids)
+        active_class_ids = tuple(sorted(active))
     else:
         active_class_ids = tuple(sorted(set(person_ids + helmet_ids)))
 

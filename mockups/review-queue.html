@@ -145,8 +145,8 @@
               <div class="field">
 	                <label for="queue-status">Status</label>
 	                <select id="queue-status" name="queue-status">
-		                  <option value="PENDING" selected>Pending review</option>
-		                  <option value="ALL">All statuses</option>
+		                  <option value="PENDING">Review Pending</option>
+		                  <option value="ALL" selected>Semua status</option>
 	                  <option value="NOT_QUALIFIED">Rejected only</option>
 	                  <option value="QUALIFIED">Approved only</option>
 	                </select>
@@ -154,7 +154,7 @@
               <div class="field">
                 <label for="queue-evidence">Evidence</label>
                 <select id="queue-evidence" name="queue-evidence">
-                  <option value="ANY" selected>Any evidence</option>
+                  <option value="ANY" selected>Semua</option>
                   <option value="CLIP_THUMB">Clip + thumbnail</option>
                   <option value="CLIP_ONLY">Clip only</option>
                   <option value="THUMB_ONLY">Thumbnail only</option>
@@ -163,7 +163,7 @@
               <div class="field">
                 <label for="queue-shift">Shift</label>
                 <select id="queue-shift" name="queue-shift">
-                  <option value="ALL" selected>All shifts</option>
+                  <option value="ALL" selected>Semua Shift</option>
                   <option value="S1">Shift 1</option>
                   <option value="S2">Shift 2</option>
                   <option value="S3">Shift 3</option>
@@ -172,9 +172,9 @@
               <div class="field">
                 <label for="queue-sort">Sort by</label>
                 <select id="queue-sort" name="queue-sort">
-                  <option value="PENDING_FIRST" selected>Pending first</option>
-                  <option value="NEWEST">Newest first</option>
-	                  <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
+                  <option value="PENDING_FIRST">Pending first</option>
+                  <option value="NEWEST" selected>Newest first</option>
+	                <option value="MACHINE_UNKNOWN_FIRST">AI SOP UNKNOWN first</option>
 	                </select>
 	              </div>
 	              <div class="field">
@@ -206,7 +206,7 @@
                     <th scope="col">Shift</th>
                     <th scope="col">Start</th>
                     <th scope="col">End</th>
-                    <th scope="col">Dur</th>
+                    <th scope="col">Durasi</th>
                     <th scope="col">Decision</th>
                     <th scope="col">Evidence</th>
                     <th scope="col">Action</th>

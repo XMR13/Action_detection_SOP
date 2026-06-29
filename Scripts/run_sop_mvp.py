@@ -249,6 +249,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--min-person-height", type=int, default=0, help="If >0, short/small person sessions become UNKNOWN.")
     parser.add_argument(
+        "--enable-helmet-alerts",
+        action="store_true",
+        help="Enable independent no-helmet safety alerts. Requires --helmet-alert-roi plus person/helmet classes.",
+    )
+    parser.add_argument(
+        "--helmet-alert-roi",
+        default=None,
+        help="Safety alert area ROI polygon JSON. Required when --enable-helmet-alerts is set.",
+    )
+    parser.add_argument(
+        "--helmet-alert-s",
+        type=float,
+        default=5.0,
+        help="No-helmet alert after sustained qualifying evidence (seconds).",
+    )
+    parser.add_argument(
+        "--helmet-alert-recovery-s",
+        type=float,
+        default=2.0,
+        help="Close a no-helmet episode after sustained associated helmet evidence (seconds).",
+    )
+    parser.add_argument(
+        "--helmet-alert-cooldown-s",
+        type=float,
+        default=10.0,
+        help="Cooldown after a no-helmet episode closes before another alert can fire (seconds).",
+    )
+    parser.add_argument(
+        "--helmet-alert-min-person-height",
+        type=int,
+        default=120,
+        help="Ignore smaller people for no-helmet alerts; tune from real camera screenshots.",
+    )
+    parser.add_argument(
+        "--helmet-alert-max-gap",
+        type=int,
+        default=1,
+        help="Analyzed-frame gaps tolerated inside no-helmet evidence before alert fires.",
+    )
+    parser.add_argument(
+        "--helmet-alert-safety-area-id",
+        default="helmet_area_main",
+        help="Identifier stored in no-helmet alert artifacts for the safety alert ROI.",
+    )
+    parser.add_argument(
+        "--helmet-alert-camera-id",
+        default=None,
+        help="Optional camera/source id stored in no-helmet alert artifacts.",
+    )
+    parser.add_argument(
         "--cleaning-s",
         type=float,
         default=0.4,

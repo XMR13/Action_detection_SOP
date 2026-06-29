@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from Action_Detection_SOP.runtime_config import (
     PROFILE_OPERATOR_MVP_A,
     PROFILE_ROLL_SOP_V1,
@@ -52,6 +54,83 @@ def test_resolves_roll_profile_classes_and_timing_defaults(tmp_path: Path) -> No
     assert resolved.classes.cleaning_cloth_ids == (3,)
     assert resolved.classes.paper_label_ids == (4,)
     assert resolved.classes.class_conf_thresholds == {3: 0.08}
+
+
+def test_roll_profile_includes_person_and_helmet_when_alerts_are_enabled(tmp_path: Path) -> None:
+    metadata = _metadata(
+        tmp_path / "metadata.yaml",
+        {
+            0: "person",
+            1: "helmet",
+            2: "roll",
+            3: "cleaning_cloth",
+            4: "label",
+        },
+    )
+    roi = tmp_path / "helmet_alert_roi.json"
+    roi.write_text('{"polygon": [[0, 0], [100, 0], [100, 100], [0, 100]]}', encoding="utf-8")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--video",
+            "sample.mp4",
+            "--metadata",
+            str(metadata),
+            "--sop-profile",
+            PROFILE_ROLL_SOP_V1,
+            "--enable-helmet-alerts",
+            "--helmet-alert-roi",
+            str(roi),
+        ]
+    )
+
+    resolved = resolve_run_config(args)
+
+    assert resolved.classes.active_class_ids == (0, 1, 2, 3, 4)
+    assert resolved.classes.person_ids == (0,)
+    assert resolved.classes.helmet_ids == (1,)
+
+
+def test_helmet_alerts_fail_fast_without_person_class(tmp_path: Path) -> None:
+    metadata = _metadata(tmp_path / "metadata.yaml", {1: "helmet", 2: "roll", 3: "cleaning_cloth", 4: "label"})
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--video",
+            "sample.mp4",
+            "--metadata",
+            str(metadata),
+            "--sop-profile",
+            PROFILE_ROLL_SOP_V1,
+            "--enable-helmet-alerts",
+            "--helmet-alert-roi",
+            "helmet_alert_roi.json",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="person class ids"):
+        resolve_run_config(args)
+
+
+def test_helmet_alerts_fail_fast_without_helmet_class(tmp_path: Path) -> None:
+    metadata = _metadata(tmp_path / "metadata.yaml", {0: "person", 2: "roll", 3: "cleaning_cloth", 4: "label"})
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--video",
+            "sample.mp4",
+            "--metadata",
+            str(metadata),
+            "--sop-profile",
+            PROFILE_ROLL_SOP_V1,
+            "--enable-helmet-alerts",
+            "--helmet-alert-roi",
+            "helmet_alert_roi.json",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="helmet class ids"):
+        resolve_run_config(args)
 
 
 def test_resolves_legacy_profile_path_timing(tmp_path: Path) -> None:

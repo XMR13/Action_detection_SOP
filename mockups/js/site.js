@@ -1267,11 +1267,12 @@
     actionButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       const action = String(button.getAttribute("data-review-status") || "").toUpperCase();
-      const shouldDisableApprove = action === "QUALIFIED" && String(machine || "").toUpperCase() === "DONE";
-      button.disabled = shouldDisableApprove;
-      button.setAttribute("aria-disabled", shouldDisableApprove ? "true" : "false");
-      if (shouldDisableApprove) {
-        button.title = "AI already marked this session DONE; use Reject or Unknown only if it needs correction.";
+      const machineDone = String(machine || "").toUpperCase() === "DONE";
+      const shouldDisableDecision = (action === "QUALIFIED" || action === "NOT_QUALIFIED") && machineDone;
+      button.disabled = shouldDisableDecision;
+      button.setAttribute("aria-disabled", shouldDisableDecision ? "true" : "false");
+      if (shouldDisableDecision) {
+        button.title = "AI telah menandai sesi pengecekan SOP ini sebagai DONE; Approve/Reject tidak diperlukan.";
       } else {
         button.removeAttribute("title");
       }

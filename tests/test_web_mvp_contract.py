@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import base64
 import csv
+import importlib.util
 import json
 from pathlib import Path
 from typing import Dict, Optional
 
-from fastapi.testclient import TestClient
+import pytest
+
+_HAS_HTTPX = importlib.util.find_spec("httpx") is not None
+pytestmark = pytest.mark.skipif(not _HAS_HTTPX, reason="fastapi/starlette TestClient requires httpx")
+
+if _HAS_HTTPX:
+    from fastapi.testclient import TestClient
+else:
+    TestClient = object  # type: ignore[misc,assignment]
 
 from Action_Detection_SOP.web_mvp.app import API_CONTRACT_VERSION, create_app
 from Action_Detection_SOP.web_mvp.settings import WebMvpSettings
