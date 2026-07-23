@@ -102,6 +102,43 @@ def _post_artifact(client: TestClient, *, session_uid: str, rel_path: str, body:
     assert res.status_code == 200
 
 
+def _put_alert(
+    client: TestClient,
+    *,
+    alert_uid: str,
+    start_date: str = "2026-06-29",
+    status: str = "PENDING",
+) -> None:
+    payload = {
+        "alert_uid": alert_uid,
+        "alert_type": "NO_HELMET",
+        "safety_profile": "helmet_alert_v1",
+        "status": status,
+        "machine_status": "NO_HELMET",
+        "start_date": start_date,
+        "end_date": start_date,
+        "start_time_s": 1.0,
+        "end_time_s": 5.0,
+        "source": "camera-1",
+        "camera_id": "cam_1",
+        "safety_area_id": "helmet_area_main",
+        "person_count": 1,
+        "thumbnail": "thumbnail.jpg",
+    }
+    res = client.put(f"/api/alerts/{alert_uid}", headers=_auth_headers(), json=payload)
+    assert res.status_code == 200
+
+
+def _post_alert_artifact(client: TestClient, *, alert_uid: str, rel_path: str, body: bytes) -> None:
+    res = client.post(
+        f"/api/alerts/{alert_uid}/artifacts",
+        headers=_auth_headers(),
+        params={"rel_path": rel_path},
+        content=body,
+    )
+    assert res.status_code == 200
+
+
 def test_health_and_config_expose_contract_version(tmp_path: Path) -> None:
     with _build_client(tmp_path) as client:
         health = client.get("/api/health")
@@ -193,6 +230,9 @@ def test_contract_endpoints_require_auth(tmp_path: Path) -> None:
     with _build_client(tmp_path) as client:
         res = client.get("/api/sessions")
         assert res.status_code == 401
+
+        alert_res = client.get("/api/alerts")
+        assert alert_res.status_code == 401
 
 
 def test_put_session_rejects_invalid_dates(tmp_path: Path) -> None:
@@ -374,6 +414,71 @@ def test_artifact_upload_rejects_path_traversal(tmp_path: Path) -> None:
             content=b"bad",
         )
         assert res.status_code == 400
+
+
+def test_alert_api_upsert_list_detail_review_and_artifact(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_alert(client, alert_uid="alert_api_001")
+        _post_alert_artifact(client, alert_uid="alert_api_001", rel_path="thumbnail.jpg", body=b"fakejpg")
+
+        rows = client.get("/api/alerts", headers=_auth_headers())
+        assert rows.status_code == 200
+        payload = rows.json()
+        assert payload["status"] == "PENDING"
+        assert payload["total"] == 1
+        row = payload["alerts"][0]
+        assert row["alert_uid"] == "alert_api_001"
+        assert row["alert_type"] == "NO_HELMET"
+        assert row["status"] == "PENDING"
+        assert row["review_source"] == "MACHINE"
+        assert row["thumbnail_url"] == "/alert-media/alert_api_001/thumbnail.jpg"
+
+        review = client.put(
+            "/api/alerts/alert_api_001/review",
+            headers=_auth_headers(),
+            json={"status": "CONFIRMED", "review_note": "verified"},
+        )
+        assert review.status_code == 200
+
+        detail = client.get("/api/alerts/alert_api_001", headers=_auth_headers())
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["status"] == "CONFIRMED"
+        assert body["review_source"] == "HUMAN"
+        assert body["review"]["review_note"] == "verified"
+        assert body["thumbnail_url"] == "/alert-media/alert_api_001/thumbnail.jpg"
+
+        pending_rows = client.get("/api/alerts", headers=_auth_headers())
+        assert pending_rows.status_code == 200
+        assert pending_rows.json()["total"] == 0
+
+        confirmed_rows = client.get("/api/alerts", headers=_auth_headers(), params={"status": "CONFIRMED"})
+        assert confirmed_rows.status_code == 200
+        assert confirmed_rows.json()["total"] == 1
+
+        media = client.get("/alert-media/alert_api_001/thumbnail.jpg", headers=_auth_headers())
+        assert media.status_code == 200
+        assert media.content == b"fakejpg"
+
+
+def test_alert_api_rejects_bad_paths_and_mismatched_uid(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        payload = {
+            "alert_uid": "alert_other",
+            "alert_type": "NO_HELMET",
+            "start_date": "2026-06-29",
+        }
+        mismatch = client.put("/api/alerts/alert_bad", headers=_auth_headers(), json=payload)
+        assert mismatch.status_code == 400
+
+        _put_alert(client, alert_uid="alert_path")
+        traversal = client.post(
+            "/api/alerts/alert_path/artifacts",
+            headers=_auth_headers(),
+            params={"rel_path": "../escape.jpg"},
+            content=b"bad",
+        )
+        assert traversal.status_code == 400
 
 
 def test_sessions_pagination_metadata_and_slicing(tmp_path: Path) -> None:

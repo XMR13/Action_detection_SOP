@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Helmet Alerts</title>
+    <link rel="stylesheet" href="css/site.css" />
+    <link rel="icon" type="image/png" href="assets/images.png" />
+  </head>
+  <body class="page-helmet-alerts is-hydrating">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/images.png" alt="Site logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrapping 3 SOP Review</h1>
+            <p class="sub">Safety SOP alert review.</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">
+            <strong>Dashboard</strong>
+            <span class="pill">overview</span>
+          </a>
+          <a href="review-queue.html">
+            <strong>Review Queue</strong>
+            <span class="pill">queue</span>
+          </a>
+          <a class="active" href="helmet-alerts.html" aria-current="page">
+            <strong>Helmet Alerts</strong>
+            <span class="pill brand">active</span>
+          </a>
+          <a href="session-detail.html">
+            <strong>Session Detail</strong>
+            <span class="pill">audit trail</span>
+          </a>
+          <a href="setup.html">
+            <strong>Setup</strong>
+            <span class="pill ink">config</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Safety SOP</h3>
+          <p class="caption">Helmet alerts are independent from roll cleaning and labeling results.</p>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar">
+          <div class="title">
+            <h2>Helmet Alerts</h2>
+            <p>No-helmet findings captured by the CV pipeline for manual confirmation.</p>
+          </div>
+          <div class="filters">
+            <span class="hint" id="alert-length-hint">Alerts: --</span>
+            <div class="field">
+              <label for="alert-date-from">Date from</label>
+              <input id="alert-date-from" name="alert-date-from" type="date" />
+            </div>
+            <div class="field">
+              <label for="alert-date-to">Date to</label>
+              <input id="alert-date-to" name="alert-date-to" type="date" />
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="alert-date-apply" type="button">Apply</button>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn" id="alert-date-clear" type="button">Clear</button>
+            </div>
+            <span class="hint" id="alert-active-date-slice">Date: all</span>
+            <button class="pill ink" id="stale-pill-alerts" type="button" hidden>New data available</button>
+          </div>
+        </header>
+
+        <section class="queue-table-stage">
+          <article class="panel queue-table-panel">
+            <div class="section-head">
+              <div>
+                <h3>Tabel helmet alert</h3>
+                <p class="caption">Default menampilkan alert pending paling baru.</p>
+              </div>
+              <a class="pill" id="alert-open-selected" href="helmet-alert-detail.html">Open Selected Alert</a>
+            </div>
+
+            <form class="filters queue-table-filters" aria-label="Alert table filters">
+              <div class="field">
+                <label for="alert-status">Status</label>
+                <select id="alert-status" name="alert-status">
+                  <option value="PENDING" selected>Pending</option>
+                  <option value="ALL">Semua status</option>
+                  <option value="CONFIRMED">Confirmed</option>
+                  <option value="DISMISSED">Dismissed</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="alert-sort">Sort by</label>
+                <select id="alert-sort" name="alert-sort">
+                  <option value="NEWEST" selected>Newest first</option>
+                  <option value="OLDEST">Oldest first</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="alert-page-size">Rows per page</label>
+                <select id="alert-page-size" name="alert-page-size">
+                  <option value="20" selected>20</option>
+                  <option value="10">10</option>
+                </select>
+              </div>
+            </form>
+
+            <div class="table-scroll">
+              <table class="table queue-table" aria-label="Helmet alerts">
+                <thead>
+                  <tr>
+                    <th scope="col">Alert</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Time</th>
+                    <th scope="col">Camera</th>
+                    <th scope="col">People</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Evidence</th>
+                    <th scope="col">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colspan="8"><span class="pill pending">Loading alerts...</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="queue-pagination" aria-label="Alert pagination">
+              <span class="hint" id="alert-page-meta">Showing --</span>
+              <div class="queue-pagination-actions">
+                <button class="btn btn-compact" id="alert-page-prev" type="button">Prev</button>
+                <span class="pill ink" id="alert-page-indicator">Page --/--</span>
+                <button class="btn btn-compact" id="alert-page-next" type="button">Next</button>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="js/site.js"></script>
+  </body>
+</html>

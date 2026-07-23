@@ -209,6 +209,13 @@ class LocalSession:
     checklist_path: Path
 
 
+@dataclass(frozen=True)
+class LocalAlert:
+    date: str
+    alert_dir: Path
+    alert_path: Path
+
+
 def _iter_sessions(data_dir: Path) -> Iterable[LocalSession]:
     sessions_root = data_dir / "sessions"
     if not sessions_root.exists():
@@ -225,6 +232,25 @@ def _iter_sessions(data_dir: Path) -> Iterable[LocalSession]:
             if not checklist_path.exists():
                 continue
             out.append(LocalSession(date=date, session_dir=session_dir, checklist_path=checklist_path))
+    return out
+
+
+def _iter_alerts(data_dir: Path) -> Iterable[LocalAlert]:
+    alerts_root = data_dir / "alerts"
+    if not alerts_root.exists():
+        return []
+    out: List[LocalAlert] = []
+    for date_dir in sorted(alerts_root.iterdir()):
+        if not date_dir.is_dir():
+            continue
+        date = date_dir.name
+        for alert_dir in sorted(date_dir.iterdir()):
+            if not alert_dir.is_dir():
+                continue
+            alert_path = alert_dir / "alert.json"
+            if not alert_path.exists():
+                continue
+            out.append(LocalAlert(date=date, alert_dir=alert_dir, alert_path=alert_path))
     return out
 
 
@@ -265,6 +291,17 @@ def _artifact_paths(session_dir: Path) -> Iterable[Path]:
                 yield p
 
 
+def _alert_artifact_paths(alert_dir: Path) -> Iterable[Path]:
+    for p in sorted(alert_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.name == "alert.json":
+            continue
+        if p.suffix == ".tmp":
+            continue
+        yield p
+
+
 def _checklist_fingerprint(checklist: Dict[str, Any]) -> str:
     payload = json.dumps(checklist, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
     return _sha1_bytes(payload)
@@ -273,6 +310,22 @@ def _checklist_fingerprint(checklist: Dict[str, Any]) -> str:
 def _file_fingerprint(path: Path) -> str:
     stat = path.stat()
     return f"{int(stat.st_size)}:{int(stat.st_mtime_ns)}"
+
+
+def _alert_uid(alert: Dict[str, Any], alert_dir: Path) -> str:
+    uid = alert.get("alert_uid")
+    if isinstance(uid, str) and uid.strip():
+        return uid.strip()
+    uid = alert_dir.name
+    alert["alert_uid"] = uid
+    return uid
+
+
+def _ensure_alert_dates(alert: Dict[str, Any], date: str) -> None:
+    if not alert.get("start_date"):
+        alert["start_date"] = date
+    if not alert.get("end_date"):
+        alert["end_date"] = date
 
 
 @dataclass
@@ -478,6 +531,53 @@ def _build_artifact_task(
     )
 
 
+def _build_alert_upsert_task(*, alert: LocalAlert, payload: Dict[str, Any], alert_uid: str) -> SpoolTask:
+    fingerprint = _checklist_fingerprint(payload)
+    task_key = _sha1_text(f"alert_upsert|{alert_uid}")
+    now_iso = _utc_now_iso()
+    return SpoolTask(
+        task_id=task_key,
+        kind="alert_upsert",
+        session_uid=alert_uid,
+        session_id="",
+        date=alert.date,
+        session_dir=str(alert.alert_dir),
+        source_path=str(alert.alert_path),
+        source_fingerprint=fingerprint,
+        rel_path=None,
+        payload=payload,
+        attempts=0,
+        next_retry_ts=0.0,
+        created_at_utc=now_iso,
+        updated_at_utc=now_iso,
+        last_error="",
+    )
+
+
+def _build_alert_artifact_task(*, alert: LocalAlert, alert_uid: str, artifact: Path) -> SpoolTask:
+    rel_path = artifact.relative_to(alert.alert_dir).as_posix()
+    fingerprint = _file_fingerprint(artifact)
+    task_key = _sha1_text(f"alert_artifact|{alert_uid}|{rel_path}")
+    now_iso = _utc_now_iso()
+    return SpoolTask(
+        task_id=task_key,
+        kind="alert_artifact",
+        session_uid=alert_uid,
+        session_id="",
+        date=alert.date,
+        session_dir=str(alert.alert_dir),
+        source_path=str(artifact),
+        source_fingerprint=fingerprint,
+        rel_path=rel_path,
+        payload=None,
+        attempts=0,
+        next_retry_ts=0.0,
+        created_at_utc=now_iso,
+        updated_at_utc=now_iso,
+        last_error="",
+    )
+
+
 def _queue_task(*, spool: SpoolPaths, task: SpoolTask, dry_run: bool) -> str:
     pending_path, done_path, dead_path = _task_files(spool, task.task_id)
     had_dead = dead_path.exists()
@@ -556,10 +656,50 @@ def _enqueue_session_tasks(*, sessions: Iterable[LocalSession], spool: SpoolPath
     return stats
 
 
+def _enqueue_alert_tasks(*, alerts: Iterable[LocalAlert], spool: SpoolPaths, dry_run: bool) -> EnqueueStats:
+    stats = EnqueueStats()
+    for alert in alerts:
+        payload = _read_json(alert.alert_path)
+        alert_uid = _alert_uid(payload, alert.alert_dir)
+        _ensure_alert_dates(payload, alert.date)
+        if not dry_run:
+            _write_json(alert.alert_path, payload)
+        upsert_task = _build_alert_upsert_task(alert=alert, payload=payload, alert_uid=alert_uid)
+        result = _queue_task(spool=spool, task=upsert_task, dry_run=dry_run)
+        _update_enqueue_stats(stats, result)
+        for artifact in _alert_artifact_paths(alert.alert_dir):
+            artifact_task = _build_alert_artifact_task(alert=alert, alert_uid=alert_uid, artifact=artifact)
+            result = _queue_task(spool=spool, task=artifact_task, dry_run=dry_run)
+            _update_enqueue_stats(stats, result)
+    return stats
+
+
+def _merge_enqueue_stats(*items: EnqueueStats) -> EnqueueStats:
+    out = EnqueueStats()
+    for item in items:
+        out.queued += item.queued
+        out.skipped_done += item.skipped_done
+        out.skipped_pending += item.skipped_pending
+        out.skipped_dead += item.skipped_dead
+        out.updated_pending += item.updated_pending
+        out.requeued_dead += item.requeued_dead
+    return out
+
+
 def _iter_pending_task_files(spool: SpoolPaths) -> Iterable[Path]:
     if not spool.pending.exists():
         return []
     return sorted(spool.pending.glob("*.json"))
+
+
+def _task_processing_priority(task: SpoolTask) -> int:
+    priorities = {
+        "upsert": 0,
+        "alert_upsert": 0,
+        "artifact": 1,
+        "alert_artifact": 1,
+    }
+    return priorities.get(task.kind, 2)
 
 
 def _iter_bucket_task_files(path: Path) -> Iterable[Path]:
@@ -806,7 +946,7 @@ def prune_done_tasks(*, spool: SpoolPaths, older_than_days: float, dry_run: bool
 def _is_retryable_http_status(*, status: int, kind: str) -> bool:
     if status in (408, 409, 425, 429, 500, 502, 503, 504):
         return True
-    if kind == "artifact" and status == 404:
+    if kind in {"artifact", "alert_artifact"} and status == 404:
         # Artifact upload may race against server index refresh after session upsert.
         return True
     return False
@@ -835,6 +975,37 @@ def _execute_task(*, task: SpoolTask, server: Server, auth_header: str, dry_run:
             rel_path = task.rel_path or artifact_path.name
             path = f"{server.base_path}/api/sessions/{task.session_uid}/artifacts?rel_path={quote(rel_path)}"
             print(f"[{_utc_now_iso()}] upload {task.session_uid}:{rel_path}")
+            _http_post_file(
+                server=server,
+                path=path,
+                auth_header=auth_header,
+                file_path=artifact_path,
+                dry_run=dry_run,
+            )
+            return
+        if task.kind == "alert_upsert":
+            payload = dict(task.payload or {})
+            if not payload:
+                payload = _read_json(Path(task.source_path))
+            alert_uid = task.session_uid
+            path = f"{server.base_path}/api/alerts/{alert_uid}"
+            print(f"[{_utc_now_iso()}] upsert alert {alert_uid} ({task.date})")
+            _http_put_json(
+                server=server,
+                path=path,
+                auth_header=auth_header,
+                payload=payload,
+                dry_run=dry_run,
+            )
+            return
+        if task.kind == "alert_artifact":
+            artifact_path = Path(task.source_path)
+            if not artifact_path.exists() or not artifact_path.is_file():
+                raise PermanentUploadError(f"Missing alert artifact file: {artifact_path}")
+            rel_path = task.rel_path or artifact_path.name
+            alert_uid = task.session_uid
+            path = f"{server.base_path}/api/alerts/{alert_uid}/artifacts?rel_path={quote(rel_path)}"
+            print(f"[{_utc_now_iso()}] upload alert {alert_uid}:{rel_path}")
             _http_post_file(
                 server=server,
                 path=path,
@@ -907,7 +1078,14 @@ def _process_pending_tasks(
             stats.dead += 1
             continue
         pending_with_tasks.append((path, task))
-    pending_with_tasks.sort(key=lambda item: (float(item[1].next_retry_ts), item[1].created_at_utc, item[1].task_id))
+    pending_with_tasks.sort(
+        key=lambda item: (
+            float(item[1].next_retry_ts),
+            _task_processing_priority(item[1]),
+            item[1].created_at_utc,
+            item[1].task_id,
+        )
+    )
     now_ts = time.time()
     due_processed = 0
     for pending_path, task in pending_with_tasks:
@@ -1023,13 +1201,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     while True:
         cycle += 1
         sessions = list(_iter_sessions(Path(args.data_dir)))
+        alerts = list(_iter_alerts(Path(args.data_dir)))
         if args.date:
             sessions = [s for s in sessions if s.date == str(args.date)]
-        enqueue_stats = _enqueue_session_tasks(
+            alerts = [a for a in alerts if a.date == str(args.date)]
+        session_enqueue_stats = _enqueue_session_tasks(
             sessions=sessions,
             spool=spool,
             dry_run=bool(args.dry_run),
         )
+        alert_enqueue_stats = _enqueue_alert_tasks(
+            alerts=alerts,
+            spool=spool,
+            dry_run=bool(args.dry_run),
+        )
+        enqueue_stats = _merge_enqueue_stats(session_enqueue_stats, alert_enqueue_stats)
         process_stats = _process_pending_tasks(
             spool=spool,
             server=server,
@@ -1063,7 +1249,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         pending_count = int(spool_snapshot["pending"]["files"])
         print(
-            f"[{_utc_now_iso()}] cycle={cycle} sessions={len(sessions)} "
+            f"[{_utc_now_iso()}] cycle={cycle} sessions={len(sessions)} alerts={len(alerts)} "
             f"queued={enqueue_stats.queued} updated_pending={enqueue_stats.updated_pending} "
             f"skipped_done={enqueue_stats.skipped_done} skipped_pending={enqueue_stats.skipped_pending} "
             f"skipped_dead={enqueue_stats.skipped_dead} requeued_dead={enqueue_stats.requeued_dead} "

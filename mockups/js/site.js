@@ -59,6 +59,20 @@
     return "pending";
   };
 
+  const displayAlertStatus = (raw) => {
+    const v = String(raw || "PENDING").toUpperCase();
+    if (v === "CONFIRMED") return "CONFIRMED";
+    if (v === "DISMISSED") return "DISMISSED";
+    return "PENDING";
+  };
+
+  const pillClassForAlertStatus = (raw) => {
+    const v = String(raw || "PENDING").toUpperCase();
+    if (v === "CONFIRMED") return "yes";
+    if (v === "DISMISSED") return "no";
+    return "pending";
+  };
+
   const structuredSop = (row) => {
     const sop = row && row.sop && typeof row.sop === "object" ? row.sop : null;
     return sop && sop.profile ? sop : null;
@@ -440,6 +454,17 @@
     return `session-detail.html${query ? `?${query}` : ""}${hash}`;
   };
 
+  const buildAlertDetailHref = (alertUid) => {
+    const slice = readDateSliceFromUrl();
+    const params = new URLSearchParams();
+    if (slice.from) params.set("date_from", slice.from);
+    if (slice.to) params.set("date_to", slice.to);
+    if (alertUid) params.set("alert_uid", String(alertUid));
+    const query = params.toString();
+    const hash = alertUid ? `#${encodeURIComponent(String(alertUid))}` : "";
+    return `helmet-alert-detail.html${query ? `?${query}` : ""}${hash}`;
+  };
+
   const readSessionUidFromUrl = () => {
     const params = new URLSearchParams(window.location.search || "");
     const fromQuery = params.get("session_uid");
@@ -448,8 +473,16 @@
     return hash ? decodeURIComponent(hash) : "";
   };
 
+  const readAlertUidFromUrl = () => {
+    const params = new URLSearchParams(window.location.search || "");
+    const fromQuery = params.get("alert_uid");
+    if (fromQuery) return String(fromQuery);
+    const hash = window.location.hash ? window.location.hash.slice(1) : "";
+    return hash ? decodeURIComponent(hash) : "";
+  };
+
   const applyDateSliceToStaticNav = () => {
-    const navTargets = new Set(["index.html", "review-queue.html", "session-detail.html", "setup.html"]);
+    const navTargets = new Set(["index.html", "review-queue.html", "helmet-alerts.html", "helmet-alert-detail.html", "session-detail.html", "setup.html"]);
     document.querySelectorAll("a[href]").forEach((node) => {
       if (!(node instanceof HTMLAnchorElement)) return;
       const href = node.getAttribute("href") || "";
@@ -662,6 +695,64 @@
   const queuePaginationIndicator = document.getElementById("queue-page-indicator");
   const queuePagePrevBtn = document.getElementById("queue-page-prev");
   const queuePageNextBtn = document.getElementById("queue-page-next");
+
+  let alertPage = 1;
+  let alertPageSize = 20;
+  const alertPaginationMeta = document.getElementById("alert-page-meta");
+  const alertPaginationIndicator = document.getElementById("alert-page-indicator");
+  const alertPagePrevBtn = document.getElementById("alert-page-prev");
+  const alertPageNextBtn = document.getElementById("alert-page-next");
+  const alertOpenSelected = document.getElementById("alert-open-selected");
+
+  const readAlertPageSize = () => {
+    const node = document.getElementById("alert-page-size");
+    const raw = node instanceof HTMLSelectElement ? Number(node.value) : Number.NaN;
+    if (raw === 10 || raw === 20) return raw;
+    return 20;
+  };
+
+  const resetAlertPage = () => {
+    alertPage = 1;
+  };
+
+  const buildAlertDataUrl = (baseUrl) => {
+    const statusSel = document.getElementById("alert-status");
+    const sortSel = document.getElementById("alert-sort");
+    const pageSizeSel = document.getElementById("alert-page-size");
+    const status = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "PENDING") : "PENDING";
+    const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
+    alertPageSize = pageSizeSel instanceof HTMLSelectElement ? readAlertPageSize() : alertPageSize;
+    const params = new URLSearchParams();
+    params.set("page", String(alertPage));
+    params.set("page_size", String(alertPageSize));
+    params.set("status", status || "PENDING");
+    params.set("sort", sort || "NEWEST");
+    const query = params.toString();
+    return withDateApiQuery(`${baseUrl}${query ? `?${query}` : ""}`);
+  };
+
+  const syncAlertPaginationUi = ({ total, page, pageSize, totalPages, hasPrev, hasNext }) => {
+    const safeTotal = Math.max(0, Number(total || 0));
+    const safePage = Math.max(1, Number(page || 1));
+    const safePageSize = Math.max(1, Number(pageSize || 20));
+    const safePages = Math.max(0, Number(totalPages || 0));
+    const from = safeTotal > 0 ? (safePage - 1) * safePageSize + 1 : 0;
+    const to = safeTotal > 0 ? Math.min(safeTotal, safePage * safePageSize) : 0;
+    if (alertPaginationMeta) {
+      alertPaginationMeta.textContent = safeTotal > 0 ? `Showing ${from}-${to} of ${safeTotal}` : "Showing 0";
+    }
+    if (alertPaginationIndicator) {
+      alertPaginationIndicator.textContent = safePages > 0 ? `Page ${safePage}/${safePages}` : "Page 0/0";
+    }
+    if (alertPagePrevBtn instanceof HTMLButtonElement) {
+      alertPagePrevBtn.disabled = !hasPrev;
+      alertPagePrevBtn.setAttribute("aria-disabled", hasPrev ? "false" : "true");
+    }
+    if (alertPageNextBtn instanceof HTMLButtonElement) {
+      alertPageNextBtn.disabled = !hasNext;
+      alertPageNextBtn.setAttribute("aria-disabled", hasNext ? "false" : "true");
+    }
+  };
 
   const readQueuePageSize = () => {
     const node = document.getElementById("queue-page-size");
@@ -1128,6 +1219,268 @@
     initQueueInteractions();
     if (queueBody && queueBody.classList.contains("page-review-queue")) {
       queueBody.classList.remove("is-hydrating");
+    }
+  };
+
+  const populateAlerts = async () => {
+    const tbody = document.querySelector(".page-helmet-alerts .queue-table tbody");
+    const alertBody = document.body;
+    if (!(tbody instanceof HTMLTableSectionElement)) {
+      return;
+    }
+    if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
+      alertBody.classList.add("is-hydrating");
+    }
+    const dateLabel = document.getElementById("alert-active-date-slice");
+    if (dateLabel) dateLabel.textContent = dateSliceLabel();
+
+    let payload;
+    try {
+      payload = await apiFetchJson(buildAlertDataUrl("/api/alerts"));
+    } catch (err) {
+      syncAlertPaginationUi({ total: 0, page: 1, pageSize: alertPageSize, totalPages: 0, hasPrev: false, hasNext: false });
+      tbody.innerHTML = `<tr><td colspan="8"><span class="pill no">Failed to load alerts</span></td></tr>`;
+      if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
+        alertBody.classList.remove("is-hydrating");
+      }
+      return;
+    }
+
+    const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+    const serverTotalPages = Number(payload.total_pages || 0);
+    if (serverTotalPages > 0 && alertPage > serverTotalPages) {
+      alertPage = serverTotalPages;
+      await populateAlerts();
+      return;
+    }
+    syncAlertPaginationUi({
+      total: Number(payload.total || alerts.length),
+      page: Number(payload.page || alertPage),
+      pageSize: Number(payload.page_size || alertPageSize),
+      totalPages: serverTotalPages,
+      hasPrev: Boolean(payload.has_prev),
+      hasNext: Boolean(payload.has_next),
+    });
+    const lengthHint = document.getElementById("alert-length-hint");
+    if (lengthHint) lengthHint.textContent = `Alerts: ${Number(payload.total || alerts.length)}`;
+
+    if (alerts.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8"><span class="pill">No alerts found</span></td></tr>`;
+      if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
+        alertBody.classList.remove("is-hydrating");
+      }
+      return;
+    }
+
+    tbody.innerHTML = alerts
+      .map((alert, index) => {
+        const uid = String(alert.alert_uid || "");
+        const status = String(alert.status || "PENDING");
+        const camera = String(alert.camera_id || alert.source || "-");
+        const date = String(alert.date || "-");
+        const time = formatHmsFromIso(alert.start_time_iso) || "-";
+        const count = Number(alert.person_count || 0);
+        const thumbUrl = alert.thumbnail_url ? String(alert.thumbnail_url) : "";
+        const active = index === 0 ? " queue-row-active" : "";
+        const linkActive = index === 0 ? " active" : "";
+        if (index === 0 && alertOpenSelected instanceof HTMLAnchorElement) {
+          alertOpenSelected.href = buildAlertDetailHref(uid);
+        }
+        return `
+          <tr class="${active.trim()}" data-alert-uid="${escapeHtml(uid)}">
+            <td><a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-alert-link>${escapeHtml(uid || "-")}</a></td>
+            <td>${escapeHtml(date)}</td>
+            <td>${escapeHtml(time)}</td>
+            <td>${escapeHtml(camera)}</td>
+            <td><span class="pill ink">${Number.isFinite(count) ? count : 0}</span></td>
+            <td><span class="pill ${pillClassForAlertStatus(status)}">${displayAlertStatus(status)}</span></td>
+            <td>
+              <div class="queue-evidence-cell">
+                <div class="queue-evidence-preview ${thumbUrl ? "" : "queue-evidence-empty"}">
+                  ${thumbUrl ? `<img class="queue-evidence-thumb" alt="alert thumbnail" src="${thumbUrl}" loading="lazy" />` : `<span class="queue-evidence-none">No preview</span>`}
+                </div>
+              </div>
+            </td>
+            <td><a class="btn btn-compact action-inspect" href="${buildAlertDetailHref(uid)}">Inspect</a></td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const alertLinks = Array.from(document.querySelectorAll("[data-alert-link]"));
+    const setActiveAlert = (index) => {
+      alertLinks.forEach((link, linkIndex) => {
+        const isActive = linkIndex === index;
+        link.classList.toggle("active", isActive);
+        const row = link.closest("tr");
+        if (row) row.classList.toggle("queue-row-active", isActive);
+        if (isActive && alertOpenSelected instanceof HTMLAnchorElement) {
+          const uid = row instanceof HTMLTableRowElement ? String(row.dataset.alertUid || "") : "";
+          alertOpenSelected.href = buildAlertDetailHref(uid);
+        }
+      });
+    };
+    alertLinks.forEach((link, index) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        setActiveAlert(index);
+        updateHashFromLink(link);
+      });
+    });
+    document.querySelectorAll(".page-helmet-alerts .queue-table tbody tr").forEach((row) => {
+      if (!(row instanceof HTMLTableRowElement)) return;
+      row.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest("a, button, input, select, textarea, label")) return;
+        const link = row.querySelector("[data-alert-link]");
+        if (!(link instanceof HTMLAnchorElement)) return;
+        const idx = alertLinks.indexOf(link);
+        if (idx >= 0) {
+          setActiveAlert(idx);
+          updateHashFromLink(link);
+        }
+      });
+    });
+
+    if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
+      alertBody.classList.remove("is-hydrating");
+    }
+  };
+
+  const populateAlertDetail = async () => {
+    const alertUid = readAlertUidFromUrl();
+    if (!alertUid) {
+      try {
+        const list = await apiFetchJson(withDateApiQuery("/api/alerts?status=PENDING&page=1&page_size=1&sort=NEWEST"));
+        const alerts = Array.isArray(list.alerts) ? list.alerts : [];
+        if (alerts.length > 0 && alerts[0].alert_uid) {
+          window.location.assign(buildAlertDetailHref(String(alerts[0].alert_uid)));
+          return;
+        }
+      } catch (err) {
+        // ignore
+      }
+      const stage = document.getElementById("alert-thumbnail-stage");
+      if (stage instanceof HTMLElement) {
+        stage.innerHTML = '<div class="frame-overlay"><span class="pill">tidak ada alert</span></div>';
+      }
+      return;
+    }
+
+    let payload;
+    try {
+      payload = await apiFetchJson(`/api/alerts/${encodeURIComponent(alertUid)}`);
+    } catch (err) {
+      return;
+    }
+
+    const alert = payload.alert && typeof payload.alert === "object" ? payload.alert : {};
+    const uidNode = document.getElementById("alert-detail-uid");
+    const idNode = document.getElementById("alert-detail-id");
+    const dateHint = document.getElementById("alert-detail-date-hint");
+    const cameraNode = document.getElementById("alert-detail-camera");
+    const areaNode = document.getElementById("alert-detail-area");
+    const sessionNode = document.getElementById("alert-detail-session");
+    const personPill = document.getElementById("alert-person-count");
+    const reviewPill = document.getElementById("alert-review-status");
+    const noteBox = document.getElementById("alert-review-note");
+    const statusInput = document.getElementById("alert-review-status-input");
+    const stage = document.getElementById("alert-thumbnail-stage");
+    const backLink = document.getElementById("alert-back-link");
+    const listLink = document.getElementById("alert-list-link");
+
+    if (uidNode) uidNode.textContent = alertUid;
+    if (idNode) idNode.textContent = alertUid;
+    if (dateHint) dateHint.textContent = `Alert time: ${formatDateTimeFromIso(alert.start_time_iso || alert.end_time_iso)}`;
+    if (cameraNode) cameraNode.textContent = String(alert.camera_id || alert.source || "-");
+    if (areaNode) areaNode.textContent = String(alert.safety_area_id || "-");
+    const related = alert.related_session_uid ? String(alert.related_session_uid) : "-";
+    if (sessionNode) {
+      sessionNode.innerHTML = related !== "-" ? `<a href="${buildSessionDetailHref(related)}">${escapeHtml(related)}</a>` : "-";
+    }
+    if (personPill) personPill.textContent = `People ${Number(alert.person_count || 0)}`;
+    const status = String(payload.status || "PENDING");
+    if (reviewPill) {
+      reviewPill.className = `pill ${pillClassForAlertStatus(status)}`;
+      reviewPill.textContent = `Review ${displayAlertStatus(status)}`;
+    }
+    if (noteBox instanceof HTMLTextAreaElement) {
+      noteBox.value = payload.review && payload.review.review_note ? String(payload.review.review_note) : "";
+    }
+    if (statusInput instanceof HTMLInputElement) statusInput.value = status;
+    if (backLink instanceof HTMLAnchorElement) backLink.href = buildUiHrefWithDate("helmet-alerts.html", encodeURIComponent(alertUid));
+    if (listLink instanceof HTMLAnchorElement) listLink.href = buildUiHrefWithDate("helmet-alerts.html", encodeURIComponent(alertUid));
+
+    if (stage instanceof HTMLElement) {
+      if (payload.thumbnail_url) {
+        stage.innerHTML = `<img alt="alert thumbnail" src="${escapeHtml(payload.thumbnail_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" />`;
+      } else {
+        stage.innerHTML = '<div class="frame-overlay"><span class="pill">tanpa thumbnail</span></div>';
+      }
+    }
+
+    const resolveNextPendingAlert = async () => {
+      try {
+        const list = await apiFetchJson(withDateApiQuery("/api/alerts?status=PENDING&page=1&page_size=200&sort=NEWEST"));
+        const alerts = Array.isArray(list.alerts) ? list.alerts : [];
+        if (alerts.length === 0) return null;
+        const idx = alerts.findIndex((item) => String(item.alert_uid || "") === String(alertUid));
+        if (idx >= 0) {
+          const next = alerts[(idx + 1) % alerts.length];
+          return next && next.alert_uid ? String(next.alert_uid) : null;
+        }
+        const first = alerts[0];
+        return first && first.alert_uid ? String(first.alert_uid) : null;
+      } catch (err) {
+        return null;
+      }
+    };
+
+    const nextLink = document.getElementById("alert-next-link");
+    if (nextLink instanceof HTMLAnchorElement) {
+      const nextUid = await resolveNextPendingAlert();
+      if (nextUid && nextUid !== alertUid) {
+        nextLink.href = buildAlertDetailHref(nextUid);
+        nextLink.textContent = "Next Pending";
+      } else {
+        nextLink.href = buildUiHrefWithDate("helmet-alerts.html");
+        nextLink.textContent = "No Pending";
+      }
+    }
+
+    const form = document.getElementById("alert-review-form");
+    if (form instanceof HTMLFormElement) {
+      form.querySelectorAll("button[data-alert-status]").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (statusInput instanceof HTMLInputElement) {
+            statusInput.value = String(button.getAttribute("data-alert-status") || "PENDING");
+          }
+        });
+      });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        const nextStatus = statusInput instanceof HTMLInputElement ? String(statusInput.value || "PENDING") : "PENDING";
+        const note = noteBox instanceof HTMLTextAreaElement ? String(noteBox.value || "") : "";
+        try {
+          await apiFetchJson(`/api/alerts/${encodeURIComponent(alertUid)}/review`, {
+            method: "PUT",
+            body: JSON.stringify({ status: nextStatus, review_note: note }),
+          });
+          if (String(nextStatus).toUpperCase() !== "PENDING") {
+            const nextUid = await resolveNextPendingAlert();
+            if (nextUid && nextUid !== alertUid) {
+              window.location.assign(buildAlertDetailHref(nextUid));
+              return;
+            }
+            window.location.assign(buildUiHrefWithDate("helmet-alerts.html"));
+          } else if (reviewPill) {
+            reviewPill.className = `pill ${pillClassForAlertStatus(nextStatus)}`;
+            reviewPill.textContent = `Review ${displayAlertStatus(nextStatus)}`;
+          }
+        } catch (err) {
+          alert("Failed to save alert review");
+        }
+      };
     }
   };
 
@@ -2306,6 +2659,52 @@
       populateDetail();
     });
     populateDetail();
+  }
+  if (body && body.classList.contains("page-helmet-alerts")) {
+    bindStaleIndicator({ pillId: "stale-pill-alerts", onRefresh: () => populateAlerts() });
+    bindDateControls({
+      fromId: "alert-date-from",
+      toId: "alert-date-to",
+      applyId: "alert-date-apply",
+      clearId: "alert-date-clear",
+      labelId: "alert-active-date-slice",
+      onChange: () => {
+        resetAlertPage();
+        populateAlerts();
+      },
+    });
+    const alertStatusSel = document.getElementById("alert-status");
+    const alertSortSel = document.getElementById("alert-sort");
+    const alertPageSizeSel = document.getElementById("alert-page-size");
+    [alertStatusSel, alertSortSel, alertPageSizeSel].forEach((node) => {
+      if (node instanceof HTMLSelectElement) {
+        node.addEventListener("change", () => {
+          resetAlertPage();
+          populateAlerts();
+        });
+      }
+    });
+    if (alertPagePrevBtn instanceof HTMLButtonElement) {
+      alertPagePrevBtn.addEventListener("click", () => {
+        if (alertPage <= 1) return;
+        alertPage -= 1;
+        populateAlerts();
+      });
+    }
+    if (alertPageNextBtn instanceof HTMLButtonElement) {
+      alertPageNextBtn.addEventListener("click", () => {
+        alertPage += 1;
+        populateAlerts();
+      });
+    }
+    alertPageSize = readAlertPageSize();
+    populateAlerts();
+  }
+  if (body && body.classList.contains("page-helmet-alert-detail")) {
+    window.addEventListener("hashchange", () => {
+      populateAlertDetail();
+    });
+    populateAlertDetail();
   }
   if (body && body.classList.contains("page-setup")) {
     populateSetup();

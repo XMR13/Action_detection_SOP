@@ -31,6 +31,23 @@ def _build_session_dir(tmp_path: Path) -> Tuple[Path, Path]:
     return data_dir, session_dir
 
 
+def _build_alert_dir(tmp_path: Path) -> Tuple[Path, Path]:
+    data_dir = tmp_path / "data"
+    alert_dir = data_dir / "alerts" / "2026-06-29" / "alert_001"
+    alert_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        alert_dir / "alert.json",
+        {
+            "alert_uid": "alert_001",
+            "alert_type": "NO_HELMET",
+            "machine_status": "NO_HELMET",
+            "status": "PENDING",
+        },
+    )
+    (alert_dir / "thumbnail.jpg").write_bytes(b"fakejpg")
+    return data_dir, alert_dir
+
+
 def _spool(data_dir: Path) -> uploader.SpoolPaths:
     spool = uploader._resolve_spool_paths(data_dir=data_dir, spool_dir=None)
     uploader._ensure_spool_dirs(spool)
@@ -66,6 +83,58 @@ def test_enqueue_creates_tasks_and_persists_uid(tmp_path: Path) -> None:
     stats_second = uploader._enqueue_session_tasks(sessions=sessions, spool=spool, dry_run=False)
     assert stats_second.skipped_pending == 4
     assert stats_second.queued == 0
+
+
+def test_enqueue_alerts_creates_upsert_and_artifact_tasks(tmp_path: Path) -> None:
+    data_dir, alert_dir = _build_alert_dir(tmp_path)
+    alerts = list(uploader._iter_alerts(data_dir))
+    spool = _spool(data_dir)
+
+    stats = uploader._enqueue_alert_tasks(alerts=alerts, spool=spool, dry_run=False)
+
+    assert stats.queued == 2
+    tasks = [uploader._load_task(path) for path in sorted(spool.pending.glob("*.json"))]
+    assert {task.kind for task in tasks} == {"alert_upsert", "alert_artifact"}
+    assert {task.session_uid for task in tasks} == {"alert_001"}
+    assert {task.rel_path for task in tasks} == {None, "thumbnail.jpg"}
+
+    payload = uploader._read_json(alert_dir / "alert.json")
+    assert payload["start_date"] == "2026-06-29"
+    assert payload["end_date"] == "2026-06-29"
+
+    stats_second = uploader._enqueue_alert_tasks(alerts=alerts, spool=spool, dry_run=False)
+    assert stats_second.skipped_pending == 2
+    assert stats_second.queued == 0
+
+
+def test_alert_upsert_is_processed_before_its_artifact(tmp_path: Path, monkeypatch) -> None:
+    data_dir, _ = _build_alert_dir(tmp_path)
+    alerts = list(uploader._iter_alerts(data_dir))
+    spool = _spool(data_dir)
+    uploader._enqueue_alert_tasks(alerts=alerts, spool=spool, dry_run=False)
+
+    processed_kinds = []
+
+    def _record_task_kind(*, task: uploader.SpoolTask, **_: object) -> None:
+        processed_kinds.append(task.kind)
+
+    monkeypatch.setattr(uploader, "_execute_task", _record_task_kind)
+    server, auth = _server_auth()
+    stats = uploader._process_pending_tasks(
+        spool=spool,
+        server=server,
+        auth_header=auth,
+        dry_run=False,
+        max_attempts=0,
+        retry_wait_s=1.0,
+        retry_backoff=2.0,
+        retry_wait_max_s=10.0,
+        process_limit=0,
+    )
+
+    assert processed_kinds == ["alert_upsert", "alert_artifact"]
+    assert stats.succeeded == 2
+    assert stats.retry_scheduled == 0
 
 
 def test_retryable_error_schedules_backoff(tmp_path: Path, monkeypatch) -> None:

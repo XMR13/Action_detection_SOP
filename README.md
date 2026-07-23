@@ -97,7 +97,7 @@ configs/metadata_roll_sop_v1.yaml
 - Daily reports: `data/reports/YYYY-MM-DD/`
 - Evidence clips: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4`
 - Uploader spool: `data/uploader_spool/{pending,done,dead}/`
-- Planned helmet alerts: `data/alerts/YYYY-MM-DD/<alert_uid>/`
+- Helmet alerts: `data/alerts/YYYY-MM-DD/<alert_uid>/`
 
 Each session `checklist.json` includes `session_uid`, used by the web API and uploader for idempotent sync.
 

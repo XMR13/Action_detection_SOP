@@ -18,6 +18,15 @@ class ReviewRecord:
     updated_at_utc: str
 
 
+@dataclass(frozen=True)
+class AlertReviewRecord:
+    alert_uid: str
+    status: str
+    review_note: str
+    created_at_utc: str
+    updated_at_utc: str
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -44,6 +53,18 @@ def init_db(db_path: Path) -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_updated ON reviews(updated_at_utc)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_reviews (
+              alert_uid TEXT PRIMARY KEY,
+              status TEXT NOT NULL,
+              review_note TEXT NOT NULL,
+              created_at_utc TEXT NOT NULL,
+              updated_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_reviews_updated ON alert_reviews(updated_at_utc)")
 
 
 def get_review(db_path: Path, session_uid: str) -> Optional[ReviewRecord]:
@@ -127,3 +148,76 @@ def upsert_review(
         updated_at_utc=now,
     )
 
+
+def get_alert_review(db_path: Path, alert_uid: str) -> Optional[AlertReviewRecord]:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT alert_uid, status, review_note, created_at_utc, updated_at_utc FROM alert_reviews WHERE alert_uid = ?",
+            (alert_uid,),
+        ).fetchone()
+        if row is None:
+            return None
+        return AlertReviewRecord(
+            alert_uid=str(row["alert_uid"]),
+            status=str(row["status"]),
+            review_note=str(row["review_note"]),
+            created_at_utc=str(row["created_at_utc"]),
+            updated_at_utc=str(row["updated_at_utc"]),
+        )
+
+
+def get_alert_reviews_by_uid(db_path: Path, alert_uids: Iterable[str]) -> Dict[str, AlertReviewRecord]:
+    uids = list(alert_uids)
+    if not uids:
+        return {}
+    placeholders = ",".join("?" for _ in uids)
+    query = (
+        "SELECT alert_uid, status, review_note, created_at_utc, updated_at_utc "
+        f"FROM alert_reviews WHERE alert_uid IN ({placeholders})"
+    )
+    out: Dict[str, AlertReviewRecord] = {}
+    with _connect(db_path) as conn:
+        for row in conn.execute(query, tuple(uids)).fetchall():
+            rec = AlertReviewRecord(
+                alert_uid=str(row["alert_uid"]),
+                status=str(row["status"]),
+                review_note=str(row["review_note"]),
+                created_at_utc=str(row["created_at_utc"]),
+                updated_at_utc=str(row["updated_at_utc"]),
+            )
+            out[rec.alert_uid] = rec
+    return out
+
+
+def upsert_alert_review(
+    *,
+    db_path: Path,
+    alert_uid: str,
+    status: str,
+    review_note: str,
+) -> AlertReviewRecord:
+    now = _utc_now_iso()
+    with _connect(db_path) as conn:
+        existing = conn.execute(
+            "SELECT created_at_utc FROM alert_reviews WHERE alert_uid = ?",
+            (alert_uid,),
+        ).fetchone()
+        created = now if existing is None else str(existing["created_at_utc"])
+        conn.execute(
+            """
+            INSERT INTO alert_reviews (alert_uid, status, review_note, created_at_utc, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(alert_uid) DO UPDATE SET
+              status=excluded.status,
+              review_note=excluded.review_note,
+              updated_at_utc=excluded.updated_at_utc
+            """,
+            (alert_uid, status, review_note, created, now),
+        )
+    return AlertReviewRecord(
+        alert_uid=alert_uid,
+        status=status,
+        review_note=review_note,
+        created_at_utc=created,
+        updated_at_utc=now,
+    )

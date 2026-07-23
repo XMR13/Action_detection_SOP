@@ -22,7 +22,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import BasicAuthConfig, BasicAuthMiddleware, issue_session_token
-from .review_store import get_review, get_reviews_by_uid, init_db, upsert_review
+from .alert_index import AlertArtifact, AlertIndex
+from .review_store import (
+    get_alert_review,
+    get_alert_reviews_by_uid,
+    get_review,
+    get_reviews_by_uid,
+    init_db,
+    upsert_alert_review,
+    upsert_review,
+)
 from .session_index import SessionArtifact, SessionIndex
 from .settings import WebMvpSettings
 from .sop_status import (
@@ -34,7 +43,7 @@ from .sop_status import (
 )
 from ..shifts import assign_shift_for_interval, parse_iso_datetime
 
-API_CONTRACT_VERSION = "2026-03-03.v1"
+API_CONTRACT_VERSION = "2026-07-23.v1"
 _MAX_REVIEW_NOTE_LEN = 4000
 
 
@@ -135,6 +144,49 @@ def _sessions_root_signature_ns(data_dir: Path) -> int:
 
     sig = 0
     for root in iter_session_roots():
+        sig = max(sig, mtime_ns(root))
+        try:
+            for child in root.iterdir():
+                if child.is_dir():
+                    sig = max(sig, mtime_ns(child))
+        except OSError:
+            continue
+    return sig
+
+
+def _alerts_root_signature_ns(data_dir: Path) -> int:
+    def mtime_ns(p: Path) -> int:
+        try:
+            return int(p.stat().st_mtime_ns)
+        except FileNotFoundError:
+            return 0
+        except OSError:
+            return 0
+
+    roots: List[Path] = []
+    direct = data_dir / "alerts"
+    if direct.exists() and direct.is_dir():
+        roots.append(direct)
+    try:
+        for child in data_dir.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.startswith(".") or child.name in {"_web_cache"}:
+                continue
+            nested = child / "alerts"
+            if nested.exists() and nested.is_dir():
+                roots.append(nested)
+    except OSError:
+        pass
+
+    sig = 0
+    unique: Dict[str, Path] = {}
+    for root in roots:
+        try:
+            unique[str(root.resolve())] = root
+        except OSError:
+            unique[str(root)] = root
+    for root in unique.values():
         sig = max(sig, mtime_ns(root))
         try:
             for child in root.iterdir():
@@ -486,6 +538,18 @@ def _safe_session_dir(data_dir: Path, session: SessionArtifact, rel_path: str) -
     return target
 
 
+def _safe_alert_dir(alert: AlertArtifact, rel_path: str) -> Path:
+    base = alert.paths.alert_dir.resolve()
+    target = (alert.paths.alert_dir / rel_path).resolve()
+    if base == target:
+        return target
+    try:
+        target.relative_to(base)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid media path") from e
+    return target
+
+
 def _safe_cache_file_name(rel_path: str, src_path: Path) -> str:
     src_stat = src_path.stat()
     digest_src = f"{rel_path}|{src_path.name}|{src_stat.st_size}|{src_stat.st_mtime_ns}"
@@ -607,10 +671,20 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+class LoginIn(BaseModel):
+    username: str = Field(...)
+    password: str = Field(...)
+
+
 class ReviewUpsertIn(BaseModel):
     review_status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"] = Field(...)
     review_note: str = Field(default="")
     overrides: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AlertReviewUpsertIn(BaseModel):
+    status: Literal["PENDING", "CONFIRMED", "DISMISSED"] = Field(...)
+    review_note: str = Field(default="")
 
 
 class SessionUpsertIn(BaseModel):
@@ -622,7 +696,24 @@ class SessionUpsertIn(BaseModel):
     end_date: Optional[str] = Field(default=None, description="YYYY-MM-DD; used if start_date is missing.")
 
 
+class AlertUpsertIn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    alert_uid: str = Field(...)
+    alert_type: str = Field(...)
+    start_date: Optional[str] = Field(default=None, description="YYYY-MM-DD; used for storage layout.")
+    end_date: Optional[str] = Field(default=None, description="YYYY-MM-DD; used if start_date is missing.")
+
+
 def _storage_date(payload: SessionUpsertIn) -> str:
+    if payload.start_date and isinstance(payload.start_date, str):
+        return payload.start_date
+    if payload.end_date and isinstance(payload.end_date, str):
+        return payload.end_date
+    raise HTTPException(status_code=400, detail="Missing start_date/end_date (YYYY-MM-DD)")
+
+
+def _alert_storage_date(payload: AlertUpsertIn) -> str:
     if payload.start_date and isinstance(payload.start_date, str):
         return payload.start_date
     if payload.end_date and isinstance(payload.end_date, str):
@@ -660,6 +751,10 @@ def _validate_token(value: str, *, label: str) -> None:
 def _validate_session_uid(session_uid: str) -> None:
     # We generate uuid4 hex today; accept safe tokens so we can evolve later.
     _validate_token(session_uid, label="session_uid")
+
+
+def _validate_alert_uid(alert_uid: str) -> None:
+    _validate_token(alert_uid, label="alert_uid")
 
 
 def _validate_session_id(session_id: str) -> None:
@@ -731,9 +826,65 @@ def _filter_sessions_by_date_window(
     return sessions, lower_raw, upper_raw
 
 
+def _filter_alerts_by_date_window(
+    alerts: List[AlertArtifact],
+    *,
+    date: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> Tuple[List[AlertArtifact], Optional[str], Optional[str]]:
+    lower, upper, lower_raw, upper_raw = _resolve_date_window(date=date, date_from=date_from, date_to=date_to)
+    if lower or upper:
+        filtered: List[AlertArtifact] = []
+        for alert in alerts:
+            alert_date = _parse_date_ymd(alert.date)
+            if alert_date is None:
+                continue
+            if lower and alert_date < lower:
+                continue
+            if upper and alert_date > upper:
+                continue
+            filtered.append(alert)
+        alerts = filtered
+    return alerts, lower_raw, upper_raw
+
+
+def _alert_effective_status(*, alert: AlertArtifact, review: Any) -> str:
+    if review is not None:
+        return str(review.status or "PENDING").upper()
+    raw = str(alert.payload.get("status") or "PENDING").upper()
+    if raw in {"PENDING", "CONFIRMED", "DISMISSED"}:
+        return raw
+    return "PENDING"
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def _alert_sort_ts(alert: AlertArtifact) -> float:
+    return (
+        _parse_iso_ts(alert.payload.get("start_time_iso"))
+        or _parse_iso_ts(alert.payload.get("end_time_iso"))
+        or _float_or_zero(alert.payload.get("end_time_s"))
+        or _float_or_zero(alert.payload.get("start_time_s"))
+    )
+
+
 def create_app(settings: WebMvpSettings) -> FastAPI:
     init_db(settings.db_path)
     index = SessionIndex(data_dir=settings.data_dir)
+    alert_index = AlertIndex(data_dir=settings.data_dir)
     refresh_lock = threading.Lock()
 
     app = FastAPI(title="SOP Review MVP", version="0.1.0")
@@ -750,6 +901,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     def _startup() -> None:
         with refresh_lock:
             index.refresh()
+            alert_index.refresh()
 
         # Optional server-side auto-rescan. Clients don't need to click Rescan
         # to see new uploads, and all clients observe updates via /api/config.
@@ -761,15 +913,21 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
         def loop() -> None:
             last_sig = _sessions_root_signature_ns(settings.data_dir)
+            last_alert_sig = _alerts_root_signature_ns(settings.data_dir)
             # Sleep first so startup doesn't immediately re-scan twice.
             while not stop_evt.wait(timeout=auto_s):
                 sig = _sessions_root_signature_ns(settings.data_dir)
-                if sig <= last_sig:
+                alert_sig = _alerts_root_signature_ns(settings.data_dir)
+                if sig <= last_sig and alert_sig <= last_alert_sig:
                     continue
                 try:
                     with refresh_lock:
-                        index.refresh()
-                    last_sig = sig
+                        if sig > last_sig:
+                            index.refresh()
+                            last_sig = sig
+                        if alert_sig > last_alert_sig:
+                            alert_index.refresh()
+                            last_alert_sig = alert_sig
                 except Exception:
                     # Keep loop alive; next poll will attempt again.
                     continue
@@ -798,10 +956,6 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "status": "ok",
             "api_contract_version": API_CONTRACT_VERSION,
         }
-
-    class LoginIn(BaseModel):
-        username: str = Field(...)
-        password: str = Field(...)
 
     @app.post("/api/auth/login")
     def login(payload: LoginIn) -> JSONResponse:
@@ -832,10 +986,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     def rescan() -> Dict[str, str]:
         with refresh_lock:
             index.refresh()
+            alert_index.refresh()
         return {
             "status": "ok",
             "last_scan_utc": index.last_scan_utc or "",
             "session_count": str(len(index.list())),
+            "alert_count": str(len(alert_index.list())),
         }
 
     @app.get("/api/admin/storage")
@@ -855,7 +1011,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "data_dir": str(settings.data_dir),
             "db_path": str(settings.db_path),
             "last_scan_utc": index.last_scan_utc,
+            "alert_last_scan_utc": alert_index.last_scan_utc,
             "session_count": len(sessions),
+            "alert_count": len(alert_index.list()),
             "clip_count": clip_count,
             "thumbnail_count": thumb_count,
             "annotated_count": annotated_count,
@@ -868,6 +1026,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     @app.get("/api/admin/ops")
     def ops() -> Dict[str, Any]:
         sessions = index.list()
+        alerts = alert_index.list()
         disk = shutil.disk_usage(settings.data_dir)
         disk_health = _disk_health(
             disk=disk,
@@ -946,7 +1105,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         return {
             "status": "ok",
             "last_scan_utc": index.last_scan_utc,
+            "alert_last_scan_utc": alert_index.last_scan_utc,
             "session_count": len(sessions),
+            "alert_count": len(alerts),
             "disk": {
                 "path": str(settings.data_dir),
                 "total_bytes": int(disk.total),
@@ -1009,6 +1170,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "db_path": str(settings.db_path),
             "last_scan_utc": index.last_scan_utc,
             "session_count": len(index.list()),
+            "alert_count": len(alert_index.list()),
             "auto_rescan_seconds": float(getattr(settings, "auto_rescan_seconds", 0.0) or 0.0),
             "auto_approve_done_enabled": settings.auto_approve_done_enabled,
             "auto_approve_min_duration_s": settings.auto_approve_min_duration_s,
@@ -1156,6 +1318,209 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "reviewed_final_sop_done_pct": reviewed_final_sop_done_pct,
             "date_from": applied_date_from,
             "date_to": applied_date_to,
+        }
+
+    def _filtered_alert_rows(
+        *,
+        date: Optional[str],
+        date_from: Optional[str],
+        date_to: Optional[str],
+        status: Literal["PENDING", "CONFIRMED", "DISMISSED", "ALL"],
+        sort: Literal["NEWEST", "OLDEST"],
+    ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], str]:
+        alerts = alert_index.list()
+        alerts, applied_date_from, applied_date_to = _filter_alerts_by_date_window(
+            alerts,
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        reviews = get_alert_reviews_by_uid(settings.db_path, (a.alert_uid for a in alerts))
+        status_filter = str(status or "PENDING").upper()
+        out: List[Dict[str, Any]] = []
+        for alert in alerts:
+            review = reviews.get(alert.alert_uid)
+            eff_status = _alert_effective_status(alert=alert, review=review)
+            if status_filter != "ALL" and eff_status != status_filter:
+                continue
+            has_thumbnail = alert.paths.thumbnail_jpg.exists()
+            sort_ts = _alert_sort_ts(alert)
+            out.append(
+                {
+                    "alert_uid": alert.alert_uid,
+                    "date": alert.date,
+                    "alert_type": alert.alert_type,
+                    "safety_profile": str(alert.payload.get("safety_profile") or ""),
+                    "status": eff_status,
+                    "review_source": "HUMAN" if review is not None else "MACHINE",
+                    "machine_status": str(alert.payload.get("machine_status") or ""),
+                    "start_time_iso": alert.payload.get("start_time_iso"),
+                    "end_time_iso": alert.payload.get("end_time_iso"),
+                    "start_time_s": _float_or_zero(alert.payload.get("start_time_s")),
+                    "end_time_s": _float_or_zero(alert.payload.get("end_time_s")),
+                    "source": str(alert.payload.get("source") or ""),
+                    "camera_id": alert.payload.get("camera_id"),
+                    "safety_area_id": str(alert.payload.get("safety_area_id") or ""),
+                    "person_count": _int_or_zero(alert.payload.get("person_count")),
+                    "related_session_uid": alert.payload.get("related_session_uid"),
+                    "has_thumbnail": has_thumbnail,
+                    "thumbnail_url": f"/alert-media/{alert.alert_uid}/thumbnail.jpg" if has_thumbnail else None,
+                    "_sort_ts": sort_ts,
+                }
+            )
+
+        if sort == "OLDEST":
+            out.sort(key=lambda x: (float(x.get("_sort_ts") or 0.0), str(x.get("alert_uid") or "")))
+        else:
+            out.sort(key=lambda x: (-float(x.get("_sort_ts") or 0.0), str(x.get("alert_uid") or "")))
+        return out, applied_date_from, applied_date_to, status_filter
+
+    @app.get("/api/alerts")
+    def list_alerts(
+        *,
+        date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        status: Literal["PENDING", "CONFIRMED", "DISMISSED", "ALL"] = Query(default="PENDING"),
+        sort: Literal["NEWEST", "OLDEST"] = Query(default="NEWEST"),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=25, ge=1, le=2000),
+    ) -> Dict[str, Any]:
+        rows, applied_date_from, applied_date_to, status_filter = _filtered_alert_rows(
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            status=status,
+            sort=sort,
+        )
+        total = len(rows)
+        start_idx = (int(page) - 1) * int(page_size)
+        end_idx = start_idx + int(page_size)
+        page_rows = rows[start_idx:end_idx]
+        total_pages = ((total + int(page_size) - 1) // int(page_size)) if total > 0 else 0
+        for row in page_rows:
+            row.pop("_sort_ts", None)
+        return {
+            "alerts": page_rows,
+            "last_scan_utc": alert_index.last_scan_utc,
+            "date_from": applied_date_from,
+            "date_to": applied_date_to,
+            "status": status_filter,
+            "sort": sort,
+            "total": total,
+            "page": int(page),
+            "page_size": int(page_size),
+            "total_pages": total_pages,
+            "has_prev": total > 0 and page > 1,
+            "has_next": end_idx < total,
+        }
+
+    @app.get("/api/alerts/{alert_uid}")
+    def get_alert(alert_uid: str) -> Dict[str, Any]:
+        _validate_alert_uid(alert_uid)
+        alert = alert_index.get(alert_uid)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        review = get_alert_review(settings.db_path, alert_uid)
+        eff_status = _alert_effective_status(alert=alert, review=review)
+        artifacts: List[Dict[str, str]] = []
+        for rel in ("alert.json", "thumbnail.jpg"):
+            p = alert.paths.alert_dir / rel
+            if p.exists():
+                artifacts.append({"name": rel, "url": f"/alert-media/{alert.alert_uid}/{rel}"})
+        clip = alert.paths.alert_dir / "clip.mp4"
+        if clip.exists():
+            artifacts.append({"name": "clip.mp4", "url": f"/alert-media/{alert.alert_uid}/clip.mp4"})
+        return {
+            "alert_uid": alert.alert_uid,
+            "date": alert.date,
+            "alert_type": alert.alert_type,
+            "alert": alert.payload,
+            "status": eff_status,
+            "review_source": "HUMAN" if review is not None else "MACHINE",
+            "review": None if review is None else review.__dict__,
+            "has_thumbnail": alert.paths.thumbnail_jpg.exists(),
+            "thumbnail_url": f"/alert-media/{alert.alert_uid}/thumbnail.jpg" if alert.paths.thumbnail_jpg.exists() else None,
+            "artifacts": artifacts,
+        }
+
+    @app.put("/api/alerts/{alert_uid}")
+    def put_alert(alert_uid: str, payload: AlertUpsertIn) -> Dict[str, Any]:
+        if payload.alert_uid != alert_uid:
+            raise HTTPException(status_code=400, detail="alert_uid mismatch")
+
+        date = _alert_storage_date(payload)
+        _validate_alert_uid(alert_uid)
+        _validate_date_ymd(date)
+        if payload.start_date:
+            _validate_date_ymd(payload.start_date)
+        if payload.end_date:
+            _validate_date_ymd(payload.end_date)
+
+        alert_dir = settings.data_dir / "alerts" / date / alert_uid
+        alert_dir.mkdir(parents=True, exist_ok=True)
+        alert_payload = payload.model_dump(mode="json")
+        alert_payload.setdefault("status", "PENDING")
+        _atomic_write_json(alert_dir / "alert.json", alert_payload)
+        alert_index.refresh()
+        return {
+            "status": "ok",
+            "alert_uid": alert_uid,
+            "date": date,
+            "alert_type": payload.alert_type,
+        }
+
+    @app.put("/api/alerts/{alert_uid}/review")
+    def put_alert_review(alert_uid: str, payload: AlertReviewUpsertIn) -> Dict[str, Any]:
+        _validate_alert_uid(alert_uid)
+        alert = alert_index.get(alert_uid)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        _validate_review_note(payload.review_note)
+        rec = upsert_alert_review(
+            db_path=settings.db_path,
+            alert_uid=alert_uid,
+            status=payload.status,
+            review_note=payload.review_note,
+        )
+        return {"review": rec.__dict__}
+
+    @app.post("/api/alerts/{alert_uid}/artifacts")
+    async def post_alert_artifact(
+        alert_uid: str,
+        request: Request,
+        rel_path: str = Query(..., description="Relative path under the alert dir, e.g. thumbnail.jpg"),
+    ) -> Dict[str, Any]:
+        _validate_alert_uid(alert_uid)
+        alert = alert_index.get(alert_uid)
+        if alert is None:
+            alert_index.refresh()
+            alert = alert_index.get(alert_uid)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="Alert not found (upsert first)")
+
+        rel = _safe_rel_path(rel_path)
+        base = alert.paths.alert_dir.resolve()
+        target = (alert.paths.alert_dir / rel).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Invalid rel_path") from e
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        with tmp.open("wb") as f:
+            async for chunk in request.stream():
+                if chunk:
+                    f.write(chunk)
+        tmp.replace(target)
+        alert_index.refresh()
+
+        rel_url = str(rel).replace("\\", "/")
+        return {
+            "status": "ok",
+            "rel_path": rel_url,
+            "url": f"/alert-media/{alert_uid}/{rel_url}",
         }
 
     def _filtered_session_rows(
@@ -1607,5 +1972,16 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             src_path=target,
         )
         return FileResponse(str(playback))
+
+    @app.get("/alert-media/{alert_uid}/{rel_path:path}", include_in_schema=False)
+    def alert_media(alert_uid: str, rel_path: str) -> FileResponse:
+        _validate_alert_uid(alert_uid)
+        alert = alert_index.get(alert_uid)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        target = _safe_alert_dir(alert, rel_path)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(str(target))
 
     return app

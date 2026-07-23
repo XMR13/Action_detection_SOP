@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roll Wrap SOP | Helmet Alert Detail</title>
+    <link rel="stylesheet" href="css/site.css" />
+    <link rel="icon" type="image/png" href="assets/images.png" />
+  </head>
+  <body class="page-helmet-alert-detail">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img class="brand-logo" src="assets/images.png" alt="Site logo" width="406" height="124" fetchpriority="high" />
+          </div>
+          <div>
+            <h1>Roll Wrapping 3 SOP Review</h1>
+            <p class="sub">Confirm or dismiss one helmet alert.</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">
+            <strong>Dashboard</strong>
+            <span class="pill">overview</span>
+          </a>
+          <a href="review-queue.html">
+            <strong>Review Queue</strong>
+            <span class="pill">queue</span>
+          </a>
+          <a class="active" href="helmet-alerts.html" aria-current="page">
+            <strong>Helmet Alerts</strong>
+            <span class="pill brand">active</span>
+          </a>
+          <a href="session-detail.html">
+            <strong>Session Detail</strong>
+            <span class="pill">audit trail</span>
+          </a>
+          <a href="setup.html">
+            <strong>Setup</strong>
+            <span class="pill ink">config</span>
+          </a>
+          <a class="nav-logout" href="login.html">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Alert review</h3>
+          <p class="caption">Reviewing this alert will not change any roll SOP session status.</p>
+          <a class="btn primary" href="helmet-alerts.html">Back to Alerts</a>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content">
+        <header class="topbar detail-header">
+          <div class="title">
+            <h2>Helmet Alert Detail</h2>
+            <p>Check the thumbnail evidence before confirming the safety finding.</p>
+            <div class="detail-crumb">
+              <a id="alert-list-link" href="helmet-alerts.html">Helmet Alerts</a>
+              <span>/</span>
+              <span id="alert-detail-id">-</span>
+            </div>
+          </div>
+          <div class="filters">
+            <span class="hint" id="alert-detail-date-hint">Alert date: -</span>
+          </div>
+        </header>
+
+        <section class="detail-shell">
+          <section class="detail-main">
+            <article class="panel detail-evidence-panel">
+              <div class="section-head">
+                <div>
+                  <h3>Bukti alert</h3>
+                  <p class="caption">Annotated thumbnail from the safety ROI.</p>
+                </div>
+                <span class="pill no" id="alert-machine-status">NO HELMET</span>
+              </div>
+              <div class="big-thumb detail-thumb detail-player" id="alert-thumbnail-stage">
+                <div class="frame-overlay"><span class="pill">Memuat bukti...</span></div>
+              </div>
+            </article>
+          </section>
+
+          <aside class="detail-rail">
+            <article class="panel detail-decision-panel">
+              <div class="section-head">
+                <div>
+                  <h3>Review alert</h3>
+                  <p class="caption">Simpan keputusan untuk temuan safety ini.</p>
+                </div>
+              </div>
+
+              <div class="detail-status-row">
+                <span class="pill pending" id="alert-review-status">Review -</span>
+                <span class="pill" id="alert-person-count">People -</span>
+              </div>
+
+              <div class="meta queue-facts">
+                <div class="row">
+                  <span class="key">Alert UID</span>
+                  <span class="val" id="alert-detail-uid">-</span>
+                </div>
+                <div class="row">
+                  <span class="key">Camera</span>
+                  <span class="val" id="alert-detail-camera">-</span>
+                </div>
+                <div class="row">
+                  <span class="key">Safety area</span>
+                  <span class="val" id="alert-detail-area">-</span>
+                </div>
+                <div class="row">
+                  <span class="key">Related session</span>
+                  <span class="val" id="alert-detail-session">-</span>
+                </div>
+              </div>
+
+              <form id="alert-review-form" class="detail-decision-form">
+                <input id="alert-review-status-input" name="status" type="hidden" value="PENDING" />
+                <div class="field">
+                  <label for="alert-review-note">Reviewer note</label>
+                  <textarea id="alert-review-note" name="review_note" placeholder="Catatan singkat untuk keputusan alert."></textarea>
+                </div>
+                <div class="detail-decision-grid">
+                  <button class="btn yes alert-decision-btn" type="submit" data-alert-status="CONFIRMED">Confirm</button>
+                  <button class="btn no alert-decision-btn" type="submit" data-alert-status="DISMISSED">Dismiss</button>
+                  <button class="btn secondary alert-decision-btn" type="submit" data-alert-status="PENDING">Pending</button>
+                </div>
+                <div class="detail-nav-row">
+                  <a class="btn" id="alert-back-link" href="helmet-alerts.html">Back to Alerts</a>
+                  <a class="btn primary" id="alert-next-link" href="helmet-alerts.html">Next Pending</a>
+                </div>
+              </form>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="js/site.js"></script>
+  </body>
+</html>
