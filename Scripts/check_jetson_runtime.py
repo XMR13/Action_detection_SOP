@@ -39,6 +39,9 @@ def _cuda_runtime() -> CheckResult:
 
         module_file = getattr(module,"__file__", "built-in")
         return CheckResult("CUDA Python runtime", True, f"{module_name} ({module_file})")
+
+    #if there is no cuda
+    return CheckResult("CUDA Python runtime", False, "; ".join(errors))
     
 
 def _venv_uses_system_packages() -> CheckResult:
