@@ -15,6 +15,44 @@ On-prem computer vision pipeline for roll-wrapping SOP review, built for Jetson 
 - Dependency manager: `uv`
 - Deployment target: Jetson Orin NX / JetPack `6.x+`
 
+### Jetson runtime environment
+
+Laptop development uses `uv`, but the Jetson runtime must keep the CUDA,
+TensorRT, NumPy, OpenCV, and CUDA Python packages supplied for its JetPack
+installation. Do not run `uv sync` or install this project's desktop
+`pyproject.toml` on the Jetson.
+
+After cloning the repository on the Jetson, create a Python 3.10 virtual
+environment that can see the JetPack system packages:
+
+```bash
+bash Scripts/setup_jetson_env.sh
+source .venv/bin/activate
+```
+
+The setup script uses `python3 -m venv --system-site-packages`, does not install
+packages, and runs `Scripts/check_jetson_runtime.py`. The check requires Python
+3.10, NumPy, OpenCV, TensorRT, CUDA Python runtime bindings, and `trtexec` to be
+visible inside the environment. `ffmpeg` is reported as optional unless checked
+with `--require-ffmpeg`.
+
+To recheck an existing Jetson environment without recreating it:
+
+```bash
+source .venv/bin/activate
+python -m Scripts.check_jetson_runtime
+```
+
+`requirements-jetson.txt` intentionally contains no NVIDIA/CV packages. Add
+only application-level dependencies that have been shown to be missing on the
+target; do not use it to replace packages managed by JetPack.
+
+The model and machine-specific files are git-ignored and must be transferred
+separately. For the current roll SOP bring-up, provide the candidate ONNX model,
+matching `configs/metadata_roll_sop_v1.yaml`, recorded validation footage, and
+later the production ROI/runtime config. Build the `.engine` on the target
+Jetson rather than transferring an engine built on the laptop.
+
 ## Important Files
 
 - Runner: `Scripts/run_sop_mvp.py`

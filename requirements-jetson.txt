@@ -1,0 +1,20 @@
+# Jetson runtime dependencies are intentionally supplied by JetPack and exposed
+# through a virtual environment created with --system-site-packages.
+#
+# Do not add these packages here:
+#   - tensorrt
+#   - numpy
+#   - opencv-python
+#   - onnxruntime-gpu
+#
+# Installing pip wheels for those packages can shadow the versions paired with
+# the JetPack CUDA/TensorRT stack. The SOP runner and uploader currently have no
+# additional mandatory pip-only runtime dependencies. If a future application
+# dependency is needed, add only that dependency here after validating it on the
+# target Jetson.
+#
+# The TensorRT backend also requires CUDA Python runtime bindings. Prefer the
+# system-provided binding. If the runtime check reports that both
+# cuda.bindings.runtime and cuda.cudart are missing, record the JetPack/CUDA
+# versions and add a compatible, reviewed cuda-python pin instead of installing
+# the newest wheel blindly.
