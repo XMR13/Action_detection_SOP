@@ -181,6 +181,11 @@ python3 -m Scripts.sop_uploader \
 
 ## Operations
 
+For a same-host live pilot, install the RTSP worker and review website as
+systemd services using [deploy/systemd/README.md](deploy/systemd/README.md).
+The installer keeps RTSP and website credentials outside the unit files and
+does not modify Python dependencies or lockfiles.
+
 Ops summary endpoint:
 
 ```text

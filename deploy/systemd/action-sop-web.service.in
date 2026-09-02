@@ -1,0 +1,42 @@
+[Unit]
+Description=Action Detection SOP review website
+Documentation=file://@PROJECT_DIR@/deploy/systemd/README.md
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@PROJECT_DIR@
+EnvironmentFile=/etc/action-sop/common.env
+EnvironmentFile=/etc/action-sop/web.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStartPre=/usr/bin/test -x @PYTHON_BIN@
+ExecStartPre=/usr/bin/test -d @PROJECT_DIR@/mockups
+ExecStart=@PYTHON_BIN@ -m Scripts.run_web_mvp \
+    --host ${SOP_WEB_HOST} \
+    --port ${SOP_WEB_PORT} \
+    --data-dir ${SOP_DATA_DIR} \
+    --db-path ${SOP_WEB_DB_PATH} \
+    --ui-dir @PROJECT_DIR@/mockups \
+    --auto-rescan-seconds ${SOP_AUTO_RESCAN_S} \
+    --disable-auto-approve-done
+
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0027
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=action-sop-web
+
+[Install]
+WantedBy=multi-user.target

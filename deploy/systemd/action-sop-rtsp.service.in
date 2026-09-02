@@ -1,0 +1,56 @@
+[Unit]
+Description=Action Detection SOP RTSP worker
+Documentation=file://@PROJECT_DIR@/deploy/systemd/README.md
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@PROJECT_DIR@
+EnvironmentFile=/etc/action-sop/common.env
+EnvironmentFile=/etc/action-sop/rtsp.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStartPre=/usr/bin/test -x @PYTHON_BIN@
+ExecStartPre=/usr/bin/test -r ${SOP_MODEL_PATH}
+ExecStartPre=/usr/bin/test -r ${SOP_METADATA_PATH}
+ExecStartPre=/usr/bin/test -r ${SOP_ROI_PATH}
+ExecStart=@PYTHON_BIN@ -m Scripts.run_sop_mvp \
+    --rtsp ${SOP_RTSP_URL} \
+    --sop-profile roll_sop_v1 \
+    --model ${SOP_MODEL_PATH} \
+    --backend tensorrt \
+    --metadata ${SOP_METADATA_PATH} \
+    --roi ${SOP_ROI_PATH} \
+    --imgsz ${SOP_IMAGE_SIZE} \
+    --conf ${SOP_CONFIDENCE} \
+    --analysis-fps ${SOP_ANALYSIS_FPS} \
+    --out-dir ${SOP_DATA_DIR} \
+    --reconnect \
+    --reconnect-wait-s ${SOP_RECONNECT_WAIT_S} \
+    --reconnect-wait-max-s ${SOP_RECONNECT_WAIT_MAX_S} \
+    --reconnect-backoff ${SOP_RECONNECT_BACKOFF} \
+    --reconnect-max-tries 0 \
+    --rtsp-open-timeout-ms ${SOP_RTSP_OPEN_TIMEOUT_MS} \
+    --rtsp-read-timeout-ms ${SOP_RTSP_READ_TIMEOUT_MS} \
+    --rtsp-buffer-size ${SOP_RTSP_BUFFER_SIZE} \
+    --rtsp-prefer-ffmpeg
+
+Restart=always
+RestartSec=3
+TimeoutStopSec=45
+KillSignal=SIGINT
+UMask=0027
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=action-sop-rtsp
+
+[Install]
+WantedBy=multi-user.target
