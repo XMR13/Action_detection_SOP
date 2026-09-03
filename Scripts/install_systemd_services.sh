@@ -119,7 +119,10 @@ fi
 if [ -z "$python_bin" ]; then
     python_bin="$project_dir/.venv/bin/python"
 fi
-python_bin=$(readlink -f "$python_bin")
+# Preserve the virtual-environment executable path. Dereferencing the final
+# `python` symlink would turn `.venv/bin/python` into `/usr/bin/python3.10` and
+# make systemd bypass packages installed in the virtual environment.
+python_bin=$(realpath -s "$python_bin")
 if [ ! -x "$python_bin" ]; then
     echo "Python executable is missing or not executable: $python_bin" >&2
     exit 2

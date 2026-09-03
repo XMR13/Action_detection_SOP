@@ -210,8 +210,6 @@ class _RollSopPolicy:
             or machine.get("labeled") != "DONE"
         ):
             return False, "roll_sop_not_done"
-        if not has_evidence:
-            return False, "no_evidence"
         return True, "roll_policy_pass"
 
     def _final_overall_status(

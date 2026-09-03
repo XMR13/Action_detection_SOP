@@ -113,10 +113,11 @@ Initial live settings are deliberately conservative:
 - 10-second open timeout and 5-second read timeout
 - no full-run video recording
 
-The web service uses one Uvicorn process and SQLite, disables automatic approval
-of `DONE`, and rescans the shared data directory every five seconds. Do not add
-multiple Uvicorn workers around the same SQLite file without measuring and
-testing write behavior.
+The web service uses one Uvicorn process and SQLite, automatically qualifies a
+`roll_sop_v1` session when both `cleaned` and `labeled` are `DONE`, and rescans
+the shared data directory every five seconds. Manual review remains available
+to correct an AI result. Do not add multiple Uvicorn workers around the same
+SQLite file without measuring and testing write behavior.
 
 Tune `/etc/action-sop/rtsp.env` only after collecting live GPU, CPU, memory,
 temperature, frame-cadence, and disk-growth evidence.

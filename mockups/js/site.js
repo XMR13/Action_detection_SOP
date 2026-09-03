@@ -1617,20 +1617,6 @@
       finalPill.textContent = `Final ${displayStepStatus(final)}`;
     }
 
-    actionButtons.forEach((button) => {
-      if (!(button instanceof HTMLButtonElement)) return;
-      const action = String(button.getAttribute("data-review-status") || "").toUpperCase();
-      const machineDone = String(machine || "").toUpperCase() === "DONE";
-      const shouldDisableDecision = (action === "QUALIFIED" || action === "NOT_QUALIFIED") && machineDone;
-      button.disabled = shouldDisableDecision;
-      button.setAttribute("aria-disabled", shouldDisableDecision ? "true" : "false");
-      if (shouldDisableDecision) {
-        button.title = "AI telah menandai sesi pengecekan SOP ini sebagai DONE; Approve/Reject tidak diperlukan.";
-      } else {
-        button.removeAttribute("title");
-      }
-    });
-
     renderSopPanel(payload);
 
     const noteBox = document.getElementById("review-note");

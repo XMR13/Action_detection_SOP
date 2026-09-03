@@ -23,8 +23,7 @@ ExecStart=@PYTHON_BIN@ -m Scripts.run_web_mvp \
     --data-dir ${SOP_DATA_DIR} \
     --db-path ${SOP_WEB_DB_PATH} \
     --ui-dir @PROJECT_DIR@/mockups \
-    --auto-rescan-seconds ${SOP_AUTO_RESCAN_S} \
-    --disable-auto-approve-done
+    --auto-rescan-seconds ${SOP_AUTO_RESCAN_S}
 
 Restart=always
 RestartSec=3

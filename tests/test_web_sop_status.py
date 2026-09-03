@@ -165,7 +165,7 @@ def test_roll_session_payload_validation_requires_canonical_overall_status() -> 
         )
 
 
-def test_roll_auto_approve_requires_compliant_machine_result_and_evidence() -> None:
+def test_roll_auto_approve_requires_only_compliant_machine_result() -> None:
     session = _session(
         {
             "sop_profile": "roll_sop_v1",
@@ -175,7 +175,7 @@ def test_roll_auto_approve_requires_compliant_machine_result_and_evidence() -> N
         }
     )
 
-    pending = effective_review_for_session(
+    approved_without_evidence = effective_review_for_session(
         session=session,
         review=None,
         auto_approve_done_enabled=True,
@@ -190,8 +190,9 @@ def test_roll_auto_approve_requires_compliant_machine_result_and_evidence() -> N
         has_evidence=True,
     )
 
-    assert pending.status == "PENDING"
-    assert pending.auto_reason == "no_evidence"
+    assert approved_without_evidence.status == "QUALIFIED"
+    assert approved_without_evidence.source == "AUTO"
+    assert approved_without_evidence.auto_reason == "roll_policy_pass"
     assert approved.status == "QUALIFIED"
     assert approved.source == "AUTO"
     assert approved.auto_reason == "roll_policy_pass"
