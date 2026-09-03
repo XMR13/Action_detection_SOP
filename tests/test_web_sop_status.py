@@ -189,6 +189,13 @@ def test_roll_auto_approve_requires_only_compliant_machine_result() -> None:
         auto_approve_min_duration_s=8.0,
         has_evidence=True,
     )
+    approved_with_pending_review = effective_review_for_session(
+        session=session,
+        review=_review({}),
+        auto_approve_done_enabled=True,
+        auto_approve_min_duration_s=8.0,
+        has_evidence=False,
+    )
 
     assert approved_without_evidence.status == "QUALIFIED"
     assert approved_without_evidence.source == "AUTO"
@@ -196,3 +203,6 @@ def test_roll_auto_approve_requires_only_compliant_machine_result() -> None:
     assert approved.status == "QUALIFIED"
     assert approved.source == "AUTO"
     assert approved.auto_reason == "roll_policy_pass"
+    assert approved_with_pending_review.status == "QUALIFIED"
+    assert approved_with_pending_review.source == "AUTO"
+    assert approved_with_pending_review.auto_reason == "roll_policy_pass"

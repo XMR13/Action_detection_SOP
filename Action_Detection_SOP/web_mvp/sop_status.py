@@ -93,7 +93,9 @@ def effective_review_for_session(
             return EffectiveReview(status="QUALIFIED", source="MANUAL")
         if manual_status == "NOT_QUALIFIED":
             return EffectiveReview(status="NOT_QUALIFIED", source="MANUAL")
-        return EffectiveReview(status="PENDING", source="MANUAL")
+        # PENDING is not a final human decision. Let the automatic policy
+        # evaluate the machine result instead of allowing an old placeholder
+        # review row to keep an otherwise complete session pending forever.
 
     if not auto_approve_done_enabled:
         return EffectiveReview(status="PENDING", source="PENDING", auto_reason="auto_approve_disabled")

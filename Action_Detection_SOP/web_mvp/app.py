@@ -1235,7 +1235,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 human_reviewed += 1
                 if r.overrides:
                     manual_overrides += 1
-            elif eff.source == "AUTO" and status == "QUALIFIED":
+            if eff.source == "AUTO" and status == "QUALIFIED":
                 auto_approved += 1
 
             if sop_status.profile == "operator_mvp_a":

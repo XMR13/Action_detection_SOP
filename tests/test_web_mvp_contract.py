@@ -312,6 +312,30 @@ def test_roll_session_api_exposes_structured_sop_and_auto_approves_with_evidence
         assert payload["sop"]["final"]["overall_status"] == "SESUAI SOP"
         assert payload["auto_review_reason"] == "roll_policy_pass"
 
+        pending_review = {
+            "review_status": "PENDING",
+            "review_note": "not decided yet",
+            "overrides": {},
+        }
+        saved = client.put(
+            "/api/sessions/uid_roll_done/review",
+            headers=_auth_headers(),
+            json=pending_review,
+        )
+        assert saved.status_code == 200
+
+        detail_after_pending = client.get("/api/sessions/uid_roll_done", headers=_auth_headers())
+        assert detail_after_pending.status_code == 200
+        pending_payload = detail_after_pending.json()
+        assert pending_payload["review"]["review_status"] == "PENDING"
+        assert pending_payload["review_status"] == "QUALIFIED"
+        assert pending_payload["review_source"] == "AUTO"
+        assert pending_payload["auto_review_reason"] == "roll_policy_pass"
+
+        stats = client.get("/api/stats", headers=_auth_headers())
+        assert stats.status_code == 200
+        assert stats.json()["auto_approved"] == 1
+
 
 def test_roll_sessions_do_not_count_as_unknown_helmet_stats(tmp_path: Path) -> None:
     with _build_client(tmp_path) as client:
