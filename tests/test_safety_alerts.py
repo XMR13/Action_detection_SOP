@@ -60,6 +60,32 @@ def test_alert_fires_after_sustained_no_helmet_only() -> None:
     assert alert.primary.height_px == 200.0
 
 
+def test_alert_can_use_wall_clock_timestamps_for_live_sources() -> None:
+    engine = _engine(required_s=2.0)
+    start_wall = datetime(2026, 9, 7, 23, 59, 59)
+    engine.update(
+        time_s=1.0,
+        frame_idx=1,
+        persons=[_person()],
+        helmets=[],
+        safety_roi=_roi(),
+        wall_dt=start_wall,
+    )
+    alerts = engine.update(
+        time_s=2.0,
+        frame_idx=2,
+        persons=[_person()],
+        helmets=[],
+        safety_roi=_roi(),
+        wall_dt=datetime(2026, 9, 8, 0, 0, 1),
+    )
+
+    assert len(alerts) == 1
+    payload = alerts[0].to_payload(run_start_dt=None, fallback_date="unknown")
+    assert payload["start_date"] == "2026-09-07"
+    assert payload["end_date"] == "2026-09-08"
+
+
 def test_alert_does_not_recur_during_same_episode() -> None:
     engine = _engine(required_s=3.0)
     alerts = []

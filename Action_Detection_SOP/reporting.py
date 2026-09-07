@@ -9,7 +9,7 @@ import csv
 import json
 import uuid
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -19,12 +19,6 @@ from .shifts import assign_shift_for_interval, parse_iso_datetime
 
 
 SessionReportResult = Union[SessionResult, RollSessionResult]
-
-def _status_count(rows: Iterable[StepStatus], status: StepStatus) -> int:
-    return sum(1 for row in rows if row == status)
-
-def _roll_status_count(rows: Iterable[RollComplianceStatus], status: RollComplianceStatus) -> int:
-    return sum(1 for row in rows if row == status)
 
 def _is_roll_session(r: SessionReportResult) -> bool:
     return isinstance(r, RollSessionResult)
@@ -62,9 +56,13 @@ def write_session_artifacts(
     out_dir: Path,
     date: str,
     session: SessionReportResult,
+    session_dir: Optional[Path] = None,
 ) -> Path:
-    session_dir = out_dir / "sessions" / date / f"session_{session.session_id}"
-    session_dir.mkdir(parents=True, exist_ok=True)
+    if session_dir is None:
+        session_dir = out_dir / "sessions" / date / f"session_{session.session_id}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+    elif session_dir.name != f"session_{session.session_id}":
+        raise ValueError("session_dir must match the session_id")
     (session_dir / "checklist.json").write_text(
         json.dumps(session_result_to_dict(session), indent=2, sort_keys=True),
         encoding="utf-8",
@@ -88,6 +86,8 @@ def write_daily_report(
     out_dir: Path,
     date: str,
     sessions: Iterable[SessionReportResult],
+    append: bool = False,
+    sop_profile: Optional[str] = None,
 ) -> Path:
     """
     Fungsi yang berguna untuk membuat daily repor, akan ditampilkan menerima input sebagai berikut:
@@ -98,7 +98,7 @@ def write_daily_report(
     
     """
     sessions_list = list(sessions)
-    if any(_is_roll_session(s) for s in sessions_list):
+    if sop_profile == "roll_sop_v1" or any(_is_roll_session(s) for s in sessions_list):
         roll_sessions = [s for s in sessions_list if isinstance(s, RollSessionResult)]
         report_dir = out_dir / "reports" / date
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -106,23 +106,43 @@ def write_daily_report(
         payload = {
             "date": date,
             "sop_profile": "roll_sop_v1",
-            "total_sessions": len(roll_sessions),
-            "cleaned_done": _status_count((s.cleaned for s in roll_sessions), StepStatus.DONE),
-            "cleaned_not_done": _status_count((s.cleaned for s in roll_sessions), StepStatus.NOT_DONE),
-            "cleaned_unknown": _status_count((s.cleaned for s in roll_sessions), StepStatus.UNKNOWN),
-            "labeled_done": _status_count((s.labeled for s in roll_sessions), StepStatus.DONE),
-            "labeled_not_done": _status_count((s.labeled for s in roll_sessions), StepStatus.NOT_DONE),
-            "labeled_unknown": _status_count((s.labeled for s in roll_sessions), StepStatus.UNKNOWN),
-            "overall_compliant": _roll_status_count(
-                (s.overall_status for s in roll_sessions), RollComplianceStatus.COMPLIANT
-            ),
-            "overall_non_compliant": _roll_status_count(
-                (s.overall_status for s in roll_sessions), RollComplianceStatus.NON_COMPLIANT
-            ),
-            "overall_unknown": _roll_status_count(
-                (s.overall_status for s in roll_sessions), RollComplianceStatus.UNKNOWN
-            ),
+            "total_sessions": 0,
+            "cleaned_done": 0,
+            "cleaned_not_done": 0,
+            "cleaned_unknown": 0,
+            "labeled_done": 0,
+            "labeled_not_done": 0,
+            "labeled_unknown": 0,
+            "overall_compliant": 0,
+            "overall_non_compliant": 0,
+            "overall_unknown": 0,
         }
+        if append and path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+            if (
+                isinstance(existing, dict)
+                and existing.get("date") == date
+                and existing.get("sop_profile") == "roll_sop_v1"
+            ):
+                for key in payload:
+                    if key in {"date", "sop_profile"}:
+                        continue
+                    payload[key] = int(existing.get(key, 0))
+
+        for session in roll_sessions:
+            payload["total_sessions"] += 1
+            payload["cleaned_done"] += int(session.cleaned == StepStatus.DONE)
+            payload["cleaned_not_done"] += int(session.cleaned == StepStatus.NOT_DONE)
+            payload["cleaned_unknown"] += int(session.cleaned == StepStatus.UNKNOWN)
+            payload["labeled_done"] += int(session.labeled == StepStatus.DONE)
+            payload["labeled_not_done"] += int(session.labeled == StepStatus.NOT_DONE)
+            payload["labeled_unknown"] += int(session.labeled == StepStatus.UNKNOWN)
+            payload["overall_compliant"] += int(session.overall_status == RollComplianceStatus.COMPLIANT)
+            payload["overall_non_compliant"] += int(session.overall_status == RollComplianceStatus.NON_COMPLIANT)
+            payload["overall_unknown"] += int(session.overall_status == RollComplianceStatus.UNKNOWN)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
 
@@ -185,6 +205,7 @@ def write_daily_csv(
     out_dir: Path,
     date: str,
     sessions: Iterable[SessionReportResult],
+    append: bool = False,
 ) -> Path:
     """
     Fungsi untuk menyimpan daily csv (report yang diperlukan)
@@ -198,13 +219,33 @@ def write_daily_csv(
     report_dir.mkdir(parents=True, exist_ok=True)
     path = report_dir / "sessions.csv"
     if not rows:
+        if append and path.exists():
+            return path
         path.write_text("", encoding="utf-8")
         return path
 
-    fieldnames = list(rows[0].keys())
+    existing_fieldnames: List[str] = []
+    existing_rows: List[Dict[str, Any]] = []
+    if append and path.exists() and path.stat().st_size > 0:
+        with path.open("r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            existing_fieldnames = list(reader.fieldnames or [])
+            existing_rows = list(reader)
+        if existing_fieldnames and all(set(row).issubset(existing_fieldnames) for row in rows):
+            with path.open("a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=existing_fieldnames)
+                writer.writerows(rows)
+            return path
+
+    fieldnames = list(existing_fieldnames)
+    for row in rows:
+        for name in row:
+            if name not in fieldnames:
+                fieldnames.append(name)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerows(existing_rows)
         writer.writerows(rows)
     return path
 
@@ -212,3 +253,54 @@ def write_daily_csv(
 def today_date_str(now: Optional[datetime] = None) -> str:
     dt = now or datetime.now()
     return dt.strftime("%Y-%m-%d")
+
+
+def highest_existing_session_number(*, out_dir: Path, date: str) -> int:
+    """Return the highest numeric session directory already present for a date."""
+    date_dir = out_dir / "sessions" / date
+
+    # Check whether this is a data directory.
+    if not date_dir.is_dir():
+        return 0
+
+    highest = 0
+    for candidate in date_dir.glob("session_*"):
+        if not candidate.is_dir():
+            continue
+        suffix = candidate.name.removeprefix("session_")
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+
+    return highest
+
+def date_for_elapsed_time(
+    *,
+    run_start_dt: Optional[datetime],
+    elapsed_s: float,
+    fallback_date: str,
+) -> str:
+    """Return the local calendar date for a timestamp within the current run.
+
+    Long-running RTSP workers can cross midnight without restarting.  Session
+    folders should follow the session start date rather than the date captured
+    when the worker process was launched.
+    """
+    if run_start_dt is None:
+        return fallback_date
+    elapsed = max(0.0, float(elapsed_s))
+    return today_date_str(run_start_dt + timedelta(seconds=elapsed))
+
+
+def session_start_datetime(
+    *,
+    run_start_dt: Optional[datetime],
+    elapsed_s: float,
+    live_source: bool,
+    wall_clock_dt: Optional[datetime] = None,
+) -> datetime:
+    """Resolve a session start using wall time for live sources."""
+    if live_source:
+        return wall_clock_dt or datetime.now()
+    if run_start_dt is not None:
+        return run_start_dt + timedelta(seconds=max(0.0, float(elapsed_s)))
+    return wall_clock_dt or datetime.now()

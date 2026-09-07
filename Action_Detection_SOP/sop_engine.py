@@ -345,14 +345,16 @@ class SopEngine:
       - helmet: DONE/NOT_DONE/UNKNOWN Apakah helm tersebut ada (global, tidak dibatasi ROI)
     """
 
-    def __init__(self, cfg: SopEngineConfig):
+    def __init__(self, cfg: SopEngineConfig, *, initial_session_counter: int = 0):
+        if initial_session_counter < 0:
+            raise ValueError("initial_session_counter must be >= 0")
         self.cfg = cfg
         self._sessionizer = _PresenceSessionizer(
             start_frames=cfg.session.start_frames,
             end_frames=cfg.session.end_frames,
         )
         self._active: Optional[_ActiveSession] = None
-        self._session_counter = 0
+        self._session_counter = int(initial_session_counter)
         self._events: List[EvidenceEvent] = []
 
     @property

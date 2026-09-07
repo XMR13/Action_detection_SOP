@@ -113,10 +113,20 @@ class HelmetAlert:
     candidates: Tuple[HelmetAlertCandidate, ...]
     related_session_uid: Optional[str] = None
     notes: Tuple[str, ...] = ()
+    start_datetime: Optional[datetime] = None
+    end_datetime: Optional[datetime] = None
 
     def to_payload(self, *, run_start_dt: Optional[datetime], fallback_date: str) -> Dict[str, Any]:
-        start_iso = _iso_at(run_start_dt, self.start_time_s)
-        end_iso = _iso_at(run_start_dt, self.end_time_s)
+        start_iso = (
+            self.start_datetime.isoformat(timespec="seconds")
+            if self.start_datetime is not None
+            else _iso_at(run_start_dt, self.start_time_s)
+        )
+        end_iso = (
+            self.end_datetime.isoformat(timespec="seconds")
+            if self.end_datetime is not None
+            else _iso_at(run_start_dt, self.end_time_s)
+        )
         start_date = start_iso[:10] if start_iso else fallback_date
         end_date = end_iso[:10] if end_iso else start_date
         return {
@@ -158,6 +168,7 @@ class HelmetAlertEngine:
         self._alert_emitted = False
         self._episode_start_time_s = 0.0
         self._episode_start_frame_idx = 0
+        self._episode_start_datetime: Optional[datetime] = None
         self._no_helmet_frames = 0
         self._no_helmet_gap_frames = 0
         self._recovery_frames = 0
@@ -173,6 +184,7 @@ class HelmetAlertEngine:
         helmets: Sequence[Detection],
         safety_roi: RoiPolygon,
         related_session_uid: Optional[str] = None,
+        wall_dt: Optional[datetime] = None,
     ) -> Tuple[HelmetAlert, ...]:
         qualifying = _qualifying_persons(
             persons,
@@ -191,7 +203,7 @@ class HelmetAlertEngine:
 
         if candidates:
             if not self._active:
-                self._start_episode(time_s=float(time_s), frame_idx=int(frame_idx))
+                self._start_episode(time_s=float(time_s), frame_idx=int(frame_idx), wall_dt=wall_dt)
             self._no_helmet_frames += 1
             self._no_helmet_gap_frames = 0
             self._recovery_frames = 0
@@ -206,6 +218,7 @@ class HelmetAlertEngine:
                     frame_idx=int(frame_idx),
                     candidates=candidates,
                     related_session_uid=related_session_uid,
+                    wall_dt=wall_dt,
                 )
                 self._alert_emitted = True
                 return (alert,)
@@ -234,11 +247,12 @@ class HelmetAlertEngine:
         if self._active:
             self._close_episode(time_s=float(time_s))
 
-    def _start_episode(self, *, time_s: float, frame_idx: int) -> None:
+    def _start_episode(self, *, time_s: float, frame_idx: int, wall_dt: Optional[datetime]) -> None:
         self._active = True
         self._alert_emitted = False
         self._episode_start_time_s = float(time_s)
         self._episode_start_frame_idx = int(frame_idx)
+        self._episode_start_datetime = wall_dt
         self._no_helmet_frames = 0
         self._no_helmet_gap_frames = 0
         self._recovery_frames = 0
@@ -253,6 +267,7 @@ class HelmetAlertEngine:
         self._no_helmet_gap_frames = 0
         self._recovery_frames = 0
         self._absence_frames = 0
+        self._episode_start_datetime = None
 
     def _build_alert(
         self,
@@ -261,6 +276,7 @@ class HelmetAlertEngine:
         frame_idx: int,
         candidates: Sequence[HelmetAlertCandidate],
         related_session_uid: Optional[str],
+        wall_dt: Optional[datetime],
     ) -> HelmetAlert:
         sorted_candidates = tuple(sorted(candidates, key=lambda c: (c.height_px, c.score), reverse=True))
         primary = sorted_candidates[0]
@@ -284,6 +300,8 @@ class HelmetAlertEngine:
             candidates=sorted_candidates,
             related_session_uid=related_session_uid,
             notes=("sustained_no_helmet",),
+            start_datetime=self._episode_start_datetime,
+            end_datetime=wall_dt,
         )
 
 

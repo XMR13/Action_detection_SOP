@@ -78,6 +78,25 @@ class TestSopEngineMvpA(unittest.TestCase):
         self.assertEqual(r.helmet, StepStatus.UNKNOWN)
         self.assertIn("helmet_check_disabled", set(r.notes))
 
+    def test_initial_session_counter_continues_after_restart(self) -> None:
+        fps = 5.0
+        engine = SopEngine(
+            SopEngineConfig(
+                session=SessionizationConfig(start_seconds=1.0, end_seconds=1.0, analysis_fps=fps),
+                helmet=None,
+                roi_dwell=RoiDwellRuleConfig(required_seconds=1.0, analysis_fps=fps),
+            ),
+            initial_session_counter=895,
+        )
+
+        results = self._run(engine=engine, analysis_fps=fps, present_frames=6, absent_frames=5, helmet_present=False)
+
+        self.assertEqual(results[0].session_id, "000896")
+
+    def test_initial_session_counter_rejects_negative_value(self) -> None:
+        with self.assertRaises(ValueError):
+            SopEngine(SopEngineConfig(), initial_session_counter=-1)
+
     def test_helmet_done_with_sustained_association(self) -> None:
         fps = 5.0
         engine = SopEngine(

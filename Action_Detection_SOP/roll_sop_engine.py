@@ -205,11 +205,13 @@ class RollSopEngine:
     ROI handling later without changing these business rules.
     """
 
-    def __init__(self, cfg: RollSopEngineConfig):
+    def __init__(self, cfg: RollSopEngineConfig, *, initial_session_counter: int = 0):
+        if initial_session_counter < 0:
+            raise ValueError("initial_session_counter must be >= 0")
         self.cfg = cfg
         self._sessionizer = RollSessionizer(cfg.session)
         self._active: Optional[_ActiveRollSession] = None
-        self._session_counter = 0
+        self._session_counter = int(initial_session_counter)
         self._events: List[EvidenceEvent] = []
 
     @property

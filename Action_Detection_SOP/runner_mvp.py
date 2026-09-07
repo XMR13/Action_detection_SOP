@@ -26,6 +26,9 @@ from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capt
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
 from Action_Detection_SOP.reporting import (
     SessionReportResult,
+    date_for_elapsed_time,
+    highest_existing_session_number,
+    session_start_datetime,
     today_date_str,
     write_daily_csv,
     write_daily_report,
@@ -355,6 +358,7 @@ def _build_sop_engine(
     sop_profile_name: str,
     helmet_disabled: bool,
     analysis_fps: float,
+    initial_session_counter: int = 0,
 ) -> EngineSetup:
     """
     Build the active SOP engine plus any report metadata derived from its config.
@@ -380,7 +384,8 @@ def _build_sop_engine(
                         analysis_fps=analysis_fps,
                         max_gap_frames=int(args.labeling_max_gap),
                     ),
-                )
+                ),
+                initial_session_counter=initial_session_counter,
             )
         )
 
@@ -416,7 +421,7 @@ def _build_sop_engine(
         roi_dwell=roi_dwell_cfg,
     )
     return EngineSetup(
-        engine=SopEngine(engine_cfg),
+        engine=SopEngine(engine_cfg, initial_session_counter=initial_session_counter),
         roi_gap_frames=roi_gap_frames,
         roi_miss_frames=roi_miss_frames,
     )
@@ -617,6 +622,8 @@ def run_mvp(
 
     out_dir = Path(args.out_dir)
     date = today_date_str()
+    is_live_source = args.rtsp is not None or args.webcam is not None
+    initial_session_counter = highest_existing_session_number(out_dir=out_dir, date=date)
 
     if args.imgsz < 32:
         raise ValueError("--imgsz must be >= 32")
@@ -843,6 +850,7 @@ def run_mvp(
         sop_profile_name=sop_profile_name,
         helmet_disabled=helmet_disabled,
         analysis_fps=analysis_fps,
+        initial_session_counter=initial_session_counter,
     )
     engine = engine_setup.engine
     helmet_alert_engine: Optional[HelmetAlertEngine] = None
@@ -867,6 +875,7 @@ def run_mvp(
     processed = 0
     sessions: List[SessionReportResult] = []
     session_dirs: List[Path] = []
+    report_dates: Set[str] = set()
     roi_for_frame: Optional[RoiPolygon] = None
     helmet_alert_roi_for_frame: Optional[RoiPolygon] = None
     helmet_alert_dirs: List[Path] = []
@@ -936,6 +945,8 @@ def run_mvp(
     run_video_path: Optional[Path] = None
     active_video_path: Optional[Path] = None
     active_session_dir: Optional[Path] = None
+    active_session_date: Optional[str] = None
+    active_session_start_dt: Optional[datetime] = None
     last_dets_global: List[Detection] = []
     last_dets_roi: List[Detection] = []
     last_persons_all: List[Detection] = []
@@ -943,6 +954,23 @@ def run_mvp(
     last_rolls_roi: List[Detection] = []
     last_cleaning_roi: List[Detection] = []
     last_labels_roi: List[Detection] = []
+
+    def _stamp_session_result(result: SessionReportResult) -> SessionReportResult:
+        if active_session_start_dt is None:
+            return result
+        if is_live_source:
+            end_dt = datetime.now()
+        elif run_start_dt is not None:
+            end_dt = run_start_dt + timedelta(seconds=float(result.end_time_s))
+        else:
+            end_dt = active_session_start_dt + timedelta(seconds=_session_duration_s(result))
+        return replace(
+            result,
+            start_time_iso=active_session_start_dt.isoformat(timespec="seconds"),
+            end_time_iso=end_dt.isoformat(timespec="seconds"),
+            start_date=active_session_start_dt.date().isoformat(),
+            end_date=end_dt.date().isoformat(),
+        )
 
     win = "SOP roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else "SOP MVP-A"
     if args.show:
@@ -1177,11 +1205,20 @@ def run_mvp(
                         helmets=helmets_all,
                         safety_roi=helmet_alert_roi_for_frame,
                         related_session_uid=None,
+                        wall_dt=datetime.now() if is_live_source else None,
                     )
                     for alert in alerts:
+                        if alert.start_datetime is not None:
+                            alert_date = alert.start_datetime.date().isoformat()
+                        else:
+                            alert_date = date_for_elapsed_time(
+                                run_start_dt=run_start_dt,
+                                elapsed_s=float(alert.start_time_s),
+                                fallback_date=date,
+                            )
                         alert_dir = write_helmet_alert_artifacts(
                             out_dir=out_dir,
-                            date=date,
+                            date=alert_date,
                             alert=alert,
                             frame_bgr=frame,
                             safety_roi=helmet_alert_roi_for_frame,
@@ -1193,6 +1230,20 @@ def run_mvp(
             session_id = engine.active_session_id
             need_thumb = bool(should_process and save_thumb and session_id and session_id not in thumb_written)
 
+            # Reserve the session directory before writing any optional artifact.
+            # A failed reservation is safer than mixing a restarted session with
+            # an older directory that has the same numeric id.
+            if session_id and active_session_dir is None:
+                active_session_start_dt = session_start_datetime(
+                    run_start_dt=run_start_dt,
+                    elapsed_s=float(t_s),
+                    live_source=is_live_source,
+                    wall_clock_dt=datetime.now() if is_live_source else None,
+                )
+                active_session_date = active_session_start_dt.date().isoformat()
+                active_session_dir = out_dir / "sessions" / active_session_date / f"session_{session_id}"
+                active_session_dir.mkdir(parents=True, exist_ok=False)
+
             if evidence_enabled and evidence_clipper is not None:
                 if evidence_session_id is None and session_id is not None:
                     evidence_session_id = session_id
@@ -1200,21 +1251,17 @@ def run_mvp(
                     evidence_clip_counts = {}
                     evidence_clips = []
 
-            # Start per-session video writer lazily once we know the session dir.
-            if (args.save_video or need_thumb) and session_id and active_session_dir is None:
-                active_session_dir = out_dir / "sessions" / date / f"session_{session_id}"
-                active_session_dir.mkdir(parents=True, exist_ok=True)
-                if args.save_video:
-                    active_video_path = active_session_dir / "annotated.mp4"
-                    if args.video_fps_out and args.video_fps_out > 0:
-                        fps_out = float(args.video_fps_out)
-                    else:
-                        fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
-                    fourcc = cv2.VideoWriter_fourcc(*str(args.out_codec))
-                    h, w = frame.shape[:2]
-                    writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
-                    if not writer.isOpened():
-                        raise RuntimeError(f"Failed to open video writer: {active_video_path}")
+            if args.save_video and session_id and active_session_dir is not None and writer is None:
+                active_video_path = active_session_dir / "annotated.mp4"
+                if args.video_fps_out and args.video_fps_out > 0:
+                    fps_out = float(args.video_fps_out)
+                else:
+                    fps_out = float(source_fps) if source_fps else (float(analysis_fps) if analysis_fps else 5.0)
+                fourcc = cv2.VideoWriter_fourcc(*str(args.out_codec))
+                h, w = frame.shape[:2]
+                writer = cv2.VideoWriter(str(active_video_path), fourcc, fps_out, (w, h))
+                if not writer.isOpened():
+                    raise RuntimeError(f"Failed to open video writer: {active_video_path}")
 
             # Visualization (optional)
             vis = frame
@@ -1307,8 +1354,9 @@ def run_mvp(
             if evidence_enabled and evidence_clipper is not None and evidence_session_id is not None and should_process:
                 completed = evidence_clipper.add_frame(time_s=float(t_s), frame=vis)
                 if completed:
-                    session_dir = out_dir / "sessions" / date / f"session_{evidence_session_id}"
-                    session_dir.mkdir(parents=True, exist_ok=True)
+                    if active_session_dir is None:
+                        raise RuntimeError("Evidence clip completed without a reserved session directory")
+                    session_dir = active_session_dir
                     for clip_data in completed:
                         idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
                         evidence_clip_counts[clip_data.clip.name] = idx
@@ -1341,16 +1389,7 @@ def run_mvp(
                     break
 
             if result is not None:
-                if run_start_dt is not None:
-                    start_dt = run_start_dt + timedelta(seconds=float(result.start_time_s))
-                    end_dt = run_start_dt + timedelta(seconds=float(result.end_time_s))
-                    result = replace(
-                        result,
-                        start_time_iso=start_dt.isoformat(timespec="seconds"),
-                        end_time_iso=end_dt.isoformat(timespec="seconds"),
-                        start_date=start_dt.date().isoformat(),
-                        end_date=end_dt.date().isoformat(),
-                    )
+                result = _stamp_session_result(result)
                 duration_s = _session_duration_s(result)
                 if args.min_session_s > 0 and duration_s < float(args.min_session_s):
                     discarded_sessions.append(
@@ -1364,10 +1403,12 @@ def run_mvp(
                         writer.release()
                         writer = None
                     active_video_path = None
-                    discard_dir = out_dir / "sessions" / date / f"session_{result.session_id}"
-                    if discard_dir.exists():
+                    discard_dir = active_session_dir
+                    if discard_dir is not None and discard_dir.exists():
                         shutil.rmtree(discard_dir, ignore_errors=True)
                     active_session_dir = None
+                    active_session_date = None
+                    active_session_start_dt = None
                     thumb_written.discard(result.session_id)
                     if evidence_enabled and evidence_clipper is not None:
                         evidence_clipper.reset()
@@ -1376,7 +1417,15 @@ def run_mvp(
                         evidence_clips = []
                     continue
                 sessions.append(result)
-                session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=result)
+                session_date = result.start_date or active_session_date or date
+                if active_session_dir is None:
+                    raise RuntimeError("Finalized session has no reserved session directory")
+                session_dir = write_session_artifacts(
+                    out_dir=out_dir,
+                    date=session_date,
+                    session=result,
+                    session_dir=active_session_dir,
+                )
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
                 write_session_run_config(session_dir=session_dir, run_config=run_config)
@@ -1398,6 +1447,20 @@ def run_mvp(
                     evidence_clip_counts = {}
                     evidence_clips = []
                 session_dirs.append(session_dir)
+                if sop_profile_name == PROFILE_ROLL_SOP_V1:
+                    write_daily_report(
+                        out_dir=out_dir,
+                        date=session_date,
+                        sessions=[result],
+                        append=True,
+                    )
+                    write_daily_csv(
+                        out_dir=out_dir,
+                        date=session_date,
+                        sessions=[result],
+                        append=True,
+                    )
+                    report_dates.add(session_date)
 
                 # Close writer for this session
                 if writer is not None:
@@ -1413,6 +1476,8 @@ def run_mvp(
                             print(f"Note: ffmpeg compression unavailable/failed; kept OpenCV output: {active_video_path}")
                     active_video_path = None
                 active_session_dir = None
+                active_session_date = None
+                active_session_start_dt = None
 
         # End-of-stream flush
         end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
@@ -1424,16 +1489,7 @@ def run_mvp(
             tail = engine.flush(time_s=float(end_time_s))
         tail_events = engine.pop_events() if tail is not None else ()
         if tail is not None:
-            if run_start_dt is not None:
-                start_dt = run_start_dt + timedelta(seconds=float(tail.start_time_s))
-                end_dt = run_start_dt + timedelta(seconds=float(tail.end_time_s))
-                tail = replace(
-                    tail,
-                    start_time_iso=start_dt.isoformat(timespec="seconds"),
-                    end_time_iso=end_dt.isoformat(timespec="seconds"),
-                    start_date=start_dt.date().isoformat(),
-                    end_date=end_dt.date().isoformat(),
-                )
+            tail = _stamp_session_result(tail)
             duration_s = _session_duration_s(tail)
             if args.min_session_s > 0 and duration_s < float(args.min_session_s):
                 discarded_sessions.append(
@@ -1447,9 +1503,12 @@ def run_mvp(
                     writer.release()
                     writer = None
                 active_video_path = None
-                discard_dir = out_dir / "sessions" / date / f"session_{tail.session_id}"
-                if discard_dir.exists():
+                discard_dir = active_session_dir
+                if discard_dir is not None and discard_dir.exists():
                     shutil.rmtree(discard_dir, ignore_errors=True)
+                active_session_dir = None
+                active_session_date = None
+                active_session_start_dt = None
                 if evidence_enabled and evidence_clipper is not None:
                     evidence_clipper.reset()
                     evidence_session_id = None
@@ -1457,7 +1516,15 @@ def run_mvp(
                     evidence_clips = []
             else:
                 sessions.append(tail)
-                session_dir = write_session_artifacts(out_dir=out_dir, date=date, session=tail)
+                session_date = tail.start_date or active_session_date or date
+                if active_session_dir is None:
+                    raise RuntimeError("Flushed session has no reserved session directory")
+                session_dir = write_session_artifacts(
+                    out_dir=out_dir,
+                    date=session_date,
+                    session=tail,
+                    session_dir=active_session_dir,
+                )
                 run_config["loop_count"] = int(loop_count)
                 run_config["reconnect_events"] = int(reconnect_events)
                 write_session_run_config(session_dir=session_dir, run_config=run_config)
@@ -1487,6 +1554,20 @@ def run_mvp(
                     evidence_clip_counts = {}
                     evidence_clips = []
                 session_dirs.append(session_dir)
+                if sop_profile_name == PROFILE_ROLL_SOP_V1:
+                    write_daily_report(
+                        out_dir=out_dir,
+                        date=session_date,
+                        sessions=[tail],
+                        append=True,
+                    )
+                    write_daily_csv(
+                        out_dir=out_dir,
+                        date=session_date,
+                        sessions=[tail],
+                        append=True,
+                    )
+                    report_dates.add(session_date)
 
     finally:
         if helmet_alert_engine is not None:
@@ -1521,8 +1602,18 @@ def run_mvp(
         if pbar is not None:
             pbar.close()
 
-    daily_json = write_daily_report(out_dir=out_dir, date=date, sessions=sessions)
-    daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
+    if sop_profile_name == PROFILE_ROLL_SOP_V1 and report_dates:
+        report_date = max(report_dates)
+        daily_json = out_dir / "reports" / report_date / "daily_report.json"
+        daily_csv = out_dir / "reports" / report_date / "sessions.csv"
+    else:
+        daily_json = write_daily_report(
+            out_dir=out_dir,
+            date=date,
+            sessions=sessions,
+            sop_profile="roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else None,
+        )
+        daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
     run_config["performance"] = {
         "preprocess": _summary_ms(perf.preprocess_s),
         "inference": _summary_ms(perf.inference_s),

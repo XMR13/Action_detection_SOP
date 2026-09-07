@@ -100,6 +100,23 @@ class TestRollSopEngine(unittest.TestCase):
         names = [event.name for event in engine.pop_events()]
         self.assertEqual(names, ["roll_entered", "cleaned_done", "labeled_done", "roll_left"])
 
+    def test_initial_session_counter_continues_after_restart(self) -> None:
+        engine = RollSopEngine(_cfg(), initial_session_counter=895)
+
+        results = self._run_session(
+            engine=engine,
+            present_frames=3,
+            absent_frames=2,
+            cloth_frames=2,
+            label_frames=2,
+        )
+
+        self.assertEqual(results[0].session_id, "000896")
+
+    def test_initial_session_counter_rejects_negative_value(self) -> None:
+        with self.assertRaises(ValueError):
+            RollSopEngine(_cfg(), initial_session_counter=-1)
+
     def test_missing_evidence_is_non_compliant(self) -> None:
         engine = RollSopEngine(_cfg())
 
