@@ -7,6 +7,7 @@ from Action_Detection_SOP.runtime_config import (
     PROFILE_ROLL_SOP_V1,
     resolve_run_config,
 )
+from Action_Detection_SOP.safety_alerts import DEFAULT_HELMET_REQUIRED_SECONDS, HelmetAlertConfig
 from Scripts.run_sop_mvp import build_parser
 
 
@@ -17,6 +18,13 @@ def _metadata(path: Path, names: dict[int, str]) -> Path:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
+
+def test_helmet_alert_default_is_shared_by_engine_and_cli() -> None:
+    args = build_parser().parse_args(["--video", "sample.mp4"])
+
+    assert DEFAULT_HELMET_REQUIRED_SECONDS == 10
+    assert HelmetAlertConfig().required_seconds == DEFAULT_HELMET_REQUIRED_SECONDS
+    assert args.helmet_alert_s == DEFAULT_HELMET_REQUIRED_SECONDS
 
 def test_resolves_roll_profile_classes_and_timing_defaults(tmp_path: Path) -> None:
     metadata = _metadata(

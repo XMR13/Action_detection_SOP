@@ -41,22 +41,23 @@ def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int
     )
 
 
-def test_alert_fires_after_sustained_no_helmet_only() -> None:
-    engine = _engine(required_s=5.0)
+def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:
+    assert HelmetAlertConfig().required_seconds == 10.0
+    engine = _engine(required_s=10.0)
     alerts = []
-    for frame_idx in range(1, 5):
+    for frame_idx in range(1, 10):
         alerts.extend(
             engine.update(time_s=float(frame_idx), frame_idx=frame_idx, persons=[_person()], helmets=[], safety_roi=_roi())
         )
     assert alerts == []
 
-    alerts.extend(engine.update(time_s=5.0, frame_idx=5, persons=[_person()], helmets=[], safety_roi=_roi()))
+    alerts.extend(engine.update(time_s=10.0, frame_idx=10, persons=[_person()], helmets=[], safety_roi=_roi()))
 
     assert len(alerts) == 1
     alert = alerts[0]
     assert alert.alert_type == "NO_HELMET"
     assert alert.start_time_s == 1.0
-    assert alert.end_time_s == 5.0
+    assert alert.end_time_s == 10.0
     assert alert.primary.height_px == 200.0
 
 

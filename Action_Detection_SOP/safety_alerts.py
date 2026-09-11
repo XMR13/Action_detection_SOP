@@ -19,6 +19,7 @@ ALERT_TYPE_NO_HELMET = "NO_HELMET"
 SAFETY_PROFILE_HELMET_ALERT_V1 = "helmet_alert_v1"
 ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
+DEFAULT_HELMET_REQUIRED_SECONDS = 10
 
 """
 ---------------------------
@@ -28,7 +29,7 @@ DATA SCHEMA
 
 @dataclass(frozen=True)
 class HelmetAlertConfig:
-    required_seconds: float = 5.0
+    required_seconds: float = DEFAULT_HELMET_REQUIRED_SECONDS
     analysis_fps: float = 5.0
     recovery_seconds: float = 2.0
     absence_seconds: float = 2.0

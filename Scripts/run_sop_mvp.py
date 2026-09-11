@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests, load_run_config
 from Action_Detection_SOP.runner_mvp import run_mvp
 from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
+from Action_Detection_SOP.safety_alerts import DEFAULT_HELMET_REQUIRED_SECONDS
 
 def _add_bool_optional_flag(
     parser: argparse.ArgumentParser,
@@ -251,17 +252,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enable-helmet-alerts",
         action="store_true",
-        help="Enable independent no-helmet safety alerts. Requires --helmet-alert-roi plus person/helmet classes.",
+        help=(
+            "Enable independent no-helmet safety alerts over the full frame, or "
+            "over --helmet-alert-roi when supplied. Requires person/helmet classes."
+        ),
     )
     parser.add_argument(
         "--helmet-alert-roi",
         default=None,
-        help="Safety alert area ROI polygon JSON. Required when --enable-helmet-alerts is set.",
+        help="Optional safety alert area ROI polygon JSON; omitted means the whole frame.",
     )
     parser.add_argument(
         "--helmet-alert-s",
         type=float,
-        default=5.0,
+        default=DEFAULT_HELMET_REQUIRED_SECONDS,
         help="No-helmet alert after sustained qualifying evidence (seconds).",
     )
     parser.add_argument(

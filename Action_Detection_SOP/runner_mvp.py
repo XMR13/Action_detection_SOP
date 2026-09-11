@@ -67,6 +67,22 @@ from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipe
 from yolo_kit.types import Detection
 
 
+def _full_frame_roi(*, frame_width: int, frame_height: int) -> RoiPolygon:
+    if frame_width <= 0 or frame_height <= 0:
+        raise ValueError("frame_width/frame_height must be positive")
+
+    #return all the polygon needed for this
+    return RoiPolygon(
+        points=(
+            (0, 0),
+            (int(frame_width) - 1, 0),
+            (int(frame_width) - 1, int(frame_height) - 1),
+            (0, int(frame_height) - 1),
+        ),
+        frame_size=(int(frame_width), int(frame_height)),
+    )
+
+
 @dataclass
 class StagePerfTracker:
     preprocess_s: List[float]
@@ -604,21 +620,20 @@ def run_mvp(
     helmet_alert_roi_path: Optional[Path] = None
     helmet_alert_roi_base: Optional[RoiPolygon] = None
     if helmet_alerts_enabled:
-        if not args.helmet_alert_roi:
-            raise ValueError("--helmet-alert-roi is required when --enable-helmet-alerts is set.")
         if not person_ids:
             raise ValueError("--enable-helmet-alerts requires resolved person class ids.")
         if not helmet_ids:
             raise ValueError("--enable-helmet-alerts requires resolved helmet class ids.")
         if bool(args.detect_roi_only):
             raise ValueError("--detect-roi-only cannot be combined with --enable-helmet-alerts.")
-        helmet_alert_roi_path = Path(args.helmet_alert_roi)
-        helmet_alert_roi_base = load_roi_json(helmet_alert_roi_path)
-        if helmet_alert_roi_base.frame_size is None:
-            print(
-                "Note: helmet alert ROI JSON has no frame_size; auto-rescale is disabled. "
-                "Re-save ROI using Scripts/calibrate_roi.py to embed calibration resolution."
-            )
+        if args.helmet_alert_roi:
+            helmet_alert_roi_path = Path(args.helmet_alert_roi)
+            helmet_alert_roi_base = load_roi_json(helmet_alert_roi_path)
+            if helmet_alert_roi_base.frame_size is None:
+                print(
+                    "Note: helmet alert ROI JSON has no frame_size; auto-rescale is disabled. "
+                    "Re-save ROI using Scripts/calibrate_roi.py to embed calibration resolution."
+                )
 
     out_dir = Path(args.out_dir)
     date = today_date_str()
@@ -904,17 +919,12 @@ def run_mvp(
             rtsp_buffer_size=rtsp_buffer_size,
         )
     )
-    if helmet_alerts_enabled and helmet_alert_roi_path is not None and helmet_alert_roi_base is not None:
-        run_config["helmet_alerts"] = {
+    if helmet_alerts_enabled:
+        helmet_alert_config: Dict[str, object] = {
             "enabled": True,
             "alert_type": "NO_HELMET",
             "safety_profile": "helmet_alert_v1",
-            "roi": {
-                "path": str(helmet_alert_roi_path),
-                "frame_size": helmet_alert_roi_base.frame_size,
-                "points": list(helmet_alert_roi_base.points),
-                "sha256": _sha256_path(helmet_alert_roi_path),
-            },
+            "scope": "roi" if helmet_alert_roi_base is not None else "full_frame",
             "required_seconds": float(args.helmet_alert_s),
             "recovery_seconds": float(args.helmet_alert_recovery_s),
             "absence_seconds": float(args.helmet_alert_recovery_s),
@@ -925,6 +935,14 @@ def run_mvp(
             "safety_area_id": str(args.helmet_alert_safety_area_id),
             "camera_id": args.helmet_alert_camera_id,
         }
+        if helmet_alert_roi_path is not None and helmet_alert_roi_base is not None:
+            helmet_alert_config["roi"] = {
+                "path": str(helmet_alert_roi_path),
+                "frame_size": helmet_alert_roi_base.frame_size,
+                "points": list(helmet_alert_roi_base.points),
+                "sha256": _sha256_path(helmet_alert_roi_path),
+            }
+        run_config["helmet_alerts"] = helmet_alert_config
     else:
         run_config["helmet_alerts"] = {"enabled": False}
 
@@ -1102,22 +1120,27 @@ def run_mvp(
                 run_config["reconnect_events"] = int(reconnect_events)
 
             if helmet_alerts_enabled and helmet_alert_roi_for_frame is None:
-                assert helmet_alert_roi_base is not None
-                helmet_alert_roi_for_frame = resolve_roi_for_frame(
-                    helmet_alert_roi_base,
-                    frame_width=frame.shape[1],
-                    frame_height=frame.shape[0],
-                )
-                if helmet_alert_roi_base.frame_size is not None:
-                    base_w, base_h = helmet_alert_roi_base.frame_size
-                    stream_size = (int(frame.shape[1]), int(frame.shape[0]))
-                    if (base_w, base_h) != stream_size:
-                        msg = (
-                            "Helmet alert ROI frame_size differs from stream resolution; ROI was auto-rescaled. "
-                            f"roi_frame_size={(base_w, base_h)} stream_size={stream_size}"
-                        )
-                        print(f"WARNING: {msg}")
-                        warnings.append(msg)
+                if helmet_alert_roi_base is None:
+                    helmet_alert_roi_for_frame = _full_frame_roi(
+                        frame_width=frame.shape[1],
+                        frame_height=frame.shape[0],
+                    )
+                else:
+                    helmet_alert_roi_for_frame = resolve_roi_for_frame(
+                        helmet_alert_roi_base,
+                        frame_width=frame.shape[1],
+                        frame_height=frame.shape[0],
+                    )
+                    if helmet_alert_roi_base.frame_size is not None:
+                        base_w, base_h = helmet_alert_roi_base.frame_size
+                        stream_size = (int(frame.shape[1]), int(frame.shape[0]))
+                        if (base_w, base_h) != stream_size:
+                            msg = (
+                                "Helmet alert ROI frame_size differs from stream resolution; ROI was auto-rescaled. "
+                                f"roi_frame_size={(base_w, base_h)} stream_size={stream_size}"
+                            )
+                            print(f"WARNING: {msg}")
+                            warnings.append(msg)
                 helmet_alert_config = run_config.get("helmet_alerts")
                 if isinstance(helmet_alert_config, dict):
                     helmet_alert_config["roi_resolved"] = {
