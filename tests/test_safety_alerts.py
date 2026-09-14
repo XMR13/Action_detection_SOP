@@ -7,7 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from Action_Detection_SOP.roi import RoiPolygon
-from Action_Detection_SOP.safety_alerts import HelmetAlertConfig, HelmetAlertEngine, write_helmet_alert_artifacts
+from Action_Detection_SOP.safety_alerts import (
+    DEFAULT_HELMET_ALERT_CONFIDENCE,
+    HelmetAlertConfig,
+    HelmetAlertEngine,
+    write_helmet_alert_artifacts,
+)
 from yolo_kit.types import Detection
 
 
@@ -19,8 +24,8 @@ def _person(*, x1: float = 50, y1: float = 20, x2: float = 150, y2: float = 220,
     return Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=score, class_id=0)
 
 
-def _helmet() -> Detection:
-    return Detection(x1=80, y1=30, x2=120, y2=60, score=0.85, class_id=1)
+def _helmet(*, score: float = 0.85) -> Detection:
+    return Detection(x1=80, y1=30, x2=120, y2=60, score=score, class_id=1)
 
 
 def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int = 120) -> HelmetAlertEngine:
@@ -43,6 +48,7 @@ def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int
 
 def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:
     assert HelmetAlertConfig().required_seconds == 10.0
+    assert HelmetAlertConfig().verification_confidence == DEFAULT_HELMET_ALERT_CONFIDENCE
     engine = _engine(required_s=10.0)
     alerts = []
     for frame_idx in range(1, 10):
@@ -59,6 +65,28 @@ def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:
     assert alert.start_time_s == 1.0
     assert alert.end_time_s == 10.0
     assert alert.primary.height_px == 200.0
+
+
+def test_weak_helmet_is_checked_at_alert_boundary() -> None:
+    engine = _engine(required_s=2.0)
+    weak_helmet = _helmet(score=0.2)
+
+    assert engine.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[weak_helmet], safety_roi=_roi()) == ()
+    assert engine.update(time_s=2.0, frame_idx=2, persons=[_person()], helmets=[weak_helmet], safety_roi=_roi()) == ()
+
+
+def test_alert_payload_logs_weak_helmet_score_and_thresholds() -> None:
+    engine = _engine(required_s=2.0)
+    weak_helmet = _helmet(score=0.2)
+
+    engine.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[weak_helmet], safety_roi=_roi())
+    alerts = engine.update(time_s=2.0, frame_idx=2, persons=[_person()], helmets=[], safety_roi=_roi())
+
+    assert len(alerts) == 1
+    payload = alerts[0].to_payload(run_start_dt=None, fallback_date="2026-09-14")
+    assert payload["best_helmet_score"] == 0.2
+    assert payload["helmet_confidence_floor"] == DEFAULT_HELMET_ALERT_CONFIDENCE
+    assert payload["helmet_strong_confidence"] == 0.35
 
 
 def test_alert_can_use_wall_clock_timestamps_for_live_sources() -> None:
@@ -85,6 +113,29 @@ def test_alert_can_use_wall_clock_timestamps_for_live_sources() -> None:
     payload = alerts[0].to_payload(run_start_dt=None, fallback_date="unknown")
     assert payload["start_date"] == "2026-09-07"
     assert payload["end_date"] == "2026-09-08"
+
+
+def test_alert_redacts_credentials_from_source_payload_and_uid() -> None:
+    engine = HelmetAlertEngine(
+        HelmetAlertConfig(required_seconds=1.0, analysis_fps=1.0),
+        source="rtsp://camera_user:camera_password@10.77.77.1:554/Streaming/Channels/1601?token=secret",
+    )
+
+    alerts = engine.update(
+        time_s=1.0,
+        frame_idx=1,
+        persons=[_person()],
+        helmets=[],
+        safety_roi=_roi(),
+    )
+
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert.source == "rtsp://10.77.77.1:554/Streaming/Channels/1601"
+    assert alert.alert_uid.startswith("alert_no_helmet_000001_")
+    assert "camera_user" not in alert.alert_uid
+    assert "camera_password" not in alert.alert_uid
+    assert "secret" not in json.dumps(alert.to_payload(run_start_dt=None, fallback_date="2026-09-11"))
 
 
 def test_alert_does_not_recur_during_same_episode() -> None:

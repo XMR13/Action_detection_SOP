@@ -8,7 +8,10 @@ from typing import Dict, Optional
 from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests, load_run_config
 from Action_Detection_SOP.runner_mvp import run_mvp
 from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
-from Action_Detection_SOP.safety_alerts import DEFAULT_HELMET_REQUIRED_SECONDS
+from Action_Detection_SOP.safety_alerts import (
+    DEFAULT_HELMET_ALERT_CONFIDENCE,
+    DEFAULT_HELMET_REQUIRED_SECONDS,
+)
 
 def _add_bool_optional_flag(
     parser: argparse.ArgumentParser,
@@ -267,6 +270,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_HELMET_REQUIRED_SECONDS,
         help="No-helmet alert after sustained qualifying evidence (seconds).",
+    )
+    parser.add_argument(
+        "--helmet-alert-confidence",
+        type=float,
+        default=DEFAULT_HELMET_ALERT_CONFIDENCE,
+        help=(
+            "Lowest helmet confidence retained for the post-threshold verification pass; "
+            "the normal strong threshold remains --conf."
+        ),
     )
     parser.add_argument(
         "--helmet-alert-recovery-s",

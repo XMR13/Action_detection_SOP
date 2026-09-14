@@ -42,6 +42,7 @@ from .sop_status import (
     validate_review_overrides,
 )
 from ..shifts import assign_shift_for_interval, parse_iso_datetime
+from ..source_security import redact_source_credentials, redact_source_fields
 
 API_CONTRACT_VERSION = "2026-07-23.v1"
 _MAX_REVIEW_NOTE_LEN = 4000
@@ -1358,8 +1359,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "end_time_iso": alert.payload.get("end_time_iso"),
                     "start_time_s": _float_or_zero(alert.payload.get("start_time_s")),
                     "end_time_s": _float_or_zero(alert.payload.get("end_time_s")),
-                    "source": str(alert.payload.get("source") or ""),
-                    "camera_id": alert.payload.get("camera_id"),
+                    "source": redact_source_credentials(str(alert.payload.get("source") or "")),
+                    "camera_id": redact_source_credentials(str(alert.payload.get("camera_id")))
+                    if alert.payload.get("camera_id")
+                    else None,
                     "safety_area_id": str(alert.payload.get("safety_area_id") or ""),
                     "person_count": _int_or_zero(alert.payload.get("person_count")),
                     "related_session_uid": alert.payload.get("related_session_uid"),
@@ -1431,11 +1434,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         clip = alert.paths.alert_dir / "clip.mp4"
         if clip.exists():
             artifacts.append({"name": "clip.mp4", "url": f"/alert-media/{alert.alert_uid}/clip.mp4"})
+        public_alert = redact_source_fields(alert.payload)
         return {
             "alert_uid": alert.alert_uid,
             "date": alert.date,
             "alert_type": alert.alert_type,
-            "alert": alert.payload,
+            "alert": public_alert,
             "status": eff_status,
             "review_source": "HUMAN" if review is not None else "MACHINE",
             "review": None if review is None else review.__dict__,
@@ -1459,7 +1463,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
         alert_dir = settings.data_dir / "alerts" / date / alert_uid
         alert_dir.mkdir(parents=True, exist_ok=True)
-        alert_payload = payload.model_dump(mode="json")
+        alert_payload = redact_source_fields(payload.model_dump(mode="json"))
         alert_payload.setdefault("status", "PENDING")
         _atomic_write_json(alert_dir / "alert.json", alert_payload)
         alert_index.refresh()

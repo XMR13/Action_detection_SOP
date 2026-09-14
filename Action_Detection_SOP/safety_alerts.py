@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,6 +11,7 @@ import cv2
 import numpy as np
 
 from Action_Detection_SOP.roi import RoiPolygon, draw_roi
+from Action_Detection_SOP.source_security import redact_source_credentials
 from yolo_kit.types import Detection
 
 
@@ -20,6 +20,7 @@ SAFETY_PROFILE_HELMET_ALERT_V1 = "helmet_alert_v1"
 ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
 DEFAULT_HELMET_REQUIRED_SECONDS = 10
+DEFAULT_HELMET_ALERT_CONFIDENCE = 0.15
 
 """
 ---------------------------
@@ -30,6 +31,8 @@ DATA SCHEMA
 @dataclass(frozen=True)
 class HelmetAlertConfig:
     required_seconds: float = DEFAULT_HELMET_REQUIRED_SECONDS
+    strong_helmet_confidence: float = 0.35
+    verification_confidence: float = DEFAULT_HELMET_ALERT_CONFIDENCE
     analysis_fps: float = 5.0
     recovery_seconds: float = 2.0
     absence_seconds: float = 2.0
@@ -45,6 +48,12 @@ class HelmetAlertConfig:
             raise ValueError("analysis_fps must be > 0")
         if self.required_seconds <= 0:
             raise ValueError("required_seconds must be > 0")
+        if not (0.0 <= self.verification_confidence <= 1.0):
+            raise ValueError("verification_confidence must be within [0, 1]")
+        if not (0.0 <= self.strong_helmet_confidence <= 1.0):
+            raise ValueError("strong_helmet_confidence must be within [0, 1]")
+        if self.verification_confidence > self.strong_helmet_confidence:
+            raise ValueError("verification_confidence must be <= strong_helmet_confidence")
         if self.recovery_seconds <= 0:
             raise ValueError("recovery_seconds must be > 0")
         if self.absence_seconds <= 0:
@@ -112,6 +121,9 @@ class HelmetAlert:
     safety_area_id: str
     primary: HelmetAlertCandidate
     candidates: Tuple[HelmetAlertCandidate, ...]
+    best_helmet_score: Optional[float] = None
+    helmet_confidence_floor: float = DEFAULT_HELMET_ALERT_CONFIDENCE
+    helmet_strong_confidence: float = 0.35
     related_session_uid: Optional[str] = None
     notes: Tuple[str, ...] = ()
     start_datetime: Optional[datetime] = None
@@ -149,6 +161,11 @@ class HelmetAlert:
             "person_height_px": round(float(self.primary.height_px), 3),
             "person_count": int(len(self.candidates)),
             "candidates": [c.as_payload() for c in self.candidates],
+            "best_helmet_score": (
+                None if self.best_helmet_score is None else round(float(self.best_helmet_score), 3)
+            ),
+            "helmet_confidence_floor": round(float(self.helmet_confidence_floor), 3),
+            "helmet_strong_confidence": round(float(self.helmet_strong_confidence), 3),
             "related_session_uid": self.related_session_uid,
             "thumbnail": "thumbnail.jpg",
             "artifacts": {
@@ -163,8 +180,8 @@ class HelmetAlert:
 class HelmetAlertEngine:
     def __init__(self, cfg: HelmetAlertConfig, *, source: str, camera_id: Optional[str] = None) -> None:
         self.cfg = cfg
-        self.source = str(source)
-        self.camera_id = str(camera_id) if camera_id else None
+        self.source = redact_source_credentials(str(source)) or "source"
+        self.camera_id = redact_source_credentials(str(camera_id)) if camera_id else None
         self._active = False
         self._alert_emitted = False
         self._episode_start_time_s = 0.0
@@ -175,6 +192,7 @@ class HelmetAlertEngine:
         self._recovery_frames = 0
         self._absence_frames = 0
         self._cooldown_until_s = 0.0
+        self._episode_best_helmet_score: Optional[float] = None
 
     def update(
         self,
@@ -192,19 +210,43 @@ class HelmetAlertEngine:
             safety_roi=safety_roi,
             min_person_height_px=self.cfg.min_person_height_px,
         )
-        candidates = tuple(
-            HelmetAlertCandidate.from_detection(p)
-            for p in qualifying
-            if not _helmet_associated_with_person(p, helmets, head_top_fraction=self.cfg.head_top_fraction)
+        associated_scores = {
+            id(person): _associated_helmet_scores(
+                person,
+                helmets,
+                head_top_fraction=self.cfg.head_top_fraction,
+            )
+            for person in qualifying
+        }
+        strong_helmeted_present = any(
+            any(score >= self.cfg.strong_helmet_confidence for score in associated_scores[id(person)])
+            for person in qualifying
         )
-        helmeted_present = any(
-            _helmet_associated_with_person(p, helmets, head_top_fraction=self.cfg.head_top_fraction)
-            for p in qualifying
+        candidate_persons = tuple(
+            person
+            for person in qualifying
+            if not any(score >= self.cfg.strong_helmet_confidence for score in associated_scores[id(person)])
+        )
+        frame_helmet_scores = tuple(
+            score for person in candidate_persons for score in associated_scores[id(person)]
+        )
+        frame_best_helmet_score = max(frame_helmet_scores) if frame_helmet_scores else None
+        candidates = tuple(HelmetAlertCandidate.from_detection(person) for person in candidate_persons)
+        # With whole-frame coverage, do not let a weak helmet on one person
+        # suppress an alert for another person in the same frame.
+        verification_helmet_present = bool(candidate_persons) and all(
+            any(score >= self.cfg.verification_confidence for score in associated_scores[id(person)])
+            for person in candidate_persons
         )
 
         if candidates:
             if not self._active:
                 self._start_episode(time_s=float(time_s), frame_idx=int(frame_idx), wall_dt=wall_dt)
+            if frame_best_helmet_score is not None:
+                if self._episode_best_helmet_score is None:
+                    self._episode_best_helmet_score = frame_best_helmet_score
+                else:
+                    self._episode_best_helmet_score = max(self._episode_best_helmet_score, frame_best_helmet_score)
             self._no_helmet_frames += 1
             self._no_helmet_gap_frames = 0
             self._recovery_frames = 0
@@ -214,6 +256,12 @@ class HelmetAlertEngine:
                 and float(time_s) >= self._cooldown_until_s
                 and self._no_helmet_frames >= self.cfg.required_frames
             ):
+                # Weak helmet detections are deliberately ignored while the
+                # episode is accumulating. At the alert boundary they get a
+                # final verification chance before NO_HELMET is emitted.
+                if verification_helmet_present:
+                    self._close_episode(time_s=float(time_s))
+                    return ()
                 alert = self._build_alert(
                     time_s=float(time_s),
                     frame_idx=int(frame_idx),
@@ -228,7 +276,7 @@ class HelmetAlertEngine:
         if not self._active:
             return ()
 
-        if helmeted_present:
+        if strong_helmeted_present:
             self._recovery_frames += 1
             self._absence_frames = 0
             self._no_helmet_gap_frames = 0
@@ -258,6 +306,7 @@ class HelmetAlertEngine:
         self._no_helmet_gap_frames = 0
         self._recovery_frames = 0
         self._absence_frames = 0
+        self._episode_best_helmet_score = None
 
     def _close_episode(self, *, time_s: float) -> None:
         if self._alert_emitted:
@@ -269,6 +318,7 @@ class HelmetAlertEngine:
         self._recovery_frames = 0
         self._absence_frames = 0
         self._episode_start_datetime = None
+        self._episode_best_helmet_score = None
 
     def _build_alert(
         self,
@@ -299,6 +349,9 @@ class HelmetAlertEngine:
             safety_area_id=self.cfg.safety_area_id,
             primary=primary,
             candidates=sorted_candidates,
+            best_helmet_score=self._episode_best_helmet_score,
+            helmet_confidence_floor=self.cfg.verification_confidence,
+            helmet_strong_confidence=self.cfg.strong_helmet_confidence,
             related_session_uid=related_session_uid,
             notes=("sustained_no_helmet",),
             start_datetime=self._episode_start_datetime,
@@ -307,10 +360,10 @@ class HelmetAlertEngine:
 
 
 def make_alert_uid(*, alert_type: str, source: str, start_time_s: float, start_frame_idx: int) -> str:
-    source_slug = _slugify(source)[:32] or "source"
-    raw = f"{alert_type}|{source}|{float(start_time_s):.3f}|{int(start_frame_idx)}"
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
-    return f"alert_{str(alert_type).lower()}_{source_slug}_{int(start_frame_idx):06d}_{digest}"
+    safe_source = redact_source_credentials(str(source)) or "source"
+    raw = f"{alert_type}|{safe_source}|{float(start_time_s):.3f}|{int(start_frame_idx)}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return f"alert_{str(alert_type).lower()}_{int(start_frame_idx):06d}_{digest}"
 
 
 def draw_helmet_alert_thumbnail(
@@ -421,21 +474,26 @@ def _helmet_associated_with_person(
     *,
     head_top_fraction: float,
 ) -> bool:
+    return bool(_associated_helmet_scores(person, helmets, head_top_fraction=head_top_fraction))
+
+
+def _associated_helmet_scores(
+    person: Detection,
+    helmets: Sequence[Detection],
+    *,
+    head_top_fraction: float,
+) -> Tuple[float, ...]:
     head_y2 = float(person.y1) + (float(person.y2) - float(person.y1)) * float(head_top_fraction)
+    scores: List[float] = []
     for helmet in helmets:
         cx = (float(helmet.x1) + float(helmet.x2)) * 0.5
         cy = (float(helmet.y1) + float(helmet.y2)) * 0.5
         if float(person.x1) <= cx <= float(person.x2) and float(person.y1) <= cy <= head_y2:
-            return True
-    return False
+            scores.append(float(helmet.score))
+    return tuple(scores)
 
 
 def _iso_at(run_start_dt: Optional[datetime], offset_s: float) -> Optional[str]:
     if run_start_dt is None:
         return None
     return (run_start_dt + timedelta(seconds=float(offset_s))).isoformat(timespec="seconds")
-
-
-def _slugify(value: str) -> str:
-    out = re.sub(r"[^a-zA-Z0-9]+", "_", str(value).strip().lower()).strip("_")
-    return out or "source"

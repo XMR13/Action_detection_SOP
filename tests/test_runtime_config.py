@@ -7,7 +7,11 @@ from Action_Detection_SOP.runtime_config import (
     PROFILE_ROLL_SOP_V1,
     resolve_run_config,
 )
-from Action_Detection_SOP.safety_alerts import DEFAULT_HELMET_REQUIRED_SECONDS, HelmetAlertConfig
+from Action_Detection_SOP.safety_alerts import (
+    DEFAULT_HELMET_ALERT_CONFIDENCE,
+    DEFAULT_HELMET_REQUIRED_SECONDS,
+    HelmetAlertConfig,
+)
 from Scripts.run_sop_mvp import build_parser
 
 
@@ -25,6 +29,7 @@ def test_helmet_alert_default_is_shared_by_engine_and_cli() -> None:
     assert DEFAULT_HELMET_REQUIRED_SECONDS == 10
     assert HelmetAlertConfig().required_seconds == DEFAULT_HELMET_REQUIRED_SECONDS
     assert args.helmet_alert_s == DEFAULT_HELMET_REQUIRED_SECONDS
+    assert args.helmet_alert_confidence == DEFAULT_HELMET_ALERT_CONFIDENCE
 
 def test_resolves_roll_profile_classes_and_timing_defaults(tmp_path: Path) -> None:
     metadata = _metadata(
@@ -97,6 +102,31 @@ def test_roll_profile_includes_person_and_helmet_when_alerts_are_enabled(tmp_pat
     assert resolved.classes.active_class_ids == (0, 1, 2, 3, 4)
     assert resolved.classes.person_ids == (0,)
     assert resolved.classes.helmet_ids == (1,)
+    assert resolved.classes.class_conf_thresholds == {1: DEFAULT_HELMET_ALERT_CONFIDENCE}
+
+
+def test_explicit_helmet_label_confidence_overrides_alert_floor(tmp_path: Path) -> None:
+    metadata = _metadata(
+        tmp_path / "metadata.yaml",
+        {0: "person", 1: "helmet", 2: "roll", 3: "cleaning_cloth", 4: "label"},
+    )
+    args = build_parser().parse_args(
+        [
+            "--video",
+            "sample.mp4",
+            "--metadata",
+            str(metadata),
+            "--sop-profile",
+            PROFILE_ROLL_SOP_V1,
+            "--enable-helmet-alerts",
+            "--label-conf",
+            "helmet=0.22",
+        ]
+    )
+
+    resolved = resolve_run_config(args)
+
+    assert resolved.classes.class_conf_thresholds == {1: 0.22}
 
 
 def test_helmet_alerts_fail_fast_without_person_class(tmp_path: Path) -> None:

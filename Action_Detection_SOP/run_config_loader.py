@@ -125,6 +125,7 @@ def apply_run_config(
         "source_fps",
         "video_fps_out",
         "conf",
+        "helmet_alert_confidence",
         "iou",
         "analysis_fps",
         "start_s",

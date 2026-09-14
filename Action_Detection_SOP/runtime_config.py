@@ -186,6 +186,17 @@ def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> Resolve
                 f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
                 "Helmet alerts require a helmet-capable metadata/model pair."
             )
+        helmet_alert_confidence = float(args.helmet_alert_confidence)
+        if not (0.0 <= helmet_alert_confidence <= 1.0):
+            raise ValueError("--helmet-alert-confidence must be within [0, 1]")
+        # Retain weak helmet candidates for the alert engine's verification
+        # pass, without changing thresholds for the other detector classes.
+        # An explicit --label-conf helmet=... remains authoritative.
+        for helmet_id in helmet_label_ids:
+            class_conf_thresholds.setdefault(
+                int(helmet_id),
+                min(float(args.conf), helmet_alert_confidence),
+            )
 
     if sop_profile_name == PROFILE_OPERATOR_MVP_A and not person_ids:
         raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")

@@ -63,6 +63,7 @@ from Action_Detection_SOP.roll_sop_engine import (
     RollSopEngineConfig,
 )
 from Action_Detection_SOP.session import RollSessionConfig
+from Action_Detection_SOP.source_security import redact_source_credentials, redact_source_fields
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
 from yolo_kit.types import Detection
 
@@ -233,9 +234,9 @@ def _parse_ort_providers(raw: Optional[str]) -> Optional[List[str]]:
 
 def _source_label(args: argparse.Namespace) -> str:
     if args.rtsp:
-        return str(args.rtsp)
+        return redact_source_credentials(str(args.rtsp)) or "rtsp://redacted-source"
     if args.video:
-        return str(args.video)
+        return redact_source_credentials(str(args.video)) or "source"
     if args.webcam is not None:
         return f"webcam_{int(args.webcam)}"
     return "source"
@@ -469,11 +470,11 @@ def _build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, objec
 
     run_config: Dict[str, object] = {
         "date": payload.date,
-        "args": payload.args_raw,
+        "args": redact_source_fields(payload.args_raw),
         "source": {
-            "video": args.video,
+            "video": redact_source_credentials(args.video),
             "webcam": args.webcam,
-            "rtsp": args.rtsp,
+            "rtsp": redact_source_credentials(args.rtsp),
         },
         "source_fps_raw": float(payload.info.fps) if payload.info.fps else None,
         "source_fps": float(payload.source_fps) if payload.source_fps else None,
@@ -546,7 +547,11 @@ def _build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, objec
     else:
         run_config["config"] = {
             "path": str(payload.config_path),
-            "data": payload.config_payload,
+            "data": (
+                redact_source_fields(payload.config_payload)
+                if payload.config_payload is not None
+                else None
+            ),
             "file": _file_metadata(payload.config_path),
         }
 
@@ -595,6 +600,15 @@ def run_mvp(
     person_ids = list(runtime.classes.person_ids)
     helmet_disabled = runtime.classes.helmet_disabled
     helmet_ids = list(runtime.classes.helmet_ids)
+    helmet_alert_confidence_floor = float(args.conf)
+    helmet_alert_strong_confidence = float(args.conf)
+    if bool(args.enable_helmet_alerts) and helmet_ids:
+        helmet_alert_confidence_floor = min(
+            float(class_conf_thresholds.get(class_id, args.conf)) for class_id in helmet_ids
+        )
+        # An explicit per-class threshold can be higher than --conf; scores
+        # that survive postprocessing must still count as strong evidence.
+        helmet_alert_strong_confidence = max(float(args.conf), helmet_alert_confidence_floor)
     roll_ids = list(runtime.classes.roll_ids)
     cleaning_cloth_ids = list(runtime.classes.cleaning_cloth_ids)
     paper_label_ids = list(runtime.classes.paper_label_ids)
@@ -873,6 +887,8 @@ def run_mvp(
         helmet_alert_engine = HelmetAlertEngine(
             HelmetAlertConfig(
                 required_seconds=float(args.helmet_alert_s),
+                strong_helmet_confidence=helmet_alert_strong_confidence,
+                verification_confidence=helmet_alert_confidence_floor,
                 analysis_fps=float(analysis_fps),
                 recovery_seconds=float(args.helmet_alert_recovery_s),
                 absence_seconds=float(args.helmet_alert_recovery_s),
@@ -926,6 +942,8 @@ def run_mvp(
             "safety_profile": "helmet_alert_v1",
             "scope": "roi" if helmet_alert_roi_base is not None else "full_frame",
             "required_seconds": float(args.helmet_alert_s),
+            "helmet_confidence_floor": helmet_alert_confidence_floor,
+            "helmet_strong_confidence": helmet_alert_strong_confidence,
             "recovery_seconds": float(args.helmet_alert_recovery_s),
             "absence_seconds": float(args.helmet_alert_recovery_s),
             "cooldown_seconds": float(args.helmet_alert_cooldown_s),
@@ -933,7 +951,7 @@ def run_mvp(
             "head_top_fraction": float(args.head_top_frac),
             "max_gap_frames": int(args.helmet_alert_max_gap),
             "safety_area_id": str(args.helmet_alert_safety_area_id),
-            "camera_id": args.helmet_alert_camera_id,
+            "camera_id": redact_source_credentials(args.helmet_alert_camera_id),
         }
         if helmet_alert_roi_path is not None and helmet_alert_roi_base is not None:
             helmet_alert_config["roi"] = {

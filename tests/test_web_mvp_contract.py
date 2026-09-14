@@ -108,6 +108,8 @@ def _put_alert(
     alert_uid: str,
     start_date: str = "2026-06-29",
     status: str = "PENDING",
+    source: str = "camera-1",
+    camera_id: str = "cam_1",
 ) -> None:
     payload = {
         "alert_uid": alert_uid,
@@ -119,8 +121,8 @@ def _put_alert(
         "end_date": start_date,
         "start_time_s": 1.0,
         "end_time_s": 5.0,
-        "source": "camera-1",
-        "camera_id": "cam_1",
+        "source": source,
+        "camera_id": camera_id,
         "safety_area_id": "helmet_area_main",
         "person_count": 1,
         "thumbnail": "thumbnail.jpg",
@@ -483,6 +485,33 @@ def test_alert_api_upsert_list_detail_review_and_artifact(tmp_path: Path) -> Non
         media = client.get("/alert-media/alert_api_001/thumbnail.jpg", headers=_auth_headers())
         assert media.status_code == 200
         assert media.content == b"fakejpg"
+
+
+def test_alert_api_redacts_source_credentials_before_storage_and_response(tmp_path: Path) -> None:
+    raw_source = "rtsp://camera_user:camera_password@10.77.77.1:554/Streaming/Channels/1601?token=secret"
+    with _build_client(tmp_path) as client:
+        _put_alert(
+            client,
+            alert_uid="alert_safe_001",
+            source=raw_source,
+            camera_id=raw_source,
+        )
+
+        rows = client.get("/api/alerts", headers=_auth_headers()).json()["alerts"]
+        detail = client.get("/api/alerts/alert_safe_001", headers=_auth_headers()).json()
+        stored = json.loads(
+            (tmp_path / "data" / "alerts" / "2026-06-29" / "alert_safe_001" / "alert.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        expected = "rtsp://10.77.77.1:554/Streaming/Channels/1601"
+        assert rows[0]["source"] == expected
+        assert rows[0]["camera_id"] == expected
+        assert detail["alert"]["source"] == expected
+        assert detail["alert"]["camera_id"] == expected
+        assert stored["source"] == expected
+        assert stored["camera_id"] == expected
 
 
 def test_alert_api_rejects_bad_paths_and_mismatched_uid(tmp_path: Path) -> None:

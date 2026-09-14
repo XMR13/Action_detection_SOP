@@ -465,6 +465,27 @@
     return `helmet-alert-detail.html${query ? `?${query}` : ""}${hash}`;
   };
 
+  const displayAlertUid = (alertUid) => {
+    const uid = String(alertUid || "");
+    const digest = uid.match(/_([0-9a-f]{10,64})$/i);
+    return digest ? `Alert ${digest[1]}` : "Alert";
+  };
+
+  const displaySource = (value) => {
+    const raw = String(value || "-");
+    if (!raw.includes("://")) return raw;
+    try {
+      const parsed = new URL(raw);
+      parsed.username = "";
+      parsed.password = "";
+      parsed.search = "";
+      parsed.hash = "";
+      return parsed.toString();
+    } catch (_err) {
+      return `${raw.split("://", 1)[0]}://redacted-source`;
+    }
+  };
+
   const readSessionUidFromUrl = () => {
     const params = new URLSearchParams(window.location.search || "");
     const fromQuery = params.get("session_uid");
@@ -1276,7 +1297,7 @@
       .map((alert, index) => {
         const uid = String(alert.alert_uid || "");
         const status = String(alert.status || "PENDING");
-        const camera = String(alert.camera_id || alert.source || "-");
+        const camera = displaySource(alert.camera_id || alert.source || "-");
         const date = String(alert.date || "-");
         const time = formatHmsFromIso(alert.start_time_iso) || "-";
         const count = Number(alert.person_count || 0);
@@ -1288,7 +1309,7 @@
         }
         return `
           <tr class="${active.trim()}" data-alert-uid="${escapeHtml(uid)}">
-            <td><a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-alert-link>${escapeHtml(uid || "-")}</a></td>
+            <td><a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-alert-link>${escapeHtml(displayAlertUid(uid))}</a></td>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(time)}</td>
             <td>${escapeHtml(camera)}</td>
@@ -1389,10 +1410,10 @@
     const backLink = document.getElementById("alert-back-link");
     const listLink = document.getElementById("alert-list-link");
 
-    if (uidNode) uidNode.textContent = alertUid;
-    if (idNode) idNode.textContent = alertUid;
+    if (uidNode) uidNode.textContent = displayAlertUid(alertUid);
+    if (idNode) idNode.textContent = displayAlertUid(alertUid);
     if (dateHint) dateHint.textContent = `Alert time: ${formatDateTimeFromIso(alert.start_time_iso || alert.end_time_iso)}`;
-    if (cameraNode) cameraNode.textContent = String(alert.camera_id || alert.source || "-");
+    if (cameraNode) cameraNode.textContent = displaySource(alert.camera_id || alert.source || "-");
     if (areaNode) areaNode.textContent = String(alert.safety_area_id || "-");
     const related = alert.related_session_uid ? String(alert.related_session_uid) : "-";
     if (sessionNode) {
