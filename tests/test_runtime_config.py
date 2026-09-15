@@ -31,6 +31,17 @@ def test_helmet_alert_default_is_shared_by_engine_and_cli() -> None:
     assert args.helmet_alert_s == DEFAULT_HELMET_REQUIRED_SECONDS
     assert args.helmet_alert_confidence == DEFAULT_HELMET_ALERT_CONFIDENCE
 
+
+def test_helmet_alert_camera_id_defaults_from_deployment_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SOP_HELMET_ALERT_CAMERA_ID", "Camera 16 RW3")
+
+    args = build_parser().parse_args(["--video", "sample.mp4"])
+
+    assert args.helmet_alert_camera_id == "Camera 16 RW3"
+
+
 def test_resolves_roll_profile_classes_and_timing_defaults(tmp_path: Path) -> None:
     metadata = _metadata(
         tmp_path / "metadata.yaml",

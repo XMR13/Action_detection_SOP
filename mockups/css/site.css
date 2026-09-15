@@ -4,3 +4,26 @@
 @import url("./page-queue.css");
 @import url("./page-detail.css");
 @import url("./portal-states.css");
+
+.page-helmet-alerts .alert-name {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.page-helmet-alerts .alert-camera {
+  display: inline-block;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.page-helmet-alert-detail .alert-reference {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}

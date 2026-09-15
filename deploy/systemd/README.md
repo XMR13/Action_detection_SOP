@@ -32,11 +32,15 @@ No Python packages, `pyproject.toml`, or `uv.lock` are changed.
 
 ## Configure
 
-Edit the RTSP source, engine, metadata, and ROI:
+Edit the RTSP source, friendly camera label, engine, metadata, and ROI:
 
 ```bash
 sudoedit /etc/action-sop/rtsp.env
 ```
+
+Set `SOP_HELMET_ALERT_CAMERA_ID` to the operator-facing camera name (for
+example, `Camera 16 RW3`). Keep the RTSP URL in `SOP_RTSP_URL`; it is not a
+display label.
 
 Edit the website credentials and bind settings:
 

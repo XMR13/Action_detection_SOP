@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roll Wrap SOP | Helmet Alert Detail</title>
-    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/site.css?v=20260914-helmet-alert-ui" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-helmet-alert-detail">
@@ -59,7 +59,7 @@
       <main class="content" id="main-content">
         <header class="topbar detail-header">
           <div class="title">
-            <h2>Helmet Alert Detail</h2>
+            <h2 id="alert-detail-name">Helmet Alert</h2>
             <p>Check the thumbnail evidence before confirming the safety finding.</p>
             <div class="detail-crumb">
               <a id="alert-list-link" href="helmet-alerts.html">Helmet Alerts</a>
@@ -104,8 +104,8 @@
 
               <div class="meta queue-facts">
                 <div class="row">
-                  <span class="key">Alert UID</span>
-                  <span class="val" id="alert-detail-uid">-</span>
+                  <span class="key">Reference</span>
+                  <span class="val alert-reference" id="alert-detail-uid">-</span>
                 </div>
                 <div class="row">
                   <span class="key">Camera</span>
@@ -142,6 +142,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js"></script>
+    <script src="js/site.js?v=20260914-helmet-alert-ui"></script>
   </body>
 </html>

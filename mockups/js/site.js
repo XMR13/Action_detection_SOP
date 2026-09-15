@@ -465,25 +465,31 @@
     return `helmet-alert-detail.html${query ? `?${query}` : ""}${hash}`;
   };
 
-  const displayAlertUid = (alertUid) => {
-    const uid = String(alertUid || "");
-    const digest = uid.match(/_([0-9a-f]{10,64})$/i);
-    return digest ? `Alert ${digest[1]}` : "Alert";
+  const displayAlertName = (alert) => {
+    const rawType = String((alert && (alert.alert_type || alert.machine_status)) || "")
+      .trim()
+      .toUpperCase();
+    const words = rawType
+      .replace(/[_-]+/g, " ")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+      .join(" ");
+    return words || "Safety Alert";
   };
 
-  const displaySource = (value) => {
-    const raw = String(value || "-");
-    if (!raw.includes("://")) return raw;
-    try {
-      const parsed = new URL(raw);
-      parsed.username = "";
-      parsed.password = "";
-      parsed.search = "";
-      parsed.hash = "";
-      return parsed.toString();
-    } catch (_err) {
-      return `${raw.split("://", 1)[0]}://redacted-source`;
-    }
+  const displayAlertReference = (alertUid) => {
+    const uid = String(alertUid || "");
+    const digest = uid.match(/_([0-9a-f]{10,64})$/i);
+    return digest ? digest[1].slice(0, 8).toUpperCase() : "—";
+  };
+
+  const displayCamera = (alert) => {
+    const cameraId = String((alert && alert.camera_id) || "").trim();
+    if (cameraId && !cameraId.includes("://")) return cameraId;
+    const source = String((alert && alert.source) || "").trim();
+    return source && !source.includes("://") ? source : "Camera";
   };
 
   const readSessionUidFromUrl = () => {
@@ -1297,7 +1303,8 @@
       .map((alert, index) => {
         const uid = String(alert.alert_uid || "");
         const status = String(alert.status || "PENDING");
-        const camera = displaySource(alert.camera_id || alert.source || "-");
+        const alertName = displayAlertName(alert);
+        const camera = displayCamera(alert);
         const date = String(alert.date || "-");
         const time = formatHmsFromIso(alert.start_time_iso) || "-";
         const count = Number(alert.person_count || 0);
@@ -1309,10 +1316,10 @@
         }
         return `
           <tr class="${active.trim()}" data-alert-uid="${escapeHtml(uid)}">
-            <td><a class="queue-session-link${linkActive}" href="#${encodeURIComponent(uid)}" data-alert-link>${escapeHtml(displayAlertUid(uid))}</a></td>
+            <td><a class="queue-session-link alert-name${linkActive}" href="#${encodeURIComponent(uid)}" aria-label="Open ${escapeHtml(alertName)} alert" data-alert-link>${escapeHtml(alertName)}</a></td>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(time)}</td>
-            <td>${escapeHtml(camera)}</td>
+            <td><span class="alert-camera" title="${escapeHtml(camera)}">${escapeHtml(camera)}</span></td>
             <td><span class="pill ink">${Number.isFinite(count) ? count : 0}</span></td>
             <td><span class="pill ${pillClassForAlertStatus(status)}">${displayAlertStatus(status)}</span></td>
             <td>
@@ -1396,6 +1403,7 @@
     }
 
     const alert = payload.alert && typeof payload.alert === "object" ? payload.alert : {};
+    const nameNode = document.getElementById("alert-detail-name");
     const uidNode = document.getElementById("alert-detail-uid");
     const idNode = document.getElementById("alert-detail-id");
     const dateHint = document.getElementById("alert-detail-date-hint");
@@ -1410,10 +1418,12 @@
     const backLink = document.getElementById("alert-back-link");
     const listLink = document.getElementById("alert-list-link");
 
-    if (uidNode) uidNode.textContent = displayAlertUid(alertUid);
-    if (idNode) idNode.textContent = displayAlertUid(alertUid);
+    const alertName = displayAlertName(alert);
+    if (nameNode) nameNode.textContent = alertName;
+    if (uidNode) uidNode.textContent = displayAlertReference(alertUid);
+    if (idNode) idNode.textContent = alertName;
     if (dateHint) dateHint.textContent = `Alert time: ${formatDateTimeFromIso(alert.start_time_iso || alert.end_time_iso)}`;
-    if (cameraNode) cameraNode.textContent = displaySource(alert.camera_id || alert.source || "-");
+    if (cameraNode) cameraNode.textContent = displayCamera(alert);
     if (areaNode) areaNode.textContent = String(alert.safety_area_id || "-");
     const related = alert.related_session_uid ? String(alert.related_session_uid) : "-";
     if (sessionNode) {

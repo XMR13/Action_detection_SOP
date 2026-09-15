@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional
@@ -311,8 +312,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--helmet-alert-camera-id",
-        default=None,
-        help="Optional camera/source id stored in no-helmet alert artifacts.",
+        default=os.environ.get("SOP_HELMET_ALERT_CAMERA_ID") or None,
+        help="Optional friendly camera label stored in no-helmet alert artifacts (or SOP_HELMET_ALERT_CAMERA_ID).",
     )
     parser.add_argument(
         "--cleaning-s",
