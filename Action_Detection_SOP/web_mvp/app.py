@@ -873,6 +873,13 @@ def _int_or_zero(value: Any) -> int:
         return 0
 
 
+def _csv_safe_cell(value: Any) -> Any:
+    """Keep string cells from being interpreted as spreadsheet formulas."""
+    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@"}:
+        return "'" + value
+    return value
+
+
 def _alert_sort_ts(alert: AlertArtifact) -> float:
     return (
         _parse_iso_ts(alert.payload.get("start_time_iso"))
@@ -1353,7 +1360,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "alert_type": alert.alert_type,
                     "safety_profile": str(alert.payload.get("safety_profile") or ""),
                     "status": eff_status,
+                    "review_status": eff_status,
                     "review_source": "HUMAN" if review is not None else "MACHINE",
+                    "review_note": str(review.review_note) if review is not None else "",
+                    "review_updated_at_utc": review.updated_at_utc if review is not None else None,
                     "machine_status": str(alert.payload.get("machine_status") or ""),
                     "start_time_iso": alert.payload.get("start_time_iso"),
                     "end_time_iso": alert.payload.get("end_time_iso"),
@@ -1417,6 +1427,85 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "has_prev": total > 0 and page > 1,
             "has_next": end_idx < total,
         }
+
+    @app.get("/api/alerts/export.csv")
+    def export_alerts_csv(
+        *,
+        date: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        status: Literal["PENDING", "CONFIRMED", "DISMISSED", "ALL"] = Query(default="PENDING"),
+        sort: Literal["NEWEST", "OLDEST"] = Query(default="NEWEST"),
+    ) -> Response:
+        """Export all alerts matching the review-queue filters, ignoring pagination."""
+        rows, _, _, _ = _filtered_alert_rows(
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            status=status,
+            sort=sort,
+        )
+
+        headers = [
+            "alert_uid",
+            "date",
+            "alert_type",
+            "safety_profile",
+            "camera_id",
+            "safety_area_id",
+            "start_time",
+            "end_time",
+            "duration_s",
+            "person_count",
+            "machine_status",
+            "review_status",
+            "review_source",
+            "review_note",
+            "review_updated_at_utc",
+            "related_session_uid",
+            "has_thumbnail",
+        ]
+
+        #buf is used for geting it to stream the data
+        buf = io.StringIO()
+        writer = csv.DictReader(buf, fieldnames=headers, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            start_s = _float_or_zero()
+
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            start_s = _float_or_zero(row.get("start_time_s"))
+            end_s = _float_or_zero(row.get("end_time_s"))
+            writer.writerow(
+                {
+                    "alert_uid": _csv_safe_cell(row.get("alert_uid")),
+                    "date": _csv_safe_cell(row.get("date")),
+                    "alert_type": _csv_safe_cell(row.get("alert_type")),
+                    "safety_profile": _csv_safe_cell(row.get("safety_profile")),
+                    "camera_id": _csv_safe_cell(row.get("camera_id")),
+                    "safety_area_id": _csv_safe_cell(row.get("safety_area_id")),
+                    "start_time": _csv_safe_cell(row.get("start_time_iso")),
+                    "end_time": _csv_safe_cell(row.get("end_time_iso")),
+                    "duration_s": round(max(0.0, end_s - start_s), 3),
+                    "person_count": _int_or_zero(row.get("person_count")),
+                    "machine_status": _csv_safe_cell(row.get("machine_status")),
+                    "review_status": _csv_safe_cell(row.get("review_status") or row.get("status")),
+                    "review_source": _csv_safe_cell(row.get("review_source")),
+                    "review_note": _csv_safe_cell(row.get("review_note")),
+                    "review_updated_at_utc": _csv_safe_cell(row.get("review_updated_at_utc")),
+                    "related_session_uid": _csv_safe_cell(row.get("related_session_uid")),
+                    "has_thumbnail": row.get("has_thumbnail"),
+                }
+            )
+
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="helmet_alerts.csv"'},
+        )
 
     @app.get("/api/alerts/{alert_uid}")
     def get_alert(alert_uid: str) -> Dict[str, Any]:

@@ -110,6 +110,7 @@ def _put_alert(
     status: str = "PENDING",
     source: str = "camera-1",
     camera_id: str = "cam_1",
+    extra: Optional[Dict[str, object]] = None,
 ) -> None:
     payload = {
         "alert_uid": alert_uid,
@@ -127,6 +128,8 @@ def _put_alert(
         "person_count": 1,
         "thumbnail": "thumbnail.jpg",
     }
+    if extra:
+        payload.update(extra)
     res = client.put(f"/api/alerts/{alert_uid}", headers=_auth_headers(), json=payload)
     assert res.status_code == 200
 
@@ -512,6 +515,99 @@ def test_alert_api_redacts_source_credentials_before_storage_and_response(tmp_pa
         assert detail["alert"]["camera_id"] == expected
         assert stored["source"] == expected
         assert stored["camera_id"] == expected
+
+
+def test_alerts_csv_export_uses_filters_but_not_pagination(tmp_path: Path) -> None:
+    raw_source = "rtsp://camera_user:camera_password@10.77.77.1:554/Streaming/Channels/1601?token=secret"
+    with _build_client(tmp_path) as client:
+        _put_alert(
+            client,
+            alert_uid="alert_csv_001",
+            start_date="2026-06-19",
+            source=raw_source,
+            camera_id=raw_source,
+            extra={
+                "start_time_s": 10.0,
+                "end_time_s": 40.0,
+                "start_time_iso": "2026-06-19T08:01:00+00:00",
+                "end_time_iso": "2026-06-19T08:01:30+00:00",
+            },
+        )
+        _put_alert(
+            client,
+            alert_uid="alert_csv_002",
+            start_date="2026-06-19",
+            extra={
+                "start_time_iso": "2026-06-19T08:02:00+00:00",
+                "end_time_iso": "2026-06-19T08:02:04+00:00",
+            },
+        )
+        _put_alert(
+            client,
+            alert_uid="alert_csv_003",
+            start_date="2026-06-20",
+            extra={"start_time_iso": "2026-06-20T08:03:00+00:00"},
+        )
+        _put_alert(
+            client,
+            alert_uid="alert_csv_004",
+            start_date="2026-06-19",
+            extra={
+                "safety_area_id": "=HYPERLINK(\"https://example.test\")",
+                "related_session_uid": "+SUM(A1)",
+                "start_time_iso": "2026-06-19T08:03:00+00:00",
+                "end_time_iso": "2026-06-19T08:03:10+00:00",
+            },
+        )
+        _post_alert_artifact(client, alert_uid="alert_csv_004", rel_path="thumbnail.jpg", body=b"fakejpg")
+        review = client.put(
+            "/api/alerts/alert_csv_004/review",
+            headers=_auth_headers(),
+            json={"status": "CONFIRMED", "review_note": "=false-positive"},
+        )
+        assert review.status_code == 200
+
+        res = client.get(
+            "/api/alerts/export.csv",
+            headers=_auth_headers(),
+            params={
+                "date": "2026-06-19",
+                "status": "ALL",
+                "sort": "OLDEST",
+                "page": 2,
+                "page_size": 1,
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/csv")
+        assert 'attachment; filename="helmet_alerts.csv"' in res.headers["content-disposition"]
+
+        rows = list(csv.DictReader(res.text.splitlines()))
+        assert [row["alert_uid"] for row in rows] == [
+            "alert_csv_001",
+            "alert_csv_002",
+            "alert_csv_004",
+        ]
+        assert rows[0]["camera_id"] == "rtsp://10.77.77.1:554/Streaming/Channels/1601"
+        assert rows[0]["duration_s"] == "30.0"
+        assert rows[2]["review_status"] == "CONFIRMED"
+        assert rows[2]["review_source"] == "HUMAN"
+        assert rows[2]["review_note"] == "'=false-positive"
+        assert rows[2]["review_updated_at_utc"]
+        assert rows[2]["safety_area_id"] == "'=HYPERLINK(\"https://example.test\")"
+        assert rows[2]["related_session_uid"] == "'+SUM(A1)"
+        assert rows[2]["has_thumbnail"] == "True"
+        assert "camera_password" not in res.text
+        assert "token=secret" not in res.text
+
+        empty = client.get(
+            "/api/alerts/export.csv",
+            headers=_auth_headers(),
+            params={"date": "2026-06-30", "status": "ALL"},
+        )
+        assert empty.status_code == 200
+        assert list(csv.DictReader(empty.text.splitlines())) == []
+        assert empty.text.startswith("alert_uid,date,alert_type,")
 
 
 def test_alert_api_rejects_bad_paths_and_mismatched_uid(tmp_path: Path) -> None:

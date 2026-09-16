@@ -91,7 +91,10 @@
                 <h3>Tabel helmet alert</h3>
                 <p class="caption">Default menampilkan alert pending paling baru.</p>
               </div>
-              <a class="pill" id="alert-open-selected" href="helmet-alert-detail.html">Open Selected Alert</a>
+              <div class="queue-table-actions">
+                <a class="pill" id="alert-export-csv" href="/api/alerts/export.csv" download>Download CSV</a>
+                <a class="pill" id="alert-open-selected" href="helmet-alert-detail.html">Open Selected Alert</a>
+              </div>
             </div>
 
             <form class="filters queue-table-filters" aria-label="Alert table filters">
@@ -153,6 +156,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js?v=20260914-helmet-alert-ui"></script>
+    <script src="js/site.js?v=20260916-helmet-alert-export"></script>
   </body>
 </html>

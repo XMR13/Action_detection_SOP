@@ -729,6 +729,7 @@
   const alertPaginationIndicator = document.getElementById("alert-page-indicator");
   const alertPagePrevBtn = document.getElementById("alert-page-prev");
   const alertPageNextBtn = document.getElementById("alert-page-next");
+  const alertExportCsv = document.getElementById("alert-export-csv");
   const alertOpenSelected = document.getElementById("alert-open-selected");
 
   const readAlertPageSize = () => {
@@ -742,7 +743,7 @@
     alertPage = 1;
   };
 
-  const buildAlertDataUrl = (baseUrl) => {
+  const buildAlertDataUrl = (baseUrl, { includePagination } = { includePagination: true }) => {
     const statusSel = document.getElementById("alert-status");
     const sortSel = document.getElementById("alert-sort");
     const pageSizeSel = document.getElementById("alert-page-size");
@@ -750,12 +751,20 @@
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
     alertPageSize = pageSizeSel instanceof HTMLSelectElement ? readAlertPageSize() : alertPageSize;
     const params = new URLSearchParams();
-    params.set("page", String(alertPage));
-    params.set("page_size", String(alertPageSize));
+    if (includePagination) {
+      params.set("page", String(alertPage));
+      params.set("page_size", String(alertPageSize));
+    }
     params.set("status", status || "PENDING");
     params.set("sort", sort || "NEWEST");
     const query = params.toString();
     return withDateApiQuery(`${baseUrl}${query ? `?${query}` : ""}`);
+  };
+
+  const syncAlertExportHref = () => {
+    if (alertExportCsv instanceof HTMLAnchorElement) {
+      alertExportCsv.href = buildAlertDataUrl("/api/alerts/export.csv", { includePagination: false });
+    }
   };
 
   const syncAlertPaginationUi = ({ total, page, pageSize, totalPages, hasPrev, hasNext }) => {
@@ -1260,6 +1269,7 @@
     }
     const dateLabel = document.getElementById("alert-active-date-slice");
     if (dateLabel) dateLabel.textContent = dateSliceLabel();
+    syncAlertExportHref();
 
     let payload;
     try {
