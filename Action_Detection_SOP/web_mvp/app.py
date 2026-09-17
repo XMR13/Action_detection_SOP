@@ -1468,12 +1468,6 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
 
         #buf is used for geting it to stream the data
         buf = io.StringIO()
-        writer = csv.DictReader(buf, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            start_s = _float_or_zero()
-
-        buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
