@@ -1353,6 +1353,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 continue
             has_thumbnail = alert.paths.thumbnail_jpg.exists()
             sort_ts = _alert_sort_ts(alert)
+
+            #the output should be a list of dictionaries
             out.append(
                 {
                     "alert_uid": alert.alert_uid,

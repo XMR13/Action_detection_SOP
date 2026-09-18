@@ -93,6 +93,16 @@
     return String(data.status || fallback || "UNKNOWN").toUpperCase();
   };
 
+  const dashboardTrendStatus = (row) => {
+    const reviewStatus = String((row && row.review_status) || "").toUpperCase();
+    if (reviewStatus === "PENDING") return "NEEDS_REVIEW";
+
+    const finalStatus = sopStatusValue(row, "final");
+    if (finalStatus === "DONE") return "DONE";
+    if (finalStatus === "NOT_DONE") return "NOT_DONE";
+    return "NEEDS_REVIEW";
+  };
+
   const rollOverallDisplay = (raw) => {
     const v = String(raw || "UNKNOWN").toUpperCase();
     if (v === "SESUAI SOP") return "Sesuai SOP";
@@ -1118,7 +1128,6 @@
       const pending = stats && stats.pending != null ? Number(stats.pending) : null;
       const approved = stats && stats.approved != null ? Number(stats.approved) : null;
       const rejected = stats && stats.rejected != null ? Number(stats.rejected) : null;
-      const unknown = stats && stats.unknown != null ? Number(stats.unknown) : null;
 
       const queueLengthHint = document.getElementById("queue-length-hint");
       if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
@@ -1139,10 +1148,6 @@
       const rejectedNode = document.getElementById("queue-stat-rejected");
       if (rejectedNode && rejected != null && !Number.isNaN(rejected)) {
         rejectedNode.textContent = String(rejected);
-      }
-      const unknownNode = document.getElementById("queue-stat-unknown");
-      if (unknownNode && unknown != null && !Number.isNaN(unknown)) {
-        unknownNode.textContent = String(unknown);
       }
     } catch (err) {
       // ignore stats failures; queue list still loads
@@ -2310,16 +2315,6 @@
         helmetCheckedHint.textContent = `${pct.toFixed(1)}% DONE across reviewed sessions`;
       }
 
-      const unknownRateNode = document.getElementById("kpi-unknown-rate");
-      if (unknownRateNode) {
-        const pct = Number(s.final_sop_unknown_pct ?? 0);
-        unknownRateNode.textContent = `${pct.toFixed(1)}%`;
-      }
-      const unknownRateHint = document.getElementById("kpi-unknown-rate-hint");
-      if (unknownRateHint) {
-        unknownRateHint.textContent = `${String(s.final_sop_unknown ?? 0)} UNKNOWN from final SOP status`;
-      }
-
       const manualReviewNode = document.getElementById("kpi-manual-review");
       if (manualReviewNode) manualReviewNode.textContent = String(s.human_reviewed ?? s.reviewed ?? "-");
       const manualReviewHint = document.getElementById("kpi-manual-review-hint");
@@ -2327,26 +2322,12 @@
         manualReviewHint.textContent = `${String(s.manual_overrides ?? 0)} manual overrides`;
       }
 
-      const compactManualNeeded = document.getElementById("dashboard-compact-manual-needed");
-      if (compactManualNeeded) compactManualNeeded.textContent = String(s.final_sop_unknown ?? "-");
       const compactApproved = document.getElementById("dashboard-compact-approved");
       if (compactApproved) compactApproved.textContent = String(s.approved ?? "-");
-      const compactMachineNo = document.getElementById("dashboard-compact-machine-no");
-      if (compactMachineNo) compactMachineNo.textContent = String(s.machine_sop_not_done ?? "-");
+      const compactRejected = document.getElementById("dashboard-compact-rejected");
+      if (compactRejected) compactRejected.textContent = String(s.rejected ?? "-");
       const compactPending = document.getElementById("dashboard-compact-pending");
       if (compactPending) compactPending.textContent = String(s.pending ?? "-");
-
-      const trendDone = document.getElementById("trend-strip-done");
-      if (trendDone) {
-        trendDone.textContent = `DONE ${String(s.machine_sop_done ?? 0)}`;
-      }
-      const trendUnknown = document.getElementById("trend-strip-unknown");
-      if (trendUnknown) {
-        const unknownPct = Number(s.final_sop_unknown_pct ?? 0);
-        trendUnknown.textContent = `UNKNOWN ${String(s.machine_sop_unknown ?? 0)} (${unknownPct.toFixed(1)}%)`;
-      }
-      const trendNotDone = document.getElementById("trend-strip-not-done");
-      if (trendNotDone) trendNotDone.textContent = `NOT DONE ${String(s.machine_sop_not_done ?? 0)}`;
 
       const renderDashboardTrend = async () => {
         const svg = document.querySelector(".trend-svg");
@@ -2450,7 +2431,7 @@
             if (Number.isNaN(dt.getTime())) return;
             const idx = dt.getHours();
             if (idx < 0 || idx >= 24) return;
-            const status = sopStatusValue(row, "machine");
+            const status = dashboardTrendStatus(row);
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else unknown[idx] += 1;
@@ -2491,7 +2472,7 @@
             const d = row && row.date ? String(row.date) : "";
             const idx = idxByDate.get(d);
             if (idx == null) return;
-            const status = sopStatusValue(row, "machine");
+            const status = dashboardTrendStatus(row);
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else unknown[idx] += 1;
@@ -2564,7 +2545,7 @@
         const trendDone = document.getElementById("trend-strip-done");
         if (trendDone) trendDone.textContent = `peak DONE ${Math.max(0, donePeak.val)} @ ${labels[donePeak.idx] || "-"}`;
         const trendUnknown = document.getElementById("trend-strip-unknown");
-        if (trendUnknown) trendUnknown.textContent = `peak UNKNOWN ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
+        if (trendUnknown) trendUnknown.textContent = `peak NEEDS REVIEW ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
         const trendNotDone = document.getElementById("trend-strip-not-done");
         if (trendNotDone) trendNotDone.textContent = `peak NOT DONE ${Math.max(0, notDonePeak.val)} @ ${labels[notDonePeak.idx] || "-"}`;
 

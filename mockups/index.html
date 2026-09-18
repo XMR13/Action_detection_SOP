@@ -165,16 +165,6 @@
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-	                <span class="kpi-label">Final SOP <br> UNKNOWN</span>
-                <span class="kpi-accent dir-b">U</span>
-              </div>
-              <div class="kpi-value" id="kpi-unknown-rate">--</div>
-              <div class="kpi-hint" id="kpi-unknown-rate-hint">Memuat statistik…</div>
-            </div>
-          </article>
-          <article class="card">
-            <div class="pad">
-              <div class="kpi-top">
                 <span class="kpi-label">Pengecekan manual</span>
                 <span class="kpi-accent no">M</span>
               </div>
@@ -189,17 +179,17 @@
             <div class="pad">
               <div class="btn-row">
                 <span class="pill dir-a">DONE</span>
-                <span class="pill dir-b">UNKNOWN</span>
+                <span class="pill dir-b">Needs review</span>
                 <span class="pill no">NOT DONE</span>
               </div>
               <div class="trend-context">
                 <p class="trend-meaning">
-                  <b>Trend line Auto Check SOP sesuai</b> range date yang dipilih
+                  <b>Hasil SOP final</b> pada rentang tanggal yang dipilih
                 </p>
                 <p class="caption" id="trend-active-slice">Date: all</p>
                 <div class="trend-meta-pills">
                   <span class="trend-key"><span class="trend-key-line dir-a"></span>DONE</span>
-                  <span class="trend-key"><span class="trend-key-line dir-b"></span>UNKNOWN</span>
+                  <span class="trend-key"><span class="trend-key-line dir-b"></span>Needs review</span>
                   <span class="trend-key"><span class="trend-key-line no"></span>NOT DONE</span>
                 </div>
               </div>
@@ -227,7 +217,7 @@
               </div>
               <div class="trend-value-strip">
                 <span class="pill" id="trend-strip-done">selesai --</span>
-                <span class="pill" id="trend-strip-unknown">tidak diketahui --</span>
+                <span class="pill" id="trend-strip-unknown">needs review --</span>
                 <span class="pill no" id="trend-strip-not-done">tidak selesai --</span>
               </div>
             </div>
@@ -240,17 +230,13 @@
               
             </p>
             <div class="queue-status-grid compact-grid">
-              <div class="queue-status-card">
-                <div class="label">Perlu review manual</div>
-                <div class="value" id="dashboard-compact-manual-needed">--</div>
-              </div>
               <div class="queue-status-card yes">
                 <div class="label">Diterima</div>
                 <div class="value" id="dashboard-compact-approved">--</div>
               </div>
               <div class="queue-status-card no">
-                <div class="label">Machine NO</div>
-                <div class="value" id="dashboard-compact-machine-no">--</div>
+                <div class="label">Ditolak</div>
+                <div class="value" id="dashboard-compact-rejected">--</div>
               </div>
               <div class="queue-status-card">
                 <div class="label">Menunggu review</div>

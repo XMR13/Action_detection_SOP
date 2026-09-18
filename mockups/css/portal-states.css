@@ -2,15 +2,12 @@
 .page-dashboard #kpi-total-sessions,
 .page-dashboard #kpi-pending,
 .page-dashboard #kpi-helmet-checked,
-.page-dashboard #kpi-unknown-rate,
 .page-dashboard #kpi-manual-review,
-.page-dashboard #dashboard-compact-manual-needed,
 .page-dashboard #dashboard-compact-approved,
-.page-dashboard #dashboard-compact-machine-no,
+.page-dashboard #dashboard-compact-rejected,
 .page-dashboard #dashboard-compact-pending,
 .page-dashboard #trend-strip-done,
 .page-dashboard #trend-strip-unknown,
-.page-dashboard #trend-strip-review,
 .page-dashboard #banner-pending-pill {
   transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -18,15 +15,12 @@
 .page-dashboard.is-hydrating #kpi-total-sessions,
 .page-dashboard.is-hydrating #kpi-pending,
 .page-dashboard.is-hydrating #kpi-helmet-checked,
-.page-dashboard.is-hydrating #kpi-unknown-rate,
 .page-dashboard.is-hydrating #kpi-manual-review,
-.page-dashboard.is-hydrating #dashboard-compact-manual-needed,
 .page-dashboard.is-hydrating #dashboard-compact-approved,
-.page-dashboard.is-hydrating #dashboard-compact-machine-no,
+.page-dashboard.is-hydrating #dashboard-compact-rejected,
 .page-dashboard.is-hydrating #dashboard-compact-pending,
 .page-dashboard.is-hydrating #trend-strip-done,
 .page-dashboard.is-hydrating #trend-strip-unknown,
-.page-dashboard.is-hydrating #trend-strip-review,
 .page-dashboard.is-hydrating #banner-pending-pill {
   opacity: 0.45;
   transform: translateY(1px);
@@ -38,7 +32,6 @@
 .page-review-queue #queue-stat-pending,
 .page-review-queue #queue-stat-approved,
 .page-review-queue #queue-stat-rejected,
-.page-review-queue #queue-stat-unknown,
 .page-review-queue #selected-session-label,
 .page-review-queue #selected-session-uid,
 .page-review-queue #selected-session-date,
@@ -54,7 +47,6 @@
 .page-review-queue.is-hydrating #queue-stat-pending,
 .page-review-queue.is-hydrating #queue-stat-approved,
 .page-review-queue.is-hydrating #queue-stat-rejected,
-.page-review-queue.is-hydrating #queue-stat-unknown,
 .page-review-queue.is-hydrating #selected-session-label,
 .page-review-queue.is-hydrating #selected-session-uid,
 .page-review-queue.is-hydrating #selected-session-date,
