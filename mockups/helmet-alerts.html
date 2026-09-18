@@ -101,8 +101,8 @@
               <div class="field">
                 <label for="alert-status">Status</label>
                 <select id="alert-status" name="alert-status">
-                  <option value="PENDING" selected>Pending</option>
-                  <option value="ALL">Semua status</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="ALL" selected>Semua status</option>
                   <option value="CONFIRMED">Confirmed</option>
                   <option value="DISMISSED">Dismissed</option>
                 </select>
@@ -130,6 +130,7 @@
                     <th scope="col">Alert</th>
                     <th scope="col">Date</th>
                     <th scope="col">Time</th>
+                    <th scope="col">Reviewed <br>Time</th>
                     <th scope="col">Camera</th>
                     <th scope="col">People</th>
                     <th scope="col">Status</th>
@@ -139,7 +140,7 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td colspan="8"><span class="pill pending">Loading alerts...</span></td>
+                    <td colspan="9"><span class="pill pending">Loading alerts...</span></td>
                   </tr>
                 </tbody>
               </table>
@@ -156,6 +157,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js?v=20260916-helmet-alert-export"></script>
+    <script src="js/site.js?v=20260918-helmet-alert-reviewed-time"></script>
   </body>
 </html>

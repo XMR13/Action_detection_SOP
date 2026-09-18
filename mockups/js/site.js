@@ -1281,7 +1281,7 @@
       payload = await apiFetchJson(buildAlertDataUrl("/api/alerts"));
     } catch (err) {
       syncAlertPaginationUi({ total: 0, page: 1, pageSize: alertPageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="8"><span class="pill no">Failed to load alerts</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill no">Failed to load alerts</span></td></tr>`;
       if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
         alertBody.classList.remove("is-hydrating");
       }
@@ -1307,7 +1307,7 @@
     if (lengthHint) lengthHint.textContent = `Alerts: ${Number(payload.total || alerts.length)}`;
 
     if (alerts.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><span class="pill">No alerts found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill">No alerts found</span></td></tr>`;
       if (alertBody && alertBody.classList.contains("page-helmet-alerts")) {
         alertBody.classList.remove("is-hydrating");
       }
@@ -1322,6 +1322,9 @@
         const camera = displayCamera(alert);
         const date = String(alert.date || "-");
         const time = formatHmsFromIso(alert.start_time_iso) || "-";
+        const reviewedTime = ["CONFIRMED", "DISMISSED"].includes(status.toUpperCase()) && alert.review_updated_at_utc
+          ? formatDateTimeFromIso(alert.review_updated_at_utc)
+          : "-";
         const count = Number(alert.person_count || 0);
         const thumbUrl = alert.thumbnail_url ? String(alert.thumbnail_url) : "";
         const active = index === 0 ? " queue-row-active" : "";
@@ -1334,6 +1337,7 @@
             <td><a class="queue-session-link alert-name${linkActive}" href="#${encodeURIComponent(uid)}" aria-label="Open ${escapeHtml(alertName)} alert" data-alert-link>${escapeHtml(alertName)}</a></td>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(time)}</td>
+            <td>${escapeHtml(reviewedTime)}</td>
             <td><span class="alert-camera" title="${escapeHtml(camera)}">${escapeHtml(camera)}</span></td>
             <td><span class="pill ink">${Number.isFinite(count) ? count : 0}</span></td>
             <td><span class="pill ${pillClassForAlertStatus(status)}">${displayAlertStatus(status)}</span></td>

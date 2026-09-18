@@ -483,7 +483,9 @@ def test_alert_api_upsert_list_detail_review_and_artifact(tmp_path: Path) -> Non
 
         confirmed_rows = client.get("/api/alerts", headers=_auth_headers(), params={"status": "CONFIRMED"})
         assert confirmed_rows.status_code == 200
-        assert confirmed_rows.json()["total"] == 1
+        confirmed_payload = confirmed_rows.json()
+        assert confirmed_payload["total"] == 1
+        assert confirmed_payload["alerts"][0]["review_updated_at_utc"]
 
         media = client.get("/alert-media/alert_api_001/thumbnail.jpg", headers=_auth_headers())
         assert media.status_code == 200
