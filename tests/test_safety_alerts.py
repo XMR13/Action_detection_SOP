@@ -5,10 +5,15 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from Action_Detection_SOP.roi import RoiPolygon
 from Action_Detection_SOP.safety_alerts import (
     DEFAULT_HELMET_ALERT_CONFIDENCE,
+    HELMET_DIAGNOSTICS_SCHEMA_VERSION,
+    HelmetDiagnosticAssociation,
+    HelmetDiagnosticEvent,
+    HelmetDiagnosticObservation,
     HelmetAlertConfig,
     HelmetAlertEngine,
     write_helmet_alert_artifacts,
@@ -44,6 +49,60 @@ def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int
         source="camera-1",
         camera_id="cam_1",
     )
+
+
+def test_helmet_diagnostic_contract_is_versioned_and_stable() -> None:
+    association = HelmetDiagnosticAssociation(
+        helmet_box=(80.0, 30.0, 120.0, 60.0),
+        helmet_score=0.33333,
+        center_inside_person=True,
+        center_inside_head=True,
+        center_distance_to_person_px=0.5,
+    )
+    observation = HelmetDiagnosticObservation(
+        diagnostic_track_id=1,
+        frame_idx=7,
+        time_s=1.23456,
+        person_box=(50.0, 20.0, 150.0, 220.0),
+        person_height_px=200.0,
+        normalized_position=(0.25, 0.3),
+        at_frame_edge=True,
+        head_visible=True,
+        helmet_score_history=(0.33333,),
+        helmet_hit_count=1,
+        helmet_observation_count=1,
+        helmet_hit_rate=1.0,
+        best_helmet_score=0.33333,
+        associations=(association,),
+    )
+    event = HelmetDiagnosticEvent(
+        event="alert_emitted",
+        reason="sustained_no_helmet",
+        frame_idx=7,
+        time_s=1.23456,
+        episode_start_frame_idx=1,
+        episode_start_time_s=0.0,
+        observations=(observation,),
+        source="rtsp://user:password@example.test/stream",
+        camera_id="camera-1",
+    )
+
+    payload = event.as_payload()
+    assert payload["schema_version"] == HELMET_DIAGNOSTICS_SCHEMA_VERSION
+    assert payload["time_s"] == 1.235
+    assert payload["observations"][0]["associations"][0]["helmet_score"] == 0.333
+    assert payload["source"] == "rtsp://example.test/stream"
+    assert json.dumps(payload, sort_keys=True) == json.dumps(event.as_payload(), sort_keys=True)
+
+    with pytest.raises(ValueError, match="reason must not be empty"):
+        HelmetDiagnosticEvent(
+            event="alert_emitted",
+            reason="",
+            frame_idx=7,
+            time_s=1.0,
+            episode_start_frame_idx=1,
+            episode_start_time_s=0.0,
+        )
 
 
 def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:

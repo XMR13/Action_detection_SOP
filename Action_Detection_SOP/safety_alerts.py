@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,12 +22,406 @@ ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
 DEFAULT_HELMET_REQUIRED_SECONDS = 10
 DEFAULT_HELMET_ALERT_CONFIDENCE = 0.15
+HELMET_DIAGNOSTICS_SCHEMA_VERSION = 1
+HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY = 32
+HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS = 8
+HELMET_DIAGNOSTIC_MAX_OBSERVATIONS = 128
 
 """
 ---------------------------
 DATA SCHEMA
 ---------------------------
 """
+
+
+def _diagnostic_float(
+    value: float,
+    field_name: str,
+    *,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+) -> float:
+    if isinstance(value, bool):
+        raise TypeError(f"{field_name} must be a number, not bool")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{field_name} must be a number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field_name} must be finite")
+    if minimum is not None and number < minimum:
+        raise ValueError(f"{field_name} must be >= {minimum}")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{field_name} must be <= {maximum}")
+    return number
+
+
+def _diagnostic_int(value: int, field_name: str, *, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be an integer")
+    if value < minimum:
+        raise ValueError(f"{field_name} must be >= {minimum}")
+    return int(value)
+
+
+def _diagnostic_bool(value: bool, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"{field_name} must be a bool")
+    return value
+
+
+def _diagnostic_box(value: Sequence[float], field_name: str) -> Tuple[float, float, float, float]:
+    try:
+        values = tuple(value)
+    except TypeError as exc:
+        raise TypeError(f"{field_name} must contain four numbers") from exc
+    if len(values) != 4:
+        raise ValueError(f"{field_name} must contain exactly four values")
+    box = tuple(_diagnostic_float(item, f"{field_name}[{idx}]") for idx, item in enumerate(values))
+    if box[2] < box[0] or box[3] < box[1]:
+        raise ValueError(f"{field_name} must have x2 >= x1 and y2 >= y1")
+    return box  # type: ignore[return-value]
+
+
+def _diagnostic_point(value: Sequence[float], field_name: str) -> Tuple[float, float]:
+    try:
+        values = tuple(value)
+    except TypeError as exc:
+        raise TypeError(f"{field_name} must contain two numbers") from exc
+    if len(values) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values")
+    point = tuple(
+        _diagnostic_float(item, f"{field_name}[{idx}]", minimum=0.0, maximum=1.0)
+        for idx, item in enumerate(values)
+    )
+    return point  # type: ignore[return-value]
+
+
+def _diagnostic_text(value: str, field_name: str, *, max_length: int = 128) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{field_name} must not be empty")
+    if len(text) > max_length:
+        raise ValueError(f"{field_name} must be <= {max_length} characters")
+    if "\n" in text or "\r" in text:
+        raise ValueError(f"{field_name} must not contain newlines")
+    return text
+
+
+def _diagnostic_optional_source(value: Optional[str], field_name: str) -> Optional[str]:
+    if value is None:
+        return None
+    text = _diagnostic_text(value, field_name)
+    return redact_source_credentials(text)
+
+
+def _diagnostic_round(value: float) -> float:
+    return round(float(value), 3)
+
+
+@dataclass(frozen=True)
+class HelmetDiagnosticAssociation:
+    """
+    Immutable geometry/evidence for one observed helmet candidate.
+    """
+
+    helmet_box: Tuple[float, float, float, float]
+    helmet_score: float
+    center_inside_person: bool
+    center_inside_head: bool
+    center_distance_to_person_px: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "helmet_box", _diagnostic_box(self.helmet_box, "helmet_box"))
+        object.__setattr__(
+            self,
+            "helmet_score",
+            _diagnostic_float(self.helmet_score, "helmet_score", minimum=0.0, maximum=1.0),
+        )
+        object.__setattr__(
+            self,
+            "center_inside_person",
+            _diagnostic_bool(self.center_inside_person, "center_inside_person"),
+        )
+        object.__setattr__(
+            self,
+            "center_inside_head",
+            _diagnostic_bool(self.center_inside_head, "center_inside_head"),
+        )
+        if self.center_distance_to_person_px is not None:
+            object.__setattr__(
+                self,
+                "center_distance_to_person_px",
+                _diagnostic_float(
+                    self.center_distance_to_person_px,
+                    "center_distance_to_person_px",
+                    minimum=0.0,
+                ),
+            )
+
+    def as_payload(self) -> Dict[str, Any]:
+        x1, y1, x2, y2 = self.helmet_box
+        return {
+            "helmet_box": [_diagnostic_round(value) for value in self.helmet_box],
+            "helmet_center": [_diagnostic_round((x1 + x2) * 0.5), _diagnostic_round((y1 + y2) * 0.5)],
+            "helmet_score": _diagnostic_round(self.helmet_score),
+            "center_inside_person": self.center_inside_person,
+            "center_inside_head": self.center_inside_head,
+            "center_distance_to_person_px": (
+                None
+                if self.center_distance_to_person_px is None
+                else _diagnostic_round(self.center_distance_to_person_px)
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class HelmetDiagnosticObservation:
+    """
+    Immutable, bounded per-frame observation for a diagnostic-only track.
+    """
+
+    diagnostic_track_id: int
+    frame_idx : int
+    time_s : float
+    person_box: Tuple[float, float, float, float]
+    person_height_px: float
+    normalized_position: Tuple[float, float]
+    at_frame_edge: bool
+    head_visible: bool
+    helmet_score_history: Tuple[float, ...] = ()
+    helmet_hit_count:int = 0
+    helmet_observation_count: int = 0
+    helmet_hit_rate: Optional[float] = 0
+    best_helmet_score: Optional[float] = None
+    associations: Tuple[HelmetDiagnosticAssociation, ...] = ()
+    track_history_length: int = 1
+    track_history_limit: int = HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY
+    track_history_truncated: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "diagnostic_track_id",
+            _diagnostic_int(self.diagnostic_track_id, "diagnostic_track_id", minimum=1),
+        )
+        object.__setattr__(self, "frame_idx", _diagnostic_int(self.frame_idx, "frame_idx"))
+        object.__setattr__(
+            self,
+            "time_s",
+            _diagnostic_float(self.time_s, "time_s", minimum=0.0),
+        )
+        object.__setattr__(self, "person_box", _diagnostic_box(self.person_box, "person_box"))
+        object.__setattr__(
+            self,
+            "person_height_px",
+            _diagnostic_float(self.person_height_px, "person_height_px", minimum=0.0),
+        )
+        object.__setattr__(
+            self,
+            "normalized_position",
+            _diagnostic_point(self.normalized_position, "normalized_position"),
+        )
+        object.__setattr__(self, "at_frame_edge", _diagnostic_bool(self.at_frame_edge, "at_frame_edge"))
+        object.__setattr__(self, "head_visible", _diagnostic_bool(self.head_visible, "head_visible"))
+
+        score_history = tuple(
+            _diagnostic_float(score, f"helmet_score_history[{idx}]", minimum=0.0, maximum=1.0)
+            for idx, score in enumerate(tuple(self.helmet_score_history))
+        )
+        if len(score_history) > HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY:
+            raise ValueError(
+                "helmet_score_history exceeds "
+                f"{HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY} retained values"
+            )
+        object.__setattr__(self, "helmet_score_history", score_history)
+
+        hit_count = _diagnostic_int(self.helmet_hit_count, "helmet_hit_count")
+        observation_count = _diagnostic_int(self.helmet_observation_count, "helmet_observation_count")
+        if hit_count > observation_count:
+            raise ValueError("helmet_hit_count must be <= helmet_observation_count")
+        if len(score_history) > observation_count:
+            raise ValueError("helmet_score_history cannot exceed helmet_observation_count")
+        object.__setattr__(self, "helmet_hit_count", hit_count)
+        object.__setattr__(self, "helmet_observation_count", observation_count)
+        if self.helmet_hit_rate is not None:
+            hit_rate = _diagnostic_float(
+                self.helmet_hit_rate,
+                "helmet_hit_rate",
+                minimum=0.0,
+                maximum=1.0,
+            )
+            if observation_count == 0 and hit_rate != 0.0:
+                raise ValueError("helmet_hit_rate must be 0 when helmet_observation_count is 0")
+            object.__setattr__(self, "helmet_hit_rate", hit_rate)
+        if self.best_helmet_score is not None:
+            object.__setattr__(
+                self,
+                "best_helmet_score",
+                _diagnostic_float(
+                    self.best_helmet_score,
+                    "best_helmet_score",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            )
+
+        associations = tuple(self.associations)
+        if len(associations) > HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS:
+            raise ValueError(
+                "associations exceeds "
+                f"{HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS} retained values"
+            )
+        if not all(isinstance(item, HelmetDiagnosticAssociation) for item in associations):
+            raise TypeError("associations must contain HelmetDiagnosticAssociation values")
+        associations = tuple(
+            sorted(
+                associations,
+                key=lambda item: (
+                    item.helmet_box,
+                    item.helmet_score,
+                    item.center_inside_person,
+                    item.center_inside_head,
+                    item.center_distance_to_person_px
+                    if item.center_distance_to_person_px is not None
+                    else -1.0,
+                ),
+            )
+        )
+        object.__setattr__(self, "associations", associations)
+
+        object.__setattr__(
+            self,
+            "track_history_length",
+            _diagnostic_int(self.track_history_length, "track_history_length", minimum=1),
+        )
+        object.__setattr__(
+            self,
+            "track_history_limit",
+            _diagnostic_int(self.track_history_limit, "track_history_limit", minimum=1),
+        )
+        object.__setattr__(
+            self,
+            "track_history_truncated",
+            _diagnostic_bool(self.track_history_truncated, "track_history_truncated"),
+        )
+
+    def as_payload(self) -> Dict[str, Any]:
+        return {
+            "schema_version": HELMET_DIAGNOSTICS_SCHEMA_VERSION,
+            "diagnostic_track_id": self.diagnostic_track_id,
+            "frame_idx": self.frame_idx,
+            "time_s": _diagnostic_round(self.time_s),
+            "person_box": [_diagnostic_round(value) for value in self.person_box],
+            "person_height_px": _diagnostic_round(self.person_height_px),
+            "normalized_position": [_diagnostic_round(value) for value in self.normalized_position],
+            "at_frame_edge": self.at_frame_edge,
+            "head_visible": self.head_visible,
+            "helmet_score_history": [_diagnostic_round(value) for value in self.helmet_score_history],
+            "helmet_hit_count": self.helmet_hit_count,
+            "helmet_observation_count": self.helmet_observation_count,
+            "helmet_hit_rate": (
+                None if self.helmet_hit_rate is None else _diagnostic_round(self.helmet_hit_rate)
+            ),
+            "best_helmet_score": (
+                None if self.best_helmet_score is None else _diagnostic_round(self.best_helmet_score)
+            ),
+            "associations": [item.as_payload() for item in self.associations],
+            "history": {
+                "length": self.track_history_length,
+                "limit": self.track_history_limit,
+                "truncated": self.track_history_truncated,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class HelmetDiagnosticEvent:
+    """
+    Immutable bounded episode/event summary for future diagnostic logging.
+    """
+
+    event: str
+    reason: str
+    frame_idx: int
+    time_s: float
+    episode_start_frame_idx: int
+    episode_start_time_s: float
+    source: Optional[str] = None
+    camera_id: Optional[str] = None
+    alert_uid: Optional[str] = None
+    observations: Tuple[HelmetDiagnosticObservation, ...] = ()
+    observation_limit: int = HELMET_DIAGNOSTIC_MAX_OBSERVATIONS
+    observations_truncated: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "event", _diagnostic_text(self.event, "event", max_length=64))
+        object.__setattr__(self, "reason", _diagnostic_text(self.reason, "reason", max_length=128))
+        object.__setattr__(self, "frame_idx", _diagnostic_int(self.frame_idx, "frame_idx"))
+        object.__setattr__(
+            self,
+            "time_s",
+            _diagnostic_float(self.time_s, "time_s", minimum=0.0),
+        )
+        object.__setattr__(
+            self,
+            "episode_start_frame_idx",
+            _diagnostic_int(self.episode_start_frame_idx, "episode_start_frame_idx"),
+        )
+        object.__setattr__(
+            self,
+            "episode_start_time_s",
+            _diagnostic_float(self.episode_start_time_s, "episode_start_time_s", minimum=0.0),
+        )
+        object.__setattr__(self, "source", _diagnostic_optional_source(self.source, "source"))
+        object.__setattr__(self, "camera_id", _diagnostic_optional_source(self.camera_id, "camera_id"))
+        if self.alert_uid is not None:
+            object.__setattr__(self, "alert_uid", _diagnostic_text(self.alert_uid, "alert_uid"))
+
+        observations = tuple(self.observations)
+        if len(observations) > HELMET_DIAGNOSTIC_MAX_OBSERVATIONS:
+            raise ValueError(
+                "observations exceeds "
+                f"{HELMET_DIAGNOSTIC_MAX_OBSERVATIONS} retained values"
+            )
+        if not all(isinstance(item, HelmetDiagnosticObservation) for item in observations):
+            raise TypeError("observations must contain HelmetDiagnosticObservation values")
+        observations = tuple(sorted(observations, key=lambda item: (item.frame_idx, item.time_s, item.diagnostic_track_id)))
+        object.__setattr__(self, "observations", observations)
+        object.__setattr__(
+            self,
+            "observation_limit",
+            _diagnostic_int(self.observation_limit, "observation_limit", minimum=1),
+        )
+        if len(observations) > self.observation_limit:
+            raise ValueError("observations cannot exceed observation_limit")
+        object.__setattr__(
+            self,
+            "observations_truncated",
+            _diagnostic_bool(self.observations_truncated, "observations_truncated"),
+        )
+
+    def as_payload(self) -> Dict[str, Any]:
+        return {
+            "schema_version": HELMET_DIAGNOSTICS_SCHEMA_VERSION,
+            "event": self.event,
+            "reason": self.reason,
+            "frame_idx": self.frame_idx,
+            "time_s": _diagnostic_round(self.time_s),
+            "episode_start_frame_idx": self.episode_start_frame_idx,
+            "episode_start_time_s": _diagnostic_round(self.episode_start_time_s),
+            "source": self.source,
+            "camera_id": self.camera_id,
+            "alert_uid": self.alert_uid,
+            "observations": [item.as_payload() for item in self.observations],
+            "history": {
+                "retained_observation_count": len(self.observations),
+                "observation_limit": self.observation_limit,
+                "truncated": self.observations_truncated,
+            },
+        }
 
 @dataclass(frozen=True)
 class HelmetAlertConfig:
@@ -101,6 +496,7 @@ class HelmetAlertCandidate:
             "height_px" : round(float(self.height_px), 3),
             "score" : round(float(self.score), 3)
         }
+
 
 @dataclass(frozen=True)
 class HelmetAlert:
