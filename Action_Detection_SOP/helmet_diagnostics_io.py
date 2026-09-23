@@ -19,11 +19,15 @@ _FLUSH_EVERY_FRAMES = 25
 
 
 class HelmetDiagnosticStorageLimit(RuntimeError):
-    """Raised when the diagnostics store has reached its configured byte cap."""
+    """
+    Raised when the diagnostics store has reached its configured byte cap.
+    """
 
 
 class HelmetDiagnosticJsonlWriter:
-    """Write bounded, local-only helmet diagnostics as newline-delimited JSON."""
+    """
+    Write bounded, local-only helmet diagnostics as newline-delimited JSON.
+    """
 
     def __init__(
         self,
@@ -243,3 +247,9 @@ class HelmetDiagnosticJsonlWriter:
             pass
         self._stream = None
         return False
+
+    def __enter__(self) -> "HelmetDiagnosticJsonlWriter":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
