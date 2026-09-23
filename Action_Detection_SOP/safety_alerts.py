@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -26,6 +26,10 @@ HELMET_DIAGNOSTICS_SCHEMA_VERSION = 1
 HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY = 32
 HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS = 8
 HELMET_DIAGNOSTIC_MAX_OBSERVATIONS = 128
+HELMET_DIAGNOSTIC_IOU_THRESHOLD = 0.25
+HELMET_DIAGNOSTIC_MAX_MISSED_FRAMES = 2
+HELMET_DIAGNOSTIC_MAX_TRACKS = 32
+HELMET_DIAGNOSTIC_MAX_PENDING_OBSERVATIONS = 256
 
 """
 ---------------------------
@@ -184,17 +188,17 @@ class HelmetDiagnosticObservation:
     """
 
     diagnostic_track_id: int
-    frame_idx : int
-    time_s : float
+    frame_idx: int
+    time_s: float
     person_box: Tuple[float, float, float, float]
     person_height_px: float
     normalized_position: Tuple[float, float]
     at_frame_edge: bool
     head_visible: bool
     helmet_score_history: Tuple[float, ...] = ()
-    helmet_hit_count:int = 0
+    helmet_hit_count: int = 0
     helmet_observation_count: int = 0
-    helmet_hit_rate: Optional[float] = 0
+    helmet_hit_rate: Optional[float] = 0.0
     best_helmet_score: Optional[float] = None
     associations: Tuple[HelmetDiagnosticAssociation, ...] = ()
     track_history_length: int = 1
@@ -295,7 +299,7 @@ class HelmetDiagnosticObservation:
         object.__setattr__(
             self,
             "track_history_length",
-            _diagnostic_int(self.track_history_length, "track_history_length", minimum=1),
+            _diagnostic_int(self.track_history_length, "track_history_length", minimum=0),
         )
         object.__setattr__(
             self,
@@ -423,6 +427,209 @@ class HelmetDiagnosticEvent:
             },
         }
 
+
+@dataclass
+class _HelmetDiagnosticTrack:
+    """Mutable state carried between frames for one temporary person track."""
+
+    track_id: int
+    bbox: Detection
+    missed_frames: int = 0
+    observation_count: int = 0
+    hit_count: int = 0
+    best_helmet_score: Optional[float] = None
+    score_history: List[float] = field(default_factory=list)
+    history_truncated: bool = False
+
+
+class HelmetDiagnosticTracker:
+    """
+    Deterministic, bounded person tracking used only for diagnostics.
+    """
+
+    def __init__(
+        self,
+        *,
+        iou_threshold: float = HELMET_DIAGNOSTIC_IOU_THRESHOLD,
+        max_missed_frames: int = HELMET_DIAGNOSTIC_MAX_MISSED_FRAMES,
+        max_tracks: int = HELMET_DIAGNOSTIC_MAX_TRACKS,
+        score_history_limit: int = HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY,
+    ) -> None:
+        self.iou_threshold = _diagnostic_float(
+            iou_threshold,
+            "diagnostic iou_threshold",
+            minimum=0.05,
+            maximum=0.95,
+        )
+        self.max_missed_frames = _diagnostic_int(
+            max_missed_frames,
+            "diagnostic max_missed_frames",
+        )
+        self.max_tracks = _diagnostic_int(max_tracks, "diagnostic max_tracks", minimum=1)
+        self.score_history_limit = _diagnostic_int(
+            score_history_limit,
+            "diagnostic score_history_limit",
+            minimum=1,
+        )
+        if self.score_history_limit > HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY:
+            raise ValueError(
+                "diagnostic score_history_limit must be <= "
+                f"{HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY}"
+            )
+        self._tracks: List[_HelmetDiagnosticTrack] = []
+        self._next_track_id = 1
+
+    @property
+    def active_track_count(self) -> int:
+        return len(self._tracks)
+
+    def reset(self) -> None:
+        """Reset temporary IDs and state at a source/engine boundary."""
+        self._tracks.clear()
+        self._next_track_id = 1
+
+    def update(
+        self,
+        *,
+        persons: Sequence[Detection],
+        helmets: Sequence[Detection],
+        frame_idx: int,
+        time_s: float,
+        frame_size: Tuple[int, int],
+        head_top_fraction: float,
+        verification_confidence: float,
+    ) -> Tuple[HelmetDiagnosticObservation, ...]:
+        """Match current people to temporary tracks and return observations.
+
+        This method only consumes detections and produces diagnostics. It does
+        not make or change any helmet-alert decision.
+        """
+
+        frame_idx = _diagnostic_int(frame_idx, "diagnostic frame_idx")
+        time_s = _diagnostic_float(time_s, "diagnostic time_s", minimum=0.0)
+        frame_width, frame_height = frame_size
+        if isinstance(frame_width, bool) or isinstance(frame_height, bool):
+            raise TypeError("diagnostic frame_size must contain integers")
+        if frame_width <= 0 or frame_height <= 0:
+            raise ValueError("diagnostic frame_size must be positive")
+        head_top_fraction = _diagnostic_float(
+            head_top_fraction,
+            "diagnostic head_top_fraction",
+            minimum=0.05,
+            maximum=0.8,
+        )
+        verification_confidence = _diagnostic_float(
+            verification_confidence,
+            "diagnostic verification_confidence",
+            minimum=0.0,
+            maximum=1.0,
+        )
+
+        ordered_persons = _diagnostic_ordered_persons(persons)
+        if len(ordered_persons) > self.max_tracks:
+            ordered_persons = ordered_persons[: self.max_tracks]
+
+        assignments: Dict[int, _HelmetDiagnosticTrack] = {}
+        matched_track_indices: set[int] = set()
+        matched_person_indices: set[int] = set()
+        matches: List[Tuple[float, int, int, int]] = []
+        for track_index, track in enumerate(self._tracks):
+            for person_index, person in enumerate(ordered_persons):
+                iou = _detection_iou(track.bbox, person)
+                if iou >= self.iou_threshold:
+                    matches.append((iou, track.track_id, person_index, track_index))
+        matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+        for _, _, person_index, track_index in matches:
+            if track_index in matched_track_indices or person_index in matched_person_indices:
+                continue
+            track = self._tracks[track_index]
+            track.bbox = ordered_persons[person_index]
+            track.missed_frames = 0
+            assignments[person_index] = track
+            matched_track_indices.add(track_index)
+            matched_person_indices.add(person_index)
+
+        for track_index, track in enumerate(self._tracks):
+            if track_index not in matched_track_indices:
+                track.missed_frames += 1
+        self._tracks = [
+            track
+            for track in self._tracks
+            if track.missed_frames <= self.max_missed_frames
+        ]
+
+        for person_index, person in enumerate(ordered_persons):
+            if person_index in matched_person_indices or len(self._tracks) >= self.max_tracks:
+                continue
+            track = _HelmetDiagnosticTrack(track_id=self._next_track_id, bbox=person)
+            self._next_track_id += 1
+            self._tracks.append(track)
+            assignments[person_index] = track
+
+        observations: List[HelmetDiagnosticObservation] = []
+        for person_index, person in enumerate(ordered_persons):
+            track = assignments.get(person_index)
+            if track is None:
+                continue
+            all_associations = _helmet_diagnostic_associations(
+                person,
+                helmets,
+                head_top_fraction=head_top_fraction,
+            )
+            associated_scores = tuple(
+                association.helmet_score
+                for association in all_associations
+                if association.center_inside_person and association.center_inside_head
+            )
+            associations = _prioritize_diagnostic_associations(all_associations)
+            frame_best_score = max(associated_scores) if associated_scores else None
+            track.observation_count += 1
+            if any(score >= verification_confidence for score in associated_scores):
+                track.hit_count += 1
+            if frame_best_score is not None:
+                track.best_helmet_score = (
+                    frame_best_score
+                    if track.best_helmet_score is None
+                    else max(track.best_helmet_score, frame_best_score)
+                )
+                if len(track.score_history) >= self.score_history_limit:
+                    track.score_history.pop(0)
+                    track.history_truncated = True
+                track.score_history.append(frame_best_score)
+
+            x1, y1, x2, y2 = (
+                float(person.x1),
+                float(person.y1),
+                float(person.x2),
+                float(person.y2),
+            )
+            touches_edge = x1 <= 0.0 or y1 <= 0.0 or x2 >= frame_width or y2 >= frame_height
+            center_x = min(1.0, max(0.0, ((x1 + x2) * 0.5) / float(frame_width)))
+            center_y = min(1.0, max(0.0, ((y1 + y2) * 0.5) / float(frame_height)))
+            observations.append(
+                HelmetDiagnosticObservation(
+                    diagnostic_track_id=track.track_id,
+                    frame_idx=frame_idx,
+                    time_s=time_s,
+                    person_box=(x1, y1, x2, y2),
+                    person_height_px=max(0.0, y2 - y1),
+                    normalized_position=(center_x, center_y),
+                    at_frame_edge=touches_edge,
+                    head_visible=not (y1 <= 0.0),
+                    helmet_score_history=tuple(track.score_history),
+                    helmet_hit_count=track.hit_count,
+                    helmet_observation_count=track.observation_count,
+                    helmet_hit_rate=track.hit_count / float(track.observation_count),
+                    best_helmet_score=track.best_helmet_score,
+                    associations=associations,
+                    track_history_length=len(track.score_history),
+                    track_history_limit=self.score_history_limit,
+                    track_history_truncated=track.history_truncated,
+                )
+            )
+        return tuple(sorted(observations, key=lambda item: item.diagnostic_track_id))
+
+
 @dataclass(frozen=True)
 class HelmetAlertConfig:
     required_seconds: float = DEFAULT_HELMET_REQUIRED_SECONDS
@@ -438,7 +645,6 @@ class HelmetAlertConfig:
     safety_area_id: str = "helmet_area_main"
 
     def __post_init__(self) -> None:
-        #just basics check to make sure the values that is supplid is in the appropriate range
         if self.analysis_fps <= 0:
             raise ValueError("analysis_fps must be > 0")
         if self.required_seconds <= 0:
@@ -574,10 +780,27 @@ class HelmetAlert:
 
 
 class HelmetAlertEngine:
-    def __init__(self, cfg: HelmetAlertConfig, *, source: str, camera_id: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        cfg: HelmetAlertConfig,
+        *,
+        source: str,
+        camera_id: Optional[str] = None,
+        diagnostics_enabled: bool = False,
+        diagnostic_tracker: Optional[HelmetDiagnosticTracker] = None,
+    ) -> None:
         self.cfg = cfg
         self.source = redact_source_credentials(str(source)) or "source"
         self.camera_id = redact_source_credentials(str(camera_id)) if camera_id else None
+        if not isinstance(diagnostics_enabled, bool):
+            raise TypeError("diagnostics_enabled must be a bool")
+        if diagnostic_tracker is not None and not diagnostics_enabled:
+            raise ValueError("diagnostic_tracker requires diagnostics_enabled=True")
+        if diagnostics_enabled and diagnostic_tracker is None:
+            diagnostic_tracker = HelmetDiagnosticTracker()
+        self._diagnostic_tracker = diagnostic_tracker
+        self._diagnostic_observations: List[HelmetDiagnosticObservation] = []
+        self._diagnostic_error_count = 0
         self._active = False
         self._alert_emitted = False
         self._episode_start_time_s = 0.0
@@ -589,6 +812,19 @@ class HelmetAlertEngine:
         self._absence_frames = 0
         self._cooldown_until_s = 0.0
         self._episode_best_helmet_score: Optional[float] = None
+
+    @property
+    def diagnostics_enabled(self) -> bool:
+        return self._diagnostic_tracker is not None
+
+    @property
+    def diagnostic_error_count(self) -> int:
+        return self._diagnostic_error_count
+
+    def pop_diagnostic_observations(self) -> Tuple[HelmetDiagnosticObservation, ...]:
+        observations = tuple(self._diagnostic_observations)
+        self._diagnostic_observations.clear()
+        return observations
 
     def update(
         self,
@@ -605,6 +841,13 @@ class HelmetAlertEngine:
             persons,
             safety_roi=safety_roi,
             min_person_height_px=self.cfg.min_person_height_px,
+        )
+        self._collect_diagnostic_observations(
+            qualifying=qualifying,
+            helmets=helmets,
+            frame_idx=frame_idx,
+            time_s=time_s,
+            safety_roi=safety_roi,
         )
         associated_scores = {
             id(person): _associated_helmet_scores(
@@ -687,6 +930,39 @@ class HelmetAlertEngine:
             self._close_episode(time_s=float(time_s))
 
         return ()
+
+    def _collect_diagnostic_observations(
+        self,
+        *,
+        qualifying: Sequence[Detection],
+        helmets: Sequence[Detection],
+        frame_idx: int,
+        time_s: float,
+        safety_roi: RoiPolygon,
+    ) -> None:
+        tracker = self._diagnostic_tracker
+        frame_size = safety_roi.frame_size
+        if tracker is None or frame_size is None:
+            return
+        try:
+            observations = tracker.update(
+                persons=qualifying,
+                helmets=helmets,
+                frame_idx=int(frame_idx),
+                time_s=float(time_s),
+                frame_size=frame_size,
+                head_top_fraction=self.cfg.head_top_fraction,
+                verification_confidence=self.cfg.verification_confidence,
+            )
+        except Exception:
+            # Diagnostic collection is a side channel. A malformed diagnostic
+            # input must never change the alert decision path.
+            self._diagnostic_error_count += 1
+            return
+        self._diagnostic_observations.extend(observations)
+        overflow = len(self._diagnostic_observations) - HELMET_DIAGNOSTIC_MAX_PENDING_OBSERVATIONS
+        if overflow > 0:
+            del self._diagnostic_observations[:overflow]
 
     def flush(self, *, time_s: float) -> None:
         if self._active:
@@ -864,6 +1140,115 @@ def _box_overlaps_roi(det: Detection, roi: RoiPolygon) -> bool:
     return False
 
 
+def _diagnostic_ordered_persons(persons: Sequence[Detection]) -> List[Detection]:
+    indexed = list(enumerate(persons))
+    indexed.sort(
+        key=lambda item: (
+            -max(0.0, float(item[1].y2) - float(item[1].y1)),
+            -float(item[1].score),
+            float(item[1].x1),
+            float(item[1].y1),
+            float(item[1].x2),
+            float(item[1].y2),
+            item[0],
+        )
+    )
+    return [person for _, person in indexed]
+
+
+def _detection_iou(a: Detection, b: Detection) -> float:
+    x1 = max(float(a.x1), float(b.x1))
+    y1 = max(float(a.y1), float(b.y1))
+    x2 = min(float(a.x2), float(b.x2))
+    y2 = min(float(a.y2), float(b.y2))
+    intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    if intersection <= 0.0:
+        return 0.0
+    area_a = max(0.0, float(a.x2) - float(a.x1)) * max(0.0, float(a.y2) - float(a.y1))
+    area_b = max(0.0, float(b.x2) - float(b.x1)) * max(0.0, float(b.y2) - float(b.y1))
+
+    denominator = area_a + area_b - intersection
+    return 0.0 if denominator <= 0.0 else intersection / denominator
+
+
+def _helmet_center_geometry(
+    person: Detection,
+    helmet: Detection,
+    *,
+    head_top_fraction: float,
+) -> Tuple[float, float, bool, bool]:
+    """Return the helmet center and whether it falls in the person's body/head regions."""
+
+    head_y2 = float(person.y1) + (float(person.y2) - float(person.y1)) * float(head_top_fraction)
+    # The point under test is the helmet box center; the person box supplies
+    # only the enclosing body and head-region boundaries.
+    center_x = (float(helmet.x1) + float(helmet.x2)) * 0.5
+    center_y = (float(helmet.y1) + float(helmet.y2)) * 0.5
+    inside_person = (
+        float(person.x1) <= center_x <= float(person.x2)
+        and float(person.y1) <= center_y <= float(person.y2)
+    )
+    inside_head = (
+        float(person.x1) <= center_x <= float(person.x2)
+        and float(person.y1) <= center_y <= head_y2
+    )
+    return center_x, center_y, inside_person, inside_head
+
+
+def _helmet_diagnostic_associations(
+    person: Detection,
+    helmets: Sequence[Detection],
+    *,
+    head_top_fraction: float,
+) -> Tuple[HelmetDiagnosticAssociation, ...]:
+    associations: List[HelmetDiagnosticAssociation] = []
+    person_center_x = (float(person.x1) + float(person.x2)) * 0.5
+    person_center_y = (float(person.y1) + float(person.y2)) * 0.5
+    for helmet in helmets:
+        center_x, center_y, inside_person, inside_head = _helmet_center_geometry(
+            person,
+            helmet,
+            head_top_fraction=head_top_fraction,
+        )
+        distance = math.hypot(center_x - person_center_x, center_y - person_center_y)
+        associations.append(
+            HelmetDiagnosticAssociation(
+                helmet_box=(
+                    float(helmet.x1),
+                    float(helmet.y1),
+                    float(helmet.x2),
+                    float(helmet.y2),
+                ),
+                helmet_score=float(helmet.score),
+                center_inside_person=inside_person,
+                center_inside_head=inside_head,
+                center_distance_to_person_px=distance,
+            )
+        )
+    associations.sort(
+        key=lambda item: (
+            -item.helmet_score,
+            item.helmet_box,
+            item.center_inside_person,
+            item.center_inside_head,
+        )
+    )
+    return tuple(associations)
+
+
+def _prioritize_diagnostic_associations(
+    associations: Sequence[HelmetDiagnosticAssociation],
+) -> Tuple[HelmetDiagnosticAssociation, ...]:
+    """Retain head-associated evidence before unrelated high-score boxes."""
+    associated = [
+        item
+        for item in associations
+        if item.center_inside_person and item.center_inside_head
+    ]
+    unrelated = [item for item in associations if item not in associated]
+    return tuple((associated + unrelated)[:HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS])
+
+
 def _helmet_associated_with_person(
     person: Detection,
     helmets: Sequence[Detection],
@@ -879,13 +1264,16 @@ def _associated_helmet_scores(
     *,
     head_top_fraction: float,
 ) -> Tuple[float, ...]:
-    head_y2 = float(person.y1) + (float(person.y2) - float(person.y1)) * float(head_top_fraction)
     scores: List[float] = []
     for helmet in helmets:
-        cx = (float(helmet.x1) + float(helmet.x2)) * 0.5
-        cy = (float(helmet.y1) + float(helmet.y2)) * 0.5
-        if float(person.x1) <= cx <= float(person.x2) and float(person.y1) <= cy <= head_y2:
+        _, _, _, inside_head = _helmet_center_geometry(
+            person,
+            helmet,
+            head_top_fraction=head_top_fraction,
+        )
+        if inside_head:
             scores.append(float(helmet.score))
+
     return tuple(scores)
 
 

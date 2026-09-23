@@ -14,6 +14,7 @@ from Action_Detection_SOP.safety_alerts import (
     HelmetDiagnosticAssociation,
     HelmetDiagnosticEvent,
     HelmetDiagnosticObservation,
+    HelmetDiagnosticTracker,
     HelmetAlertConfig,
     HelmetAlertEngine,
     write_helmet_alert_artifacts,
@@ -33,7 +34,13 @@ def _helmet(*, score: float = 0.85) -> Detection:
     return Detection(x1=80, y1=30, x2=120, y2=60, score=score, class_id=1)
 
 
-def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int = 120) -> HelmetAlertEngine:
+def _engine(
+    *,
+    required_s: float = 5.0,
+    cooldown_s: float = 0.0,
+    min_height: int = 120,
+    diagnostics: bool = False,
+) -> HelmetAlertEngine:
     return HelmetAlertEngine(
         HelmetAlertConfig(
             required_seconds=required_s,
@@ -48,7 +55,12 @@ def _engine(*, required_s: float = 5.0, cooldown_s: float = 0.0, min_height: int
         ),
         source="camera-1",
         camera_id="cam_1",
+        diagnostics_enabled=diagnostics,
     )
+
+
+def _helmet_at(*, x1: float = 80, score: float = 0.85) -> Detection:
+    return Detection(x1=x1, y1=30, x2=x1 + 40, y2=60, score=score, class_id=1)
 
 
 def test_helmet_diagnostic_contract_is_versioned_and_stable() -> None:
@@ -103,6 +115,193 @@ def test_helmet_diagnostic_contract_is_versioned_and_stable() -> None:
             episode_start_frame_idx=1,
             episode_start_time_s=0.0,
         )
+
+
+def test_diagnostic_tracker_matches_people_and_bounds_history() -> None:
+    tracker = HelmetDiagnosticTracker(max_missed_frames=1, score_history_limit=2)
+    first = tracker.update(
+        persons=[_person()],
+        helmets=[_helmet_at(score=0.2)],
+        frame_idx=1,
+        time_s=1.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+    second = tracker.update(
+        persons=[_person(x1=52, x2=152)],
+        helmets=[_helmet_at(x1=82, score=0.3)],
+        frame_idx=2,
+        time_s=2.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+    third = tracker.update(
+        persons=[_person(x1=54, x2=154)],
+        helmets=[_helmet_at(x1=84, score=0.4)],
+        frame_idx=3,
+        time_s=3.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+
+    assert first[0].diagnostic_track_id == second[0].diagnostic_track_id == third[0].diagnostic_track_id
+    assert third[0].helmet_observation_count == 3
+    assert third[0].helmet_hit_count == 3
+    assert third[0].helmet_hit_rate == 1.0
+    assert third[0].best_helmet_score == 0.4
+    assert third[0].helmet_score_history == (0.3, 0.4)
+    assert third[0].track_history_truncated is True
+    assert third[0].associations[0].center_inside_head is True
+    assert tracker.active_track_count == 1
+
+
+def test_diagnostic_tracker_preserves_associated_evidence_when_capping_payload() -> None:
+    tracker = HelmetDiagnosticTracker()
+    unrelated = [
+        Detection(
+            x1=200 + (index * 20),
+            y1=200,
+            x2=220 + (index * 20),
+            y2=230,
+            score=0.9,
+            class_id=1,
+        )
+        for index in range(8)
+    ]
+    observations = tracker.update(
+        persons=[_person()],
+        helmets=unrelated + [_helmet_at(score=0.2)],
+        frame_idx=1,
+        time_s=1.0,
+        frame_size=(1000, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+
+    observation = observations[0]
+    assert observation.helmet_hit_count == 1
+    assert observation.best_helmet_score == 0.2
+    assert len(observation.associations) == 8
+    assert any(item.center_inside_head for item in observation.associations)
+
+
+def test_diagnostic_tracker_uses_helmet_box_center_for_association() -> None:
+    tracker = HelmetDiagnosticTracker()
+    observation = tracker.update(
+        persons=[_person(x1=100, x2=200)],
+        helmets=[Detection(x1=80, y1=30, x2=110, y2=60, score=0.9, class_id=1)],
+        frame_idx=1,
+        time_s=1.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )[0]
+
+    association = observation.associations[0]
+    assert association.center_inside_person is False
+    assert association.center_inside_head is False
+    assert observation.helmet_hit_count == 0
+    assert observation.best_helmet_score is None
+
+
+def test_diagnostic_tracker_rejects_history_limit_above_contract_bound() -> None:
+    with pytest.raises(ValueError, match="score_history_limit must be <= 32"):
+        HelmetDiagnosticTracker(score_history_limit=33)
+
+    with pytest.raises(ValueError, match="diagnostic_tracker requires diagnostics_enabled=True"):
+        HelmetAlertEngine(
+            HelmetAlertConfig(),
+            source="camera-1",
+            diagnostic_tracker=HelmetDiagnosticTracker(),
+        )
+
+
+def test_diagnostic_sidecar_isolates_malformed_diagnostic_inputs() -> None:
+    disabled = _engine(diagnostics=False)
+    enabled = _engine(diagnostics=True)
+    kwargs = {
+        "time_s": "not-a-time",
+        "frame_idx": "not-a-frame",
+        "persons": [],
+        "helmets": [],
+        "safety_roi": _roi(),
+    }
+
+    assert disabled.update(**kwargs) == ()
+    assert enabled.update(**kwargs) == ()
+    assert enabled.diagnostic_error_count == 1
+
+
+def test_diagnostic_tracker_expires_missed_tracks_without_reusing_ids() -> None:
+    tracker = HelmetDiagnosticTracker(max_missed_frames=1)
+    first = tracker.update(
+        persons=[_person()],
+        helmets=[],
+        frame_idx=1,
+        time_s=1.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+    tracker.update(
+        persons=[],
+        helmets=[],
+        frame_idx=2,
+        time_s=2.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+    tracker.update(
+        persons=[],
+        helmets=[],
+        frame_idx=3,
+        time_s=3.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+    replacement = tracker.update(
+        persons=[_person()],
+        helmets=[],
+        frame_idx=4,
+        time_s=4.0,
+        frame_size=(400, 400),
+        head_top_fraction=0.35,
+        verification_confidence=0.15,
+    )
+
+    assert first[0].diagnostic_track_id == 1
+    assert replacement[0].diagnostic_track_id == 2
+    assert tracker.active_track_count == 1
+
+
+def test_diagnostics_do_not_change_alert_decisions_or_timing() -> None:
+    disabled = _engine(required_s=3.0, diagnostics=False)
+    enabled = _engine(required_s=3.0, diagnostics=True)
+    disabled_alerts = []
+    enabled_alerts = []
+    for frame_idx in range(1, 4):
+        kwargs = {
+            "time_s": float(frame_idx),
+            "frame_idx": frame_idx,
+            "persons": [_person()],
+            "helmets": [],
+            "safety_roi": _roi(),
+        }
+        disabled_alerts.extend(disabled.update(**kwargs))
+        enabled_alerts.extend(enabled.update(**kwargs))
+
+    assert disabled_alerts == enabled_alerts
+    assert [(alert.start_time_s, alert.end_time_s, alert.trigger_frame_idx) for alert in disabled_alerts] == [
+        (1.0, 3.0, 3)
+    ]
+    observations = enabled.pop_diagnostic_observations()
+    assert len(observations) == 3
+    assert enabled.diagnostic_error_count == 0
 
 
 def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:
