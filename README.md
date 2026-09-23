@@ -136,6 +136,8 @@ configs/metadata_roll_sop_v1.yaml
 - Evidence clips: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4`
 - Uploader spool: `data/uploader_spool/{pending,done,dead}/`
 - Helmet alerts: `data/alerts/YYYY-MM-DD/<alert_uid>/`
+- Optional helmet diagnostics: `data/diagnostics/helmet/YYYY-MM-DD/run_*.jsonl` (enable with `--helmet-alert-diagnostics`; total storage defaults to 128 MiB).
+- Summarize diagnostic runs read-only with `python -m Scripts.analyze_helmet_diagnostics data/diagnostics/helmet/` (use `--max-tracks 0` to print every aggregated track).
 
 Each session `checklist.json` includes `session_uid`, used by the web API and uploader for idempotent sync.
 

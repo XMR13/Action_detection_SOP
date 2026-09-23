@@ -126,6 +126,22 @@ SQLite file without measuring and testing write behavior.
 Tune `/etc/action-sop/rtsp.env` only after collecting live GPU, CPU, memory,
 temperature, frame-cadence, and disk-growth evidence.
 
+## Optional helmet diagnostics
+
+Set `SOP_HELMET_DIAGNOSTICS_ARGS` in `/etc/action-sop/rtsp.env` to
+`"--helmet-alert-diagnostics --helmet-diagnostics-max-mb 512"` after confirming
+the available disk space and required capture duration. The cap covers all
+helmet diagnostic JSONL files under `SOP_DATA_DIR`; an empty value disables
+capture. Existing environment files are preserved on reinstall, so set this
+value explicitly on an already configured Jetson.
+
+After pulling the updated repository, rerun the installer for the RTSP
+component with the same service user, Python, and data-directory options used
+for the installed service. Add `--start` to render the unit, reload systemd,
+and restart the worker. Logs are written under
+`<SOP_DATA_DIR>/diagnostics/helmet/YYYY-MM-DD/`. The diagnostics analyzer can
+read the copied JSONL files after capture.
+
 ## Stop or restart
 
 ```bash
