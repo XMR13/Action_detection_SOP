@@ -64,6 +64,7 @@ def _helmet_at(*, x1: float = 80, score: float = 0.85) -> Detection:
 
 
 def test_helmet_diagnostic_contract_is_versioned_and_stable() -> None:
+    assert HELMET_DIAGNOSTICS_SCHEMA_VERSION == 2
     association = HelmetDiagnosticAssociation(
         helmet_box=(80.0, 30.0, 120.0, 60.0),
         helmet_score=0.33333,
@@ -94,16 +95,15 @@ def test_helmet_diagnostic_contract_is_versioned_and_stable() -> None:
         time_s=1.23456,
         episode_start_frame_idx=1,
         episode_start_time_s=0.0,
-        observations=(observation,),
-        source="rtsp://user:password@example.test/stream",
-        camera_id="camera-1",
     )
 
     payload = event.as_payload()
     assert payload["schema_version"] == HELMET_DIAGNOSTICS_SCHEMA_VERSION
     assert payload["time_s"] == 1.235
-    assert payload["observations"][0]["associations"][0]["helmet_score"] == 0.333
-    assert payload["source"] == "rtsp://example.test/stream"
+    assert observation.as_payload()["associations"][0]["helmet_score"] == 0.333
+    assert "helmet_center" not in association.as_payload()
+    assert "observations" not in payload
+    assert "source" not in payload
     assert json.dumps(payload, sort_keys=True) == json.dumps(event.as_payload(), sort_keys=True)
 
     with pytest.raises(ValueError, match="reason must not be empty"):
@@ -301,7 +301,40 @@ def test_diagnostics_do_not_change_alert_decisions_or_timing() -> None:
     ]
     observations = enabled.pop_diagnostic_observations()
     assert len(observations) == 3
+    diagnostic_events = enabled.pop_diagnostic_events()
+    assert [event.event for event in diagnostic_events] == ["episode_started", "alert_emitted"]
+    assert diagnostic_events[-1].alert_uid == enabled_alerts[0].alert_uid
     assert enabled.diagnostic_error_count == 0
+
+
+def test_diagnostic_events_explain_weak_helmet_cancel_and_recovery() -> None:
+    cancelled = _engine(required_s=2.0, diagnostics=True)
+    cancelled.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[], safety_roi=_roi())
+    cancelled.update(
+        time_s=2.0,
+        frame_idx=2,
+        persons=[_person()],
+        helmets=[_helmet(score=0.2)],
+        safety_roi=_roi(),
+    )
+    cancellation_events = cancelled.pop_diagnostic_events()
+    assert [(event.event, event.reason) for event in cancellation_events] == [
+        ("episode_started", "no_helmet_candidate"),
+        ("episode_cancelled", "weak_helmet_verified"),
+    ]
+
+    recovered = _engine(required_s=1.0, diagnostics=True)
+    alerts = recovered.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[], safety_roi=_roi())
+    recovered.update(time_s=2.0, frame_idx=2, persons=[_person()], helmets=[_helmet()], safety_roi=_roi())
+    recovered.update(time_s=3.0, frame_idx=3, persons=[_person()], helmets=[_helmet()], safety_roi=_roi())
+
+    events = recovered.pop_diagnostic_events()
+    assert len(alerts) == 1
+    assert [(event.event, event.reason) for event in events] == [
+        ("episode_started", "no_helmet_candidate"),
+        ("alert_emitted", "sustained_no_helmet"),
+        ("episode_closed", "helmet_recovered"),
+    ]
 
 
 def test_alert_fires_only_after_ten_seconds_without_helmet() -> None:

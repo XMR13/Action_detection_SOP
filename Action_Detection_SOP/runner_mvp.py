@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import cv2
 
@@ -22,6 +21,7 @@ except ModuleNotFoundError:
 
 from Action_Detection_SOP.evidence import EvidenceClipConfig, EvidenceClipper
 from Action_Detection_SOP.evidence_io import write_evidence_clip, write_evidence_manifest
+from Action_Detection_SOP.helmet_diagnostics_capture import HelmetDiagnosticCapture
 from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capture
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
 from Action_Detection_SOP.reporting import (
@@ -40,8 +40,15 @@ from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, 
 from Action_Detection_SOP.runtime_config import (
     PROFILE_OPERATOR_MVP_A,
     PROFILE_ROLL_SOP_V1,
-    ResolvedRunConfig,
     resolve_run_config,
+)
+from Action_Detection_SOP.runner_setup import (
+    RunConfigPayloadInput,
+    build_run_config_payload as _build_run_config_payload,
+    build_sop_engine as _build_sop_engine,
+    _file_metadata,
+    _sha256_path,
+    source_label as _source_label,
 )
 from Action_Detection_SOP.safety_alerts import (
     HelmetAlertConfig,
@@ -49,21 +56,12 @@ from Action_Detection_SOP.safety_alerts import (
     write_helmet_alert_artifacts,
 )
 from Action_Detection_SOP.sop_engine import (
-    HelmetRuleConfig,
-    RoiDwellRuleConfig,
     SessionResult,
-    SessionizationConfig,
     SopEngine,
-    SopEngineConfig,
     helmet_associated_with_person,
 )
-from Action_Detection_SOP.roll_sop_engine import (
-    RollEvidenceRuleConfig,
-    RollSopEngine,
-    RollSopEngineConfig,
-)
-from Action_Detection_SOP.session import RollSessionConfig
-from Action_Detection_SOP.source_security import redact_source_credentials, redact_source_fields
+from Action_Detection_SOP.roll_sop_engine import RollSopEngine
+from Action_Detection_SOP.source_security import redact_source_credentials
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
 from yolo_kit.types import Detection
 
@@ -189,33 +187,6 @@ def _filter_class_ids(dets: Sequence[Detection], class_ids: Sequence[int]) -> Li
     return out
 
 
-def _sha256_path(path: Path) -> Optional[str]:
-    if not path.exists():
-        return None
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _file_metadata(path: Path) -> Dict[str, object]:
-    payload: Dict[str, object] = {"path": str(path)}
-    if not path.exists():
-        payload["exists"] = False
-        return payload
-    st = path.stat()
-    payload.update(
-        {
-            "exists": True,
-            "size_bytes": int(st.st_size),
-            "mtime": float(st.st_mtime),
-            "sha256": _sha256_path(path),
-        }
-    )
-    return payload
-
-
 def _sanitize_ort_provider_name(name: str) -> str:
     # PowerShell line continuations and copy/paste can leave stray backticks/quotes.
     return str(name).strip().strip("'\"`")
@@ -230,16 +201,6 @@ def _parse_ort_providers(raw: Optional[str]) -> Optional[List[str]]:
         if cleaned:
             parts.append(cleaned)
     return parts or None
-
-
-def _source_label(args: argparse.Namespace) -> str:
-    if args.rtsp:
-        return redact_source_credentials(str(args.rtsp)) or "rtsp://redacted-source"
-    if args.video:
-        return redact_source_credentials(str(args.video)) or "source"
-    if args.webcam is not None:
-        return f"webcam_{int(args.webcam)}"
-    return "source"
 
 
 def _overlay_style(frame_height: int) -> Tuple[float, int]:
@@ -339,249 +300,6 @@ class RunOutputs:
     daily_report_csv: Path
 
 
-@dataclass(frozen=True)
-class EngineSetup:
-    engine: Union[SopEngine, RollSopEngine]
-    roi_gap_frames: Optional[int] = None
-    roi_miss_frames: Optional[int] = None
-
-
-@dataclass(frozen=True)
-class RunConfigPayloadInput:
-    args: argparse.Namespace
-    args_raw: Dict[str, object]
-    config_path: Optional[Path]
-    config_payload: Optional[Dict[str, object]]
-    date: str
-    info: CaptureInfo
-    source_fps: Optional[float]
-    analysis_fps: float
-    every: int
-    roi_path: Path
-    roi_base: RoiPolygon
-    evidence_enabled: bool
-    evidence_cfg: Optional[EvidenceClipConfig]
-    runtime: ResolvedRunConfig
-    engine_setup: EngineSetup
-    rtsp_prefer_ffmpeg: bool
-    rtsp_open_timeout_ms: Optional[int]
-    rtsp_read_timeout_ms: Optional[int]
-    rtsp_buffer_size: Optional[int]
-
-
-def _build_sop_engine(
-    *,
-    args: argparse.Namespace,
-    sop_profile_name: str,
-    helmet_disabled: bool,
-    analysis_fps: float,
-    initial_session_counter: int = 0,
-) -> EngineSetup:
-    """
-    Build the active SOP engine plus any report metadata derived from its config.
-    apabila tidak merupakan PROFILE_ROLL_SOP_V1, maka akan kembali menggunakan
-    MVP yang sebelumnya yakni menggunakan waktu (PROFILE_OPERATOR_MVP_A)
-    """
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        return EngineSetup(
-            engine=RollSopEngine(
-                RollSopEngineConfig(
-                    session=RollSessionConfig(
-                        start_seconds=float(args.start_s),
-                        end_seconds=float(args.end_s),
-                        analysis_fps=analysis_fps,
-                    ),
-                    cleaning=RollEvidenceRuleConfig(
-                        required_seconds=float(args.cleaning_s),
-                        analysis_fps=analysis_fps,
-                        max_gap_frames=int(args.cleaning_max_gap),
-                    ),
-                    labeling=RollEvidenceRuleConfig(
-                        required_seconds=float(args.labeling_s),
-                        analysis_fps=analysis_fps,
-                        max_gap_frames=int(args.labeling_max_gap),
-                    ),
-                ),
-                initial_session_counter=initial_session_counter,
-            )
-        )
-
-    helmet_cfg = None
-    if not helmet_disabled:
-        helmet_cfg = HelmetRuleConfig(
-            required_seconds=float(args.helmet_s),
-            analysis_fps=analysis_fps,
-            head_top_fraction=float(args.head_top_frac),
-            min_person_height_px=int(args.min_person_height),
-            max_gap_frames=int(args.helmet_max_gap),
-        )
-
-    roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
-    roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
-    if roi_miss_frames < roi_gap_frames:
-        roi_miss_frames = roi_gap_frames
-    roi_dwell_cfg = RoiDwellRuleConfig(
-        required_seconds=float(args.roi_dwell_s),
-        analysis_fps=analysis_fps,
-        max_gap_frames=roi_gap_frames,
-        max_track_missed=roi_miss_frames,
-        iou_match_threshold=float(args.roi_dwell_iou),
-        min_person_height_px=int(args.roi_min_person_height),
-    )
-    engine_cfg = SopEngineConfig(
-        session=SessionizationConfig(
-            start_seconds=float(args.start_s),
-            end_seconds=float(args.end_s),
-            analysis_fps=analysis_fps,
-        ),
-        helmet=helmet_cfg,
-        roi_dwell=roi_dwell_cfg,
-    )
-    return EngineSetup(
-        engine=SopEngine(engine_cfg, initial_session_counter=initial_session_counter),
-        roi_gap_frames=roi_gap_frames,
-        roi_miss_frames=roi_miss_frames,
-    )
-
-
-def _build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object]:
-    args = payload.args
-    runtime = payload.runtime
-    sop_profile = runtime.sop_profile
-    classes = runtime.classes
-    sop_profile_name = sop_profile.name
-
-    evidence_payload: Dict[str, object] = {
-        "enabled": bool(payload.evidence_enabled),
-        "pre_seconds": float(args.evidence_pre_s),
-        "post_seconds": float(args.evidence_post_s),
-        "max_seconds": float(args.evidence_max_s),
-        "analysis_fps": float(payload.analysis_fps),
-        "events": (
-            ["roll_entered", "cleaned_done", "labeled_done", "roll_left"]
-            if sop_profile_name == PROFILE_ROLL_SOP_V1
-            else ["roi_dwell_done", "helmet_done"]
-        ),
-    }
-    if payload.evidence_cfg is not None:
-        pre_s, post_s = payload.evidence_cfg.resolved_window()
-        evidence_payload["resolved_pre_seconds"] = float(pre_s)
-        evidence_payload["resolved_post_seconds"] = float(post_s)
-
-    run_config: Dict[str, object] = {
-        "date": payload.date,
-        "args": redact_source_fields(payload.args_raw),
-        "source": {
-            "video": redact_source_credentials(args.video),
-            "webcam": args.webcam,
-            "rtsp": redact_source_credentials(args.rtsp),
-        },
-        "source_fps_raw": float(payload.info.fps) if payload.info.fps else None,
-        "source_fps": float(payload.source_fps) if payload.source_fps else None,
-        "analysis_fps": float(payload.analysis_fps),
-        "every": int(payload.every),
-        "sessionization": {
-            "sop_profile": sop_profile_name,
-            "start_seconds": float(args.start_s),
-            "end_seconds": float(args.end_s),
-            "min_session_seconds": float(args.min_session_s),
-        },
-        "roi": {
-            "path": str(payload.roi_path),
-            "frame_size": payload.roi_base.frame_size,
-            "points": list(payload.roi_base.points),
-            "sha256": _sha256_path(payload.roi_path),
-        },
-        "evidence": evidence_payload,
-        "model": _file_metadata(Path(args.model)),
-        "metadata": _file_metadata(Path(args.metadata)) if args.metadata else {"path": None},
-        "postprocess": {
-            "conf": float(args.conf),
-            "label_conf": {
-                str(classes.class_names.get(class_id, class_id)): float(threshold)
-                for class_id, threshold in sorted(classes.class_conf_thresholds.items())
-            },
-            "iou": float(args.iou),
-            "no_nms": bool(args.no_nms),
-        },
-        "detect_roi_only": bool(args.detect_roi_only),
-        "video_fps_out": float(args.video_fps_out) if args.video_fps_out else None,
-        "video_output": {
-            "codec": str(args.out_codec),
-            "compress_out": bool(args.compress_out),
-            "ffmpeg_crf": int(args.out_crf),
-            "ffmpeg_preset": str(args.out_preset),
-        },
-        "stream_sim": {
-            "loop_video": bool(args.loop_video),
-            "realtime": bool(args.realtime),
-            "reconnect": bool(args.reconnect),
-            "reconnect_wait_s": float(args.reconnect_wait_s),
-            "reconnect_wait_max_s": float(args.reconnect_wait_max_s),
-            "reconnect_backoff": float(args.reconnect_backoff),
-            "reconnect_max_tries": int(args.reconnect_max_tries),
-            "rtsp_prefer_ffmpeg": bool(payload.rtsp_prefer_ffmpeg),
-            "rtsp_open_timeout_ms": (
-                int(payload.rtsp_open_timeout_ms) if payload.rtsp_open_timeout_ms is not None else None
-            ),
-            "rtsp_read_timeout_ms": (
-                int(payload.rtsp_read_timeout_ms) if payload.rtsp_read_timeout_ms is not None else None
-            ),
-            "rtsp_buffer_size": int(payload.rtsp_buffer_size) if payload.rtsp_buffer_size is not None else None,
-        },
-    }
-
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
-        run_config["roi_dwell"] = {
-            "required_seconds": float(args.roi_dwell_s),
-            "max_gap_seconds": float(args.roi_dwell_max_gap),
-            "max_gap_frames": int(payload.engine_setup.roi_gap_frames or 0),
-            "max_track_missed_seconds": float(args.roi_dwell_miss),
-            "max_track_missed_frames": int(payload.engine_setup.roi_miss_frames or 0),
-            "iou_match_threshold": float(args.roi_dwell_iou),
-            "min_person_height_px": int(args.roi_min_person_height),
-        }
-
-    if payload.config_path is None:
-        run_config["config"] = {"path": None}
-    else:
-        run_config["config"] = {
-            "path": str(payload.config_path),
-            "data": (
-                redact_source_fields(payload.config_payload)
-                if payload.config_payload is not None
-                else None
-            ),
-            "file": _file_metadata(payload.config_path),
-        }
-
-    if sop_profile.path is None:
-        run_config["sop_profile"] = {"name": sop_profile_name, "path": None}
-    else:
-        run_config["sop_profile"] = {
-            "name": sop_profile_name,
-            "path": str(sop_profile.path),
-            "data": asdict(sop_profile.profile) if sop_profile.profile is not None else None,
-            "file": _file_metadata(sop_profile.path),
-        }
-
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        run_config["roll_sop_v1"] = {
-            "roll_labels": list(args.roll_label),
-            "roll_class_ids": list(classes.roll_ids),
-            "cleaning_cloth_labels": list(args.cleaning_cloth_label),
-            "cleaning_cloth_class_ids": list(classes.cleaning_cloth_ids),
-            "paper_label_labels": list(args.paper_label),
-            "paper_label_class_ids": list(classes.paper_label_ids),
-            "cleaning_required_seconds": float(args.cleaning_s),
-            "cleaning_max_gap_frames": int(args.cleaning_max_gap),
-            "labeling_required_seconds": float(args.labeling_s),
-            "labeling_max_gap_frames": int(args.labeling_max_gap),
-        }
-
-    return run_config
-
-
 def run_mvp(
     args: argparse.Namespace,
     *,
@@ -592,7 +310,7 @@ def run_mvp(
     def _session_duration_s(session: SessionReportResult) -> float:
         return max(0.0, float(session.end_time_s) - float(session.start_time_s))
 
-    #run the mvp from the configuration
+    # Resolve profile, classes, timing, and ROI inputs.
     runtime = resolve_run_config(args)
     sop_profile_name = runtime.sop_profile.name
     class_names = runtime.classes.class_names
@@ -787,6 +505,11 @@ def run_mvp(
             raise ValueError("--helmet-alert-min-person-height must be >= 0")
         if args.helmet_alert_max_gap < 0:
             raise ValueError("--helmet-alert-max-gap must be >= 0")
+    if bool(args.helmet_alert_diagnostics):
+        if not helmet_alerts_enabled:
+            raise ValueError("--helmet-alert-diagnostics requires --enable-helmet-alerts")
+        if int(args.helmet_diagnostics_max_mb) <= 0:
+            raise ValueError("--helmet-diagnostics-max-mb must be > 0")
     if not args.no_evidence:
         if args.evidence_pre_s < 0:
             raise ValueError("--evidence-pre-s must be >= 0")
@@ -799,6 +522,7 @@ def run_mvp(
     if not (0 <= int(args.out_crf) <= 51):
         raise ValueError("--out-crf must be within [0, 51]")
 
+    # Validate command options and prepare capture settings.
     reconnect_tries = 0
     reconnect_events = 0
 
@@ -845,6 +569,7 @@ def run_mvp(
                     print(f"Retrying in {wait_s:.1f}s...")
                     time.sleep(wait_s)
 
+    # Open the source and derive the actual analysis cadence.
     cap, info = _open_capture_with_retries(initial_open=True)
 
     source_fps = float(args.source_fps) if args.source_fps and args.source_fps > 0 else info.fps
@@ -862,6 +587,7 @@ def run_mvp(
             every = 1
             analysis_fps = float(args.analysis_fps)
 
+    # Build the SOP/alert engines and run metadata.
     evidence_enabled = not bool(args.no_evidence)
     evidence_cfg: Optional[EvidenceClipConfig] = None
     evidence_clipper: Optional[EvidenceClipper] = None
@@ -900,6 +626,7 @@ def run_mvp(
             ),
             source=_source_label(args),
             camera_id=args.helmet_alert_camera_id,
+            diagnostics_enabled=bool(args.helmet_alert_diagnostics),
         )
 
     frame_idx = 0
@@ -952,6 +679,11 @@ def run_mvp(
             "max_gap_frames": int(args.helmet_alert_max_gap),
             "safety_area_id": str(args.helmet_alert_safety_area_id),
             "camera_id": redact_source_credentials(args.helmet_alert_camera_id),
+            "diagnostics": {
+                "requested": bool(args.helmet_alert_diagnostics),
+                "enabled": False,
+                "max_total_mb": int(args.helmet_diagnostics_max_mb),
+            },
         }
         if helmet_alert_roi_path is not None and helmet_alert_roi_base is not None:
             helmet_alert_config["roi"] = {
@@ -964,6 +696,8 @@ def run_mvp(
     else:
         run_config["helmet_alerts"] = {"enabled": False}
 
+    # Initialize per-run state and output writers.
+    diagnostic_capture: Optional[HelmetDiagnosticCapture] = None
     warnings: List[str] = []
     discarded_sessions: List[Dict[str, object]] = []
 
@@ -1008,6 +742,7 @@ def run_mvp(
             end_date=end_dt.date().isoformat(),
         )
 
+    # Configure progress display and the optional diagnostic sidecar.
     win = "SOP roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else "SOP MVP-A"
     if args.show:
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -1030,6 +765,45 @@ def run_mvp(
         else:
             pbar = tqdm(unit="frame", desc="sop", mininterval=progress_every_s)
 
+    if helmet_alerts_enabled and bool(args.helmet_alert_diagnostics) and helmet_alert_engine is not None:
+        helmet_config = run_config.get("helmet_alerts")
+        diagnostic_context = {
+            "model_sha256": run_config.get("model", {}).get("sha256")
+            if isinstance(run_config.get("model"), dict)
+            else None,
+            "metadata_sha256": run_config.get("metadata", {}).get("sha256")
+            if isinstance(run_config.get("metadata"), dict)
+            else None,
+            "roi_sha256": run_config.get("roi", {}).get("sha256")
+            if isinstance(run_config.get("roi"), dict)
+            else None,
+            "helmet_alerts": (
+                {key: value for key, value in helmet_config.items() if key != "diagnostics"}
+                if isinstance(helmet_config, dict)
+                else None
+            ),
+        }
+        diagnostic_capture = HelmetDiagnosticCapture(
+            engine=helmet_alert_engine,
+            out_dir=out_dir,
+            date=date,
+            source=_source_label(args),
+            camera_id=args.helmet_alert_camera_id,
+            context=diagnostic_context,
+            max_total_bytes=int(args.helmet_diagnostics_max_mb) * 1024 * 1024,
+        )
+        if diagnostic_capture.start() and isinstance(helmet_config, dict):
+            diagnostics_config = helmet_config.get("diagnostics")
+            if isinstance(diagnostics_config, dict):
+                diagnostics_config.update(
+                    {
+                        "enabled": True,
+                        "path": str(diagnostic_capture.path),
+                        "run_id": diagnostic_capture.run_id,
+                    }
+                )
+
+    # Main capture loop: infer, update SOP rules, and persist frame artifacts.
     try:
         while True:
             ok, frame = cap.read()
@@ -1046,11 +820,23 @@ def run_mvp(
                     info = get_capture_info(cap)
                     loop_count += 1
                     reconnect_tries = 0
+                    if diagnostic_capture is not None:
+                        diagnostic_capture.start_segment(
+                            reason="video_loop",
+                            frame_idx=processed,
+                            time_s=(frame_idx / source_fps) if source_fps else (processed / analysis_fps),
+                        )
                     continue
 
                 if args.reconnect:
                     cap.release()
                     cap, info = _open_capture_with_retries(initial_open=False)
+                    if diagnostic_capture is not None:
+                        diagnostic_capture.start_segment(
+                            reason="capture_reconnected",
+                            frame_idx=processed,
+                            time_s=(frame_idx / source_fps) if source_fps else (processed / analysis_fps),
+                        )
                     continue
 
                 break
@@ -1237,6 +1023,7 @@ def run_mvp(
                 last_persons_all = list(persons_all)
                 last_helmets_all = list(helmets_all)
 
+                alerts = ()
                 if helmet_alert_engine is not None:
                     assert helmet_alert_roi_for_frame is not None
                     alerts = helmet_alert_engine.update(
@@ -1266,6 +1053,12 @@ def run_mvp(
                             run_start_dt=run_start_dt,
                         )
                         helmet_alert_dirs.append(alert_dir)
+                    if diagnostic_capture is not None:
+                        diagnostic_capture.persist_frame(
+                            frame_idx=int(processed),
+                            time_s=float(t_s),
+                            alert_uids=tuple(alert.alert_uid for alert in alerts),
+                        )
 
             events = engine.pop_events() if should_process else ()
             session_id = engine.active_session_id
@@ -1610,10 +1403,13 @@ def run_mvp(
                     )
                     report_dates.add(session_date)
 
+    # Close active episodes and release every opened output/capture handle.
     finally:
         if helmet_alert_engine is not None:
             end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
-            helmet_alert_engine.flush(time_s=float(end_time_s))
+            helmet_alert_engine.flush(time_s=float(end_time_s), frame_idx=int(processed))
+            if diagnostic_capture is not None:
+                diagnostic_capture.close(frame_idx=int(processed), time_s=float(end_time_s))
         cap.release()
         if writer is not None:
             writer.release()
@@ -1643,6 +1439,7 @@ def run_mvp(
         if pbar is not None:
             pbar.close()
 
+    # Write final daily reports and the complete run configuration.
     if sop_profile_name == PROFILE_ROLL_SOP_V1 and report_dates:
         report_date = max(report_dates)
         daily_json = out_dir / "reports" / report_date / "daily_report.json"
@@ -1668,6 +1465,9 @@ def run_mvp(
         run_config["discarded_sessions"] = list(discarded_sessions)
     if isinstance(run_config.get("helmet_alerts"), dict):
         run_config["helmet_alerts"]["alerts_written"] = int(len(helmet_alert_dirs))  # type: ignore[index]
+        if diagnostic_capture is not None:
+            diagnostic_details = diagnostic_capture.summary()
+            run_config["helmet_alerts"]["diagnostics"] = diagnostic_details  # type: ignore[index]
     run_config_path = write_run_config(out_dir=out_dir, date=date, run_config=run_config)
 
     outputs = RunOutputs(

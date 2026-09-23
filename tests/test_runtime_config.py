@@ -32,6 +32,25 @@ def test_helmet_alert_default_is_shared_by_engine_and_cli() -> None:
     assert args.helmet_alert_confidence == DEFAULT_HELMET_ALERT_CONFIDENCE
 
 
+def test_helmet_alert_diagnostics_are_opt_in_and_have_a_storage_cap() -> None:
+    default_args = build_parser().parse_args(["--video", "sample.mp4"])
+    diagnostic_args = build_parser().parse_args(
+        [
+            "--video",
+            "sample.mp4",
+            "--enable-helmet-alerts",
+            "--helmet-alert-diagnostics",
+            "--helmet-diagnostics-max-mb",
+            "64",
+        ]
+    )
+
+    assert default_args.helmet_alert_diagnostics is False
+    assert default_args.helmet_diagnostics_max_mb == 128
+    assert diagnostic_args.helmet_alert_diagnostics is True
+    assert diagnostic_args.helmet_diagnostics_max_mb == 64
+
+
 def test_helmet_alert_camera_id_defaults_from_deployment_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

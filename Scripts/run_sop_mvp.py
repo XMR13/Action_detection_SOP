@@ -316,6 +316,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional friendly camera label stored in no-helmet alert artifacts (or SOP_HELMET_ALERT_CAMERA_ID).",
     )
     parser.add_argument(
+        "--helmet-alert-diagnostics",
+        action="store_true",
+        help="Save local, bounded helmet observations/events for diagnosis; requires --enable-helmet-alerts.",
+    )
+    parser.add_argument(
+        "--helmet-diagnostics-max-mb",
+        type=int,
+        default=128,
+        help="Maximum total storage for local helmet diagnostics under the output directory (MiB).",
+    )
+    parser.add_argument(
         "--cleaning-s",
         type=float,
         default=0.4,

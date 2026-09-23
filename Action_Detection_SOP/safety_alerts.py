@@ -22,14 +22,14 @@ ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
 DEFAULT_HELMET_REQUIRED_SECONDS = 10
 DEFAULT_HELMET_ALERT_CONFIDENCE = 0.15
-HELMET_DIAGNOSTICS_SCHEMA_VERSION = 1
+HELMET_DIAGNOSTICS_SCHEMA_VERSION = 2
 HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY = 32
 HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS = 8
-HELMET_DIAGNOSTIC_MAX_OBSERVATIONS = 128
 HELMET_DIAGNOSTIC_IOU_THRESHOLD = 0.25
 HELMET_DIAGNOSTIC_MAX_MISSED_FRAMES = 2
 HELMET_DIAGNOSTIC_MAX_TRACKS = 32
 HELMET_DIAGNOSTIC_MAX_PENDING_OBSERVATIONS = 256
+HELMET_DIAGNOSTIC_MAX_PENDING_EVENTS = 256
 
 """
 ---------------------------
@@ -114,13 +114,6 @@ def _diagnostic_text(value: str, field_name: str, *, max_length: int = 128) -> s
     return text
 
 
-def _diagnostic_optional_source(value: Optional[str], field_name: str) -> Optional[str]:
-    if value is None:
-        return None
-    text = _diagnostic_text(value, field_name)
-    return redact_source_credentials(text)
-
-
 def _diagnostic_round(value: float) -> float:
     return round(float(value), 3)
 
@@ -166,10 +159,8 @@ class HelmetDiagnosticAssociation:
             )
 
     def as_payload(self) -> Dict[str, Any]:
-        x1, y1, x2, y2 = self.helmet_box
         return {
             "helmet_box": [_diagnostic_round(value) for value in self.helmet_box],
-            "helmet_center": [_diagnostic_round((x1 + x2) * 0.5), _diagnostic_round((y1 + y2) * 0.5)],
             "helmet_score": _diagnostic_round(self.helmet_score),
             "center_inside_person": self.center_inside_person,
             "center_inside_head": self.center_inside_head,
@@ -188,17 +179,17 @@ class HelmetDiagnosticObservation:
     """
 
     diagnostic_track_id: int
-    frame_idx: int
-    time_s: float
+    frame_idx : int
+    time_s : float
     person_box: Tuple[float, float, float, float]
     person_height_px: float
     normalized_position: Tuple[float, float]
     at_frame_edge: bool
     head_visible: bool
     helmet_score_history: Tuple[float, ...] = ()
-    helmet_hit_count: int = 0
+    helmet_hit_count:int = 0
     helmet_observation_count: int = 0
-    helmet_hit_rate: Optional[float] = 0.0
+    helmet_hit_rate: Optional[float] = 0
     best_helmet_score: Optional[float] = None
     associations: Tuple[HelmetDiagnosticAssociation, ...] = ()
     track_history_length: int = 1
@@ -344,7 +335,7 @@ class HelmetDiagnosticObservation:
 @dataclass(frozen=True)
 class HelmetDiagnosticEvent:
     """
-    Immutable bounded episode/event summary for future diagnostic logging.
+    Episode decision linked to the observations in its frame record.
     """
 
     event: str
@@ -353,12 +344,7 @@ class HelmetDiagnosticEvent:
     time_s: float
     episode_start_frame_idx: int
     episode_start_time_s: float
-    source: Optional[str] = None
-    camera_id: Optional[str] = None
     alert_uid: Optional[str] = None
-    observations: Tuple[HelmetDiagnosticObservation, ...] = ()
-    observation_limit: int = HELMET_DIAGNOSTIC_MAX_OBSERVATIONS
-    observations_truncated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event", _diagnostic_text(self.event, "event", max_length=64))
@@ -379,33 +365,8 @@ class HelmetDiagnosticEvent:
             "episode_start_time_s",
             _diagnostic_float(self.episode_start_time_s, "episode_start_time_s", minimum=0.0),
         )
-        object.__setattr__(self, "source", _diagnostic_optional_source(self.source, "source"))
-        object.__setattr__(self, "camera_id", _diagnostic_optional_source(self.camera_id, "camera_id"))
         if self.alert_uid is not None:
             object.__setattr__(self, "alert_uid", _diagnostic_text(self.alert_uid, "alert_uid"))
-
-        observations = tuple(self.observations)
-        if len(observations) > HELMET_DIAGNOSTIC_MAX_OBSERVATIONS:
-            raise ValueError(
-                "observations exceeds "
-                f"{HELMET_DIAGNOSTIC_MAX_OBSERVATIONS} retained values"
-            )
-        if not all(isinstance(item, HelmetDiagnosticObservation) for item in observations):
-            raise TypeError("observations must contain HelmetDiagnosticObservation values")
-        observations = tuple(sorted(observations, key=lambda item: (item.frame_idx, item.time_s, item.diagnostic_track_id)))
-        object.__setattr__(self, "observations", observations)
-        object.__setattr__(
-            self,
-            "observation_limit",
-            _diagnostic_int(self.observation_limit, "observation_limit", minimum=1),
-        )
-        if len(observations) > self.observation_limit:
-            raise ValueError("observations cannot exceed observation_limit")
-        object.__setattr__(
-            self,
-            "observations_truncated",
-            _diagnostic_bool(self.observations_truncated, "observations_truncated"),
-        )
 
     def as_payload(self) -> Dict[str, Any]:
         return {
@@ -416,22 +377,12 @@ class HelmetDiagnosticEvent:
             "time_s": _diagnostic_round(self.time_s),
             "episode_start_frame_idx": self.episode_start_frame_idx,
             "episode_start_time_s": _diagnostic_round(self.episode_start_time_s),
-            "source": self.source,
-            "camera_id": self.camera_id,
             "alert_uid": self.alert_uid,
-            "observations": [item.as_payload() for item in self.observations],
-            "history": {
-                "retained_observation_count": len(self.observations),
-                "observation_limit": self.observation_limit,
-                "truncated": self.observations_truncated,
-            },
         }
 
 
 @dataclass
 class _HelmetDiagnosticTrack:
-    """Mutable state carried between frames for one temporary person track."""
-
     track_id: int
     bbox: Detection
     missed_frames: int = 0
@@ -505,6 +456,7 @@ class HelmetDiagnosticTracker:
         not make or change any helmet-alert decision.
         """
 
+        #initialize all of the variables using helper _diagnostic
         frame_idx = _diagnostic_int(frame_idx, "diagnostic frame_idx")
         time_s = _diagnostic_float(time_s, "diagnostic time_s", minimum=0.0)
         frame_width, frame_height = frame_size
@@ -552,11 +504,7 @@ class HelmetDiagnosticTracker:
         for track_index, track in enumerate(self._tracks):
             if track_index not in matched_track_indices:
                 track.missed_frames += 1
-        self._tracks = [
-            track
-            for track in self._tracks
-            if track.missed_frames <= self.max_missed_frames
-        ]
+        self._tracks = [track for track in self._tracks if track.missed_frames <= self.max_missed_frames]
 
         for person_index, person in enumerate(ordered_persons):
             if person_index in matched_person_indices or len(self._tracks) >= self.max_tracks:
@@ -597,12 +545,7 @@ class HelmetDiagnosticTracker:
                     track.history_truncated = True
                 track.score_history.append(frame_best_score)
 
-            x1, y1, x2, y2 = (
-                float(person.x1),
-                float(person.y1),
-                float(person.x2),
-                float(person.y2),
-            )
+            x1, y1, x2, y2 = (float(person.x1), float(person.y1), float(person.x2), float(person.y2))
             touches_edge = x1 <= 0.0 or y1 <= 0.0 or x2 >= frame_width or y2 >= frame_height
             center_x = min(1.0, max(0.0, ((x1 + x2) * 0.5) / float(frame_width)))
             center_y = min(1.0, max(0.0, ((y1 + y2) * 0.5) / float(frame_height)))
@@ -645,6 +588,7 @@ class HelmetAlertConfig:
     safety_area_id: str = "helmet_area_main"
 
     def __post_init__(self) -> None:
+        #just basics check to make sure the values that is supplied is in the appropriate range
         if self.analysis_fps <= 0:
             raise ValueError("analysis_fps must be > 0")
         if self.required_seconds <= 0:
@@ -800,7 +744,11 @@ class HelmetAlertEngine:
             diagnostic_tracker = HelmetDiagnosticTracker()
         self._diagnostic_tracker = diagnostic_tracker
         self._diagnostic_observations: List[HelmetDiagnosticObservation] = []
+        self._diagnostic_events: List[HelmetDiagnosticEvent] = []
         self._diagnostic_error_count = 0
+        self._diagnostic_dropped_observation_count = 0
+        self._diagnostic_dropped_event_count = 0
+        self._last_frame_idx = 0
         self._active = False
         self._alert_emitted = False
         self._episode_start_time_s = 0.0
@@ -821,10 +769,32 @@ class HelmetAlertEngine:
     def diagnostic_error_count(self) -> int:
         return self._diagnostic_error_count
 
+    @property
+    def diagnostic_dropped_observation_count(self) -> int:
+        return self._diagnostic_dropped_observation_count
+
+    @property
+    def diagnostic_dropped_event_count(self) -> int:
+        return self._diagnostic_dropped_event_count
+
     def pop_diagnostic_observations(self) -> Tuple[HelmetDiagnosticObservation, ...]:
         observations = tuple(self._diagnostic_observations)
         self._diagnostic_observations.clear()
         return observations
+
+    def pop_diagnostic_events(self) -> Tuple[HelmetDiagnosticEvent, ...]:
+        events = tuple(self._diagnostic_events)
+        self._diagnostic_events.clear()
+        return events
+
+    def reset_diagnostic_tracks(self) -> None:
+        if self._diagnostic_tracker is not None:
+            self._diagnostic_tracker.reset()
+
+    def disable_diagnostics(self) -> None:
+        self._diagnostic_tracker = None
+        self._diagnostic_observations.clear()
+        self._diagnostic_events.clear()
 
     def update(
         self,
@@ -837,6 +807,8 @@ class HelmetAlertEngine:
         related_session_uid: Optional[str] = None,
         wall_dt: Optional[datetime] = None,
     ) -> Tuple[HelmetAlert, ...]:
+        if self._diagnostic_tracker is not None and isinstance(frame_idx, int) and not isinstance(frame_idx, bool):
+            self._last_frame_idx = frame_idx
         qualifying = _qualifying_persons(
             persons,
             safety_roi=safety_roi,
@@ -899,7 +871,12 @@ class HelmetAlertEngine:
                 # episode is accumulating. At the alert boundary they get a
                 # final verification chance before NO_HELMET is emitted.
                 if verification_helmet_present:
-                    self._close_episode(time_s=float(time_s))
+                    self._close_episode(
+                        time_s=float(time_s),
+                        frame_idx=int(frame_idx),
+                        event="episode_cancelled",
+                        reason="weak_helmet_verified",
+                    )
                     return ()
                 alert = self._build_alert(
                     time_s=float(time_s),
@@ -909,6 +886,13 @@ class HelmetAlertEngine:
                     wall_dt=wall_dt,
                 )
                 self._alert_emitted = True
+                self._record_diagnostic_event(
+                    event="alert_emitted",
+                    reason="sustained_no_helmet",
+                    frame_idx=int(frame_idx),
+                    time_s=float(time_s),
+                    alert_uid=alert.alert_uid,
+                )
                 return (alert,)
             return ()
 
@@ -926,8 +910,20 @@ class HelmetAlertEngine:
             if not self._alert_emitted and self._no_helmet_gap_frames > self.cfg.max_gap_frames:
                 self._no_helmet_frames = 0
 
-        if self._recovery_frames >= self.cfg.recovery_frames or self._absence_frames >= self.cfg.absence_frames:
-            self._close_episode(time_s=float(time_s))
+        if self._recovery_frames >= self.cfg.recovery_frames:
+            self._close_episode(
+                time_s=float(time_s),
+                frame_idx=int(frame_idx),
+                event="episode_closed",
+                reason="helmet_recovered",
+            )
+        elif self._absence_frames >= self.cfg.absence_frames:
+            self._close_episode(
+                time_s=float(time_s),
+                frame_idx=int(frame_idx),
+                event="episode_closed",
+                reason="person_absent",
+            )
 
         return ()
 
@@ -963,10 +959,46 @@ class HelmetAlertEngine:
         overflow = len(self._diagnostic_observations) - HELMET_DIAGNOSTIC_MAX_PENDING_OBSERVATIONS
         if overflow > 0:
             del self._diagnostic_observations[:overflow]
+            self._diagnostic_dropped_observation_count += overflow
 
-    def flush(self, *, time_s: float) -> None:
+    def _record_diagnostic_event(
+        self,
+        *,
+        event: str,
+        reason: str,
+        frame_idx: int,
+        time_s: float,
+        alert_uid: Optional[str] = None,
+    ) -> None:
+        if self._diagnostic_tracker is None:
+            return
+        try:
+            diagnostic_event = HelmetDiagnosticEvent(
+                event=event,
+                reason=reason,
+                frame_idx=frame_idx,
+                time_s=time_s,
+                episode_start_frame_idx=self._episode_start_frame_idx,
+                episode_start_time_s=self._episode_start_time_s,
+                alert_uid=alert_uid,
+            )
+        except Exception:
+            self._diagnostic_error_count += 1
+            return
+        self._diagnostic_events.append(diagnostic_event)
+        overflow = len(self._diagnostic_events) - HELMET_DIAGNOSTIC_MAX_PENDING_EVENTS
+        if overflow > 0:
+            del self._diagnostic_events[:overflow]
+            self._diagnostic_dropped_event_count += overflow
+
+    def flush(self, *, time_s: float, frame_idx: Optional[int] = None) -> None:
         if self._active:
-            self._close_episode(time_s=float(time_s))
+            self._close_episode(
+                time_s=float(time_s),
+                frame_idx=self._last_frame_idx if frame_idx is None else int(frame_idx),
+                event="episode_closed",
+                reason="runner_flush",
+            )
 
     def _start_episode(self, *, time_s: float, frame_idx: int, wall_dt: Optional[datetime]) -> None:
         self._active = True
@@ -979,8 +1011,27 @@ class HelmetAlertEngine:
         self._recovery_frames = 0
         self._absence_frames = 0
         self._episode_best_helmet_score = None
+        self._record_diagnostic_event(
+            event="episode_started",
+            reason="no_helmet_candidate",
+            frame_idx=frame_idx,
+            time_s=time_s,
+        )
 
-    def _close_episode(self, *, time_s: float) -> None:
+    def _close_episode(
+        self,
+        *,
+        time_s: float,
+        frame_idx: Optional[int] = None,
+        event: str = "episode_closed",
+        reason: str = "episode_ended",
+    ) -> None:
+        self._record_diagnostic_event(
+            event=event,
+            reason=reason,
+            frame_idx=self._last_frame_idx if frame_idx is None else frame_idx,
+            time_s=time_s,
+        )
         if self._alert_emitted:
             self._cooldown_until_s = float(time_s) + float(self.cfg.cooldown_seconds)
         self._active = False
@@ -1167,6 +1218,7 @@ def _detection_iou(a: Detection, b: Detection) -> float:
     area_a = max(0.0, float(a.x2) - float(a.x1)) * max(0.0, float(a.y2) - float(a.y1))
     area_b = max(0.0, float(b.x2) - float(b.x1)) * max(0.0, float(b.y2) - float(b.y1))
 
+    #return the finallyf cintion of the iou (intersection over union)
     denominator = area_a + area_b - intersection
     return 0.0 if denominator <= 0.0 else intersection / denominator
 
@@ -1177,21 +1229,13 @@ def _helmet_center_geometry(
     *,
     head_top_fraction: float,
 ) -> Tuple[float, float, bool, bool]:
-    """Return the helmet center and whether it falls in the person's body/head regions."""
-
     head_y2 = float(person.y1) + (float(person.y2) - float(person.y1)) * float(head_top_fraction)
-    # The point under test is the helmet box center; the person box supplies
-    # only the enclosing body and head-region boundaries.
+
+    #the center calculation are for the inside helmet center geometry
     center_x = (float(helmet.x1) + float(helmet.x2)) * 0.5
     center_y = (float(helmet.y1) + float(helmet.y2)) * 0.5
-    inside_person = (
-        float(person.x1) <= center_x <= float(person.x2)
-        and float(person.y1) <= center_y <= float(person.y2)
-    )
-    inside_head = (
-        float(person.x1) <= center_x <= float(person.x2)
-        and float(person.y1) <= center_y <= head_y2
-    )
+    inside_person = float(person.x1) <= center_x <= float(person.x2) and float(person.y1) <= center_y <= float(person.y2)
+    inside_head = float(person.x1) <= center_x <= float(person.x2) and float(person.y1) <= center_y <= head_y2
     return center_x, center_y, inside_person, inside_head
 
 
@@ -1213,12 +1257,7 @@ def _helmet_diagnostic_associations(
         distance = math.hypot(center_x - person_center_x, center_y - person_center_y)
         associations.append(
             HelmetDiagnosticAssociation(
-                helmet_box=(
-                    float(helmet.x1),
-                    float(helmet.y1),
-                    float(helmet.x2),
-                    float(helmet.y2),
-                ),
+                helmet_box=(float(helmet.x1), float(helmet.y1), float(helmet.x2), float(helmet.y2)),
                 helmet_score=float(helmet.score),
                 center_inside_person=inside_person,
                 center_inside_head=inside_head,
@@ -1240,11 +1279,7 @@ def _prioritize_diagnostic_associations(
     associations: Sequence[HelmetDiagnosticAssociation],
 ) -> Tuple[HelmetDiagnosticAssociation, ...]:
     """Retain head-associated evidence before unrelated high-score boxes."""
-    associated = [
-        item
-        for item in associations
-        if item.center_inside_person and item.center_inside_head
-    ]
+    associated = [item for item in associations if item.center_inside_person and item.center_inside_head]
     unrelated = [item for item in associations if item not in associated]
     return tuple((associated + unrelated)[:HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS])
 
