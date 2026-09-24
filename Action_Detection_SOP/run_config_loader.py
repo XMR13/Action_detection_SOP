@@ -144,6 +144,7 @@ def apply_run_config(
         "progress_every_s",
         "cleaning_s",
         "labeling_s",
+        "blue_roll_min_fraction",
     }
     bool_keys = {
         "loop_video",
@@ -162,6 +163,7 @@ def apply_run_config(
         "show",
         "progress",
         "compress_out",
+        "exclude_blue_rolls",
     }
 
     for key, value in payload.items():

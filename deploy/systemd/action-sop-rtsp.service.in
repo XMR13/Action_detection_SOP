@@ -29,6 +29,7 @@ ExecStart=@PYTHON_BIN@ -m Scripts.run_sop_mvp \
     --imgsz ${SOP_IMAGE_SIZE} \
     --conf ${SOP_CONFIDENCE} \
     --analysis-fps ${SOP_ANALYSIS_FPS} \
+    $SOP_BLUE_ROLL_ARGS \
     --enable-helmet-alerts \
     $SOP_HELMET_DIAGNOSTICS_ARGS \
     --out-dir ${SOP_DATA_DIR} \

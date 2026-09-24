@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests, load_run_config
+from Action_Detection_SOP.roll_color_gate import DEFAULT_MIN_BLUE_FRACTION
 from Action_Detection_SOP.runner_mvp import run_mvp
 from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
 from Action_Detection_SOP.safety_alerts import (
@@ -169,6 +170,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--person-label", action="append", default=["person"], help="Class name for person (repeatable).")
     parser.add_argument("--helmet-label", action="append", default=["helmet"], help="Class name for helmet (repeatable).")
     parser.add_argument("--roll-label", action="append", default=["roll"], help="Class name for roll (repeatable).")
+    parser.add_argument(
+        "--exclude-blue-rolls",
+        action="store_true",
+        help="roll_sop_v1: exclude blue wrapped rolls already completed upstairs from first-floor SOP sessions.",
+    )
+    parser.add_argument(
+        "--blue-roll-min-fraction",
+        type=float,
+        default=DEFAULT_MIN_BLUE_FRACTION,
+        help="Minimum blue fraction inside a roll box for exclusion (default: 0.30).",
+    )
     parser.add_argument(
         "--cleaning-cloth-label",
         action="append",

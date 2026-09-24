@@ -9,6 +9,22 @@ On-prem computer vision pipeline for roll-wrapping SOP review, built for Jetson 
 - Current `roll_sop_v1` target checks: `cleaned`, `labeled`, and `overall_status`.
 - Separate safety flow: helmet alerts are independent website alert records, not part of roll `overall_status`.
 
+### Blue rolls completed upstairs
+
+The first-floor roll SOP does not apply to rolls with blue outer covering; their
+wrapping SOP was completed upstairs. `roll_sop_v1` can exclude these rolls before
+sessionization with `--exclude-blue-rolls`. The opt-in rule measures blue pixels
+inside each detected roll box on the raw camera frame. Its default minimum blue
+fraction is `0.30` and can be set with `--blue-roll-min-fraction`. Detections
+that do not meet the threshold continue through normal SOP review. The run
+configuration records the threshold and exclusion counts.
+
+The initial color range was checked against three blue-roll screenshots from
+Camera 16 RW3. Validate on recorded blue and non-blue rolls, including lighting
+changes and occlusions, before enabling it on the live worker. The existing
+session start/end timing handles short color misses; a sustained miss can still
+create a session. This rule does not change existing review records.
+
 ## Requirements
 
 - Python `3.10`

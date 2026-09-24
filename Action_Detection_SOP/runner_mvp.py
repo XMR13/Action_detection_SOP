@@ -24,6 +24,7 @@ from Action_Detection_SOP.evidence_io import write_evidence_clip, write_evidence
 from Action_Detection_SOP.helmet_diagnostics_capture import HelmetDiagnosticCapture
 from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capture
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
+from Action_Detection_SOP.roll_color_gate import BLUE_HSV_LOWER, BLUE_HSV_UPPER, exclude_blue_rolls
 from Action_Detection_SOP.reporting import (
     SessionReportResult,
     date_for_elapsed_time,
@@ -313,6 +314,10 @@ def run_mvp(
     # Resolve profile, classes, timing, and ROI inputs.
     runtime = resolve_run_config(args)
     sop_profile_name = runtime.sop_profile.name
+    if args.exclude_blue_rolls and sop_profile_name != PROFILE_ROLL_SOP_V1:
+        raise ValueError("--exclude-blue-rolls requires --sop-profile roll_sop_v1")
+    if not (0.0 < args.blue_roll_min_fraction <= 1.0):
+        raise ValueError("--blue-roll-min-fraction must be within (0, 1]")
     class_names = runtime.classes.class_names
     class_conf_thresholds = runtime.classes.class_conf_thresholds
     person_ids = list(runtime.classes.person_ids)
@@ -662,6 +667,15 @@ def run_mvp(
             rtsp_buffer_size=rtsp_buffer_size,
         )
     )
+    blue_roll_exclusion: Dict[str, object] = {
+        "enabled": bool(args.exclude_blue_rolls),
+        "min_blue_fraction": float(args.blue_roll_min_fraction),
+        "hsv_lower": list(BLUE_HSV_LOWER),
+        "hsv_upper": list(BLUE_HSV_UPPER),
+        "excluded_detections": 0,
+        "frames_with_exclusions": 0,
+    }
+    run_config["blue_roll_exclusion"] = blue_roll_exclusion
     if helmet_alerts_enabled:
         helmet_alert_config: Dict[str, object] = {
             "enabled": True,
@@ -721,7 +735,6 @@ def run_mvp(
     last_dets_roi: List[Detection] = []
     last_persons_all: List[Detection] = []
     last_helmets_all: List[Detection] = []
-    last_rolls_roi: List[Detection] = []
     last_cleaning_roi: List[Detection] = []
     last_labels_roi: List[Detection] = []
 
@@ -995,18 +1008,28 @@ def run_mvp(
                 persons_all, helmets_all = _split_classes(dets_global, person_ids=person_ids, helmet_ids=helmet_ids)
                 persons_roi = _filter_by_roi(persons_all, roi_for_frame)
                 if sop_profile_name == PROFILE_ROLL_SOP_V1:
-                    rolls_roi = _filter_class_ids(dets_roi, roll_ids)
+                    roi_rolls = _filter_class_ids(dets_roi, roll_ids)
+                    sop_rolls = roi_rolls
+                    if args.exclude_blue_rolls:
+                        sop_rolls, blue_rolls = exclude_blue_rolls(
+                            frame,
+                            roi_rolls,
+                            min_blue_fraction=float(args.blue_roll_min_fraction),
+                        )
+                        if blue_rolls:
+                            blue_roll_exclusion["excluded_detections"] += len(blue_rolls)
+                            blue_roll_exclusion["frames_with_exclusions"] += 1
+                            
                     cleaning_roi = _filter_class_ids(dets_roi, cleaning_cloth_ids)
                     labels_roi = _filter_class_ids(dets_roi, paper_label_ids)
                     assert isinstance(engine, RollSopEngine)
                     result = engine.update(
                         time_s=float(t_s),
                         frame_idx=processed,
-                        rolls=rolls_roi,
+                        rolls=sop_rolls,
                         cleaning_cloths=cleaning_roi,
                         labels=labels_roi,
                     )
-                    last_rolls_roi = list(rolls_roi)
                     last_cleaning_roi = list(cleaning_roi)
                     last_labels_roi = list(labels_roi)
                 else:

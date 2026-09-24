@@ -126,6 +126,17 @@ SQLite file without measuring and testing write behavior.
 Tune `/etc/action-sop/rtsp.env` only after collecting live GPU, CPU, memory,
 temperature, frame-cadence, and disk-growth evidence.
 
+## Optional blue-roll exclusion
+
+Blue outer covering identifies rolls whose wrapping SOP was completed upstairs.
+After validating the rule against recorded blue and non-blue rolls from this
+camera, set `SOP_BLUE_ROLL_ARGS="--exclude-blue-rolls"` in
+`/etc/action-sop/rtsp.env`. The default blue fraction threshold is `0.30`; add
+`--blue-roll-min-fraction VALUE` only when replay evidence supports a different
+value. Rerender the RTSP unit with the installer and restart the worker. The
+rule is off when `SOP_BLUE_ROLL_ARGS` is empty. Its exclusion counts are stored
+in the run configuration; old review records are unaffected.
+
 ## Optional helmet diagnostics
 
 Set `SOP_HELMET_DIAGNOSTICS_ARGS` in `/etc/action-sop/rtsp.env` to
