@@ -137,6 +137,17 @@ value. Rerender the RTSP unit with the installer and restart the worker. The
 rule is off when `SOP_BLUE_ROLL_ARGS` is empty. Its exclusion counts are stored
 in the run configuration; old review records are unaffected.
 
+## Short roll-session duration exclusion
+
+The RTSP service uses the runner's existing minimum session duration check.
+Set `SOP_MIN_SESSION_ARGS="--min-session-s 30"` in
+`/etc/action-sop/rtsp.env` to discard a completed roll session when its
+`end_time_s - start_time_s` duration is below 30 seconds. This matches the
+website's **Durasi** field; a session at exactly 30 seconds is retained. The
+RTSP environment example enables this 30-second threshold by default. Set the
+variable to an empty string to keep sessions of all durations. Rerender the
+RTSP unit with the installer and restart the worker after changing it.
+
 ## Optional helmet diagnostics
 
 Set `SOP_HELMET_DIAGNOSTICS_ARGS` in `/etc/action-sop/rtsp.env` to

@@ -1248,6 +1248,8 @@ def run_mvp(
             if result is not None:
                 result = _stamp_session_result(result)
                 duration_s = _session_duration_s(result)
+
+                #Jika waktu yang prosses lebih besar dari 0 namun lebih kekcil dari min session maka discard
                 if args.min_session_s > 0 and duration_s < float(args.min_session_s):
                     discarded_sessions.append(
                         {

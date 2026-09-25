@@ -30,6 +30,7 @@ ExecStart=@PYTHON_BIN@ -m Scripts.run_sop_mvp \
     --conf ${SOP_CONFIDENCE} \
     --analysis-fps ${SOP_ANALYSIS_FPS} \
     $SOP_BLUE_ROLL_ARGS \
+    $SOP_MIN_SESSION_ARGS \
     --enable-helmet-alerts \
     $SOP_HELMET_DIAGNOSTICS_ARGS \
     --out-dir ${SOP_DATA_DIR} \

@@ -101,12 +101,14 @@ def _sessions_root_signature_ns(data_dir: Path) -> int:
     - `<data_dir>/sessions`
     - `<data_dir>/*/sessions` (one-level nested runner outputs)
 
-    For each sessions root, we only look at:
+    For each sessions root, we look at:
     - the root mtime
     - mtimes of the immediate date subdirectories
+    - mtimes of the session subdirectories
 
     Creating a new session directory updates the parent date directory mtime,
-    so this detects new uploads without reading any JSON.
+    and writing its finalized checklist updates the session directory mtime.
+    This detects both new sessions and completed sessions without reading JSON.
     """
 
     def mtime_ns(p: Path) -> int:
@@ -147,9 +149,16 @@ def _sessions_root_signature_ns(data_dir: Path) -> int:
     for root in iter_session_roots():
         sig = max(sig, mtime_ns(root))
         try:
-            for child in root.iterdir():
-                if child.is_dir():
-                    sig = max(sig, mtime_ns(child))
+            for date_dir in root.iterdir():
+                if not date_dir.is_dir():
+                    continue
+                sig = max(sig, mtime_ns(date_dir))
+                try:
+                    for session_dir in date_dir.iterdir():
+                        if session_dir.is_dir():
+                            sig = max(sig, mtime_ns(session_dir))
+                except OSError:
+                    continue
         except OSError:
             continue
     return sig

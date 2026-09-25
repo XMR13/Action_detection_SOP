@@ -33,16 +33,19 @@ class SessionArtifact:
 
 def _safe_read_json(path: Path) -> Dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
         return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
     out: List[Tuple[str, Path, Path]] = []
 
+    # Runner session directories exist while active; checklist.json is written
+    # only when a session passes finalization and is ready for review.
     # Primary layout from run_sop_mvp:
     # <out_dir>/sessions/<date>/session_<id>/
     # Ingestion layout (web-first):
@@ -58,7 +61,7 @@ def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
             for child in sorted(date_dir.iterdir()):
                 if not child.is_dir():
                     continue
-                if child.name.startswith("session_") or (child / "checklist.json").exists():
+                if (child / "checklist.json").is_file():
                     out.append((date, child, data_dir))
 
     # Also support nested copied run-output folders:
@@ -77,7 +80,7 @@ def _iter_session_dirs(data_dir: Path) -> Iterable[Tuple[str, Path, Path]]:
             for child in sorted(date_dir.iterdir()):
                 if not child.is_dir():
                     continue
-                if child.name.startswith("session_") or (child / "checklist.json").exists():
+                if (child / "checklist.json").is_file():
                     out.append((date, child, run_root))
 
     # Deduplicate by absolute session path in case two globs resolve to same dir.
@@ -134,6 +137,9 @@ class SessionIndex:
         for date, session_dir, run_root in _iter_session_dirs(self._data_dir):
             checklist_path = session_dir / "checklist.json"
             checklist = _safe_read_json(checklist_path)
+            # Ignore empty, partial, malformed, or non-object checklist data.
+            if not checklist:
+                continue
             if "session_id" in checklist:
                 session_id = str(checklist.get("session_id") or "")
             else:
