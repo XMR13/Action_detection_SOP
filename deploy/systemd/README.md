@@ -126,6 +126,26 @@ SQLite file without measuring and testing write behavior.
 Tune `/etc/action-sop/rtsp.env` only after collecting live GPU, CPU, memory,
 temperature, frame-cadence, and disk-growth evidence.
 
+## Optional cleaning-cloth confidence
+
+The RTSP worker normally uses `SOP_CONFIDENCE` for roll, cleaning cloth, and
+label detections. The runner also supports a per-class `--label-conf` override.
+To trial a lower threshold for cleaning cloth alone, set this in
+`/etc/action-sop/rtsp.env`:
+
+```ini
+SOP_CLEANING_CLOTH_ARGS="--label-conf cleaning_cloth=0.25"
+```
+
+The `0.25` value is an initial comparison point, not an accepted threshold.
+It leaves the roll and label thresholds at `SOP_CONFIDENCE` and does not add
+another inference pass. Lower scores can increase false cleaning evidence, so
+compare missed cleaning cases and false `cleaned=DONE` cases before keeping it.
+An empty value restores the general threshold. Existing protected environment
+files are preserved on reinstall; add the variable explicitly on a deployed
+Jetson, rerun the RTSP installer with `--start`, and verify that the running
+process has consecutive `--label-conf` and `cleaning_cloth=0.25` arguments.
+
 ## Optional blue-roll exclusion
 
 Blue outer covering identifies rolls whose wrapping SOP was completed upstairs.
