@@ -304,7 +304,109 @@ def test_diagnostics_do_not_change_alert_decisions_or_timing() -> None:
     diagnostic_events = enabled.pop_diagnostic_events()
     assert [event.event for event in diagnostic_events] == ["episode_started", "alert_emitted"]
     assert diagnostic_events[-1].alert_uid == enabled_alerts[0].alert_uid
+    assert diagnostic_events[-1].candidate_track_ids == (1,)
     assert enabled.diagnostic_error_count == 0
+
+
+def test_shadow_rejects_interrupted_no_helmet_streak_without_changing_alert() -> None:
+    live = _engine(required_s=3.0)
+    shadow = _engine(required_s=3.0, diagnostics=True)
+    live_alerts = []
+    shadow_alerts = []
+    for frame_idx, helmets in enumerate(([], [_helmet(score=0.2)], []), start=1):
+        kwargs = {
+            "time_s": float(frame_idx),
+            "frame_idx": frame_idx,
+            "persons": [_person()],
+            "helmets": helmets,
+            "safety_roi": _roi(),
+        }
+        live_alerts.extend(live.update(**kwargs))
+        shadow_alerts.extend(shadow.update(**kwargs))
+
+    assert live_alerts == shadow_alerts
+    assert len(live_alerts) == 1
+    observations = shadow.pop_diagnostic_observations()
+    recent = observations[-1].shadow
+    assert recent is not None
+    assert recent.as_payload() == {
+        "required_frames": 3,
+        "window_frames": 3,
+        "observed_frames": 3,
+        "verified_frames": 1,
+        "unverified_streak_frames": 1,
+        "sustained_unverified": False,
+    }
+
+
+def test_shadow_uses_each_persons_own_recent_helmet_evidence() -> None:
+    engine = _engine(required_s=3.0, diagnostics=True)
+    helmeted = _person()
+    unhelmeted = _person(x1=220, x2=320)
+    alerts = []
+    for frame_idx in range(1, 4):
+        alerts.extend(
+            engine.update(
+                time_s=float(frame_idx),
+                frame_idx=frame_idx,
+                persons=[helmeted, unhelmeted],
+                helmets=[_helmet()],
+                safety_roi=_roi(),
+            )
+        )
+
+    assert len(alerts) == 1
+    latest = [item for item in engine.pop_diagnostic_observations() if item.frame_idx == 3]
+    by_x1 = {item.person_box[0]: item.shadow for item in latest}
+    assert by_x1[50.0] is not None and by_x1[50.0].verified_frames == 3
+    assert by_x1[50.0].sustained_unverified is False
+    assert by_x1[220.0] is not None and by_x1[220.0].verified_frames == 0
+    assert by_x1[220.0].sustained_unverified is True
+    emitted = [event for event in engine.pop_diagnostic_events() if event.event == "alert_emitted"]
+    assert len(emitted) == 1
+    assert emitted[0].candidate_track_ids == (
+        next(item.diagnostic_track_id for item in latest if item.person_box[0] == 220.0),
+    )
+
+
+def test_shadow_streak_resets_when_person_track_is_missing() -> None:
+    tracker = HelmetDiagnosticTracker(shadow_required_frames=2)
+    args = {
+        "helmets": [],
+        "frame_size": (400, 400),
+        "head_top_fraction": 0.35,
+        "verification_confidence": 0.15,
+    }
+    tracker.update(persons=[_person()], frame_idx=1, time_s=1.0, **args)
+    tracker.update(persons=[], frame_idx=2, time_s=2.0, **args)
+    observation = tracker.update(persons=[_person()], frame_idx=3, time_s=3.0, **args)[0]
+
+    assert observation.diagnostic_track_id == 1
+    assert observation.shadow is not None
+    assert observation.shadow.observed_frames == 1
+    assert observation.shadow.unverified_streak_frames == 1
+    assert observation.shadow.sustained_unverified is False
+
+
+def test_shadow_recent_history_is_bounded_but_streak_keeps_required_duration() -> None:
+    tracker = HelmetDiagnosticTracker(shadow_required_frames=151)
+    observation = None
+    for frame_idx in range(1, 152):
+        observation = tracker.update(
+            persons=[_person()],
+            helmets=[],
+            frame_idx=frame_idx,
+            time_s=float(frame_idx),
+            frame_size=(400, 400),
+            head_top_fraction=0.35,
+            verification_confidence=0.15,
+        )[0]
+
+    assert observation is not None and observation.shadow is not None
+    assert observation.shadow.window_frames == 150
+    assert observation.shadow.observed_frames == 150
+    assert observation.shadow.unverified_streak_frames == 151
+    assert observation.shadow.sustained_unverified is True
 
 
 def test_diagnostic_events_explain_weak_helmet_cancel_and_recovery() -> None:

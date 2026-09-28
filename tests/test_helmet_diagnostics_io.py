@@ -26,6 +26,10 @@ def test_jsonl_writer_records_frames_events_and_redacts_sources(tmp_path: Path) 
     alerts = engine.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[], safety_roi=_roi())
     observations = engine.pop_diagnostic_observations()
     events = engine.pop_diagnostic_events()
+    engine.update(time_s=2.0, frame_idx=2, persons=[_person()], helmets=[], safety_roi=_roi())
+    next_observations = engine.pop_diagnostic_observations()
+    next_events = engine.pop_diagnostic_events()
+    assert next_events == ()
 
     writer = HelmetDiagnosticJsonlWriter(
         out_dir=tmp_path,
@@ -48,8 +52,8 @@ def test_jsonl_writer_records_frames_events_and_redacts_sources(tmp_path: Path) 
         frame_idx=2,
         time_s=2.0,
         segment_id=0,
-        observations=(),
-        events=(),
+        observations=next_observations,
+        events=next_events,
     )
     writer.close()
 
@@ -59,11 +63,15 @@ def test_jsonl_writer_records_frames_events_and_redacts_sources(tmp_path: Path) 
     assert records[0]["camera_id"] == "rtsp://camera.local/camera"
     assert records[1]["record_type"] == "capture_segment"
     assert records[2]["observations"][0]["diagnostic_track_id"] == 1
+    assert records[2]["observations"][0]["shadow"]["sustained_unverified"] is True
+    assert records[2]["observations"][0]["shadow"]["required_frames"] == 1
     assert records[2]["events"][0]["event"] == "episode_started"
+    assert records[2]["events"][1]["candidate_track_ids"] == [1]
     assert "observations" not in records[2]["events"][0]
     assert "source" not in records[2]["events"][0]
     assert records[2]["alert_uids"] == [alerts[0].alert_uid]
-    assert records[3]["observations"] == []
+    assert len(records[3]["observations"]) == 1
+    assert "shadow" not in records[3]["observations"][0]
     assert records[-1]["record_type"] == "run_end"
     assert "secret" not in writer.path.read_text(encoding="utf-8")
     assert "token=private" not in writer.path.read_text(encoding="utf-8")

@@ -109,6 +109,9 @@ class HelmetDiagnosticJsonlWriter:
             time_s = float(time_s)
             if not math.isfinite(time_s) or time_s < 0.0:
                 return self._fail()
+            # Keep the per-frame capture compact while preserving shadow state
+            # at episode transitions and alert emission.
+            include_shadow = bool(events)
             payload = {
                 "record_type": "final_drain" if final_drain else "frame",
                 "logged_at_utc": self._now_utc(),
@@ -116,7 +119,9 @@ class HelmetDiagnosticJsonlWriter:
                 "frame_idx": int(frame_idx),
                 "time_s": round(time_s, 3),
                 "alert_uids": list(alert_uids),
-                "observations": [item.as_payload() for item in observations],
+                "observations": [
+                    item.as_payload(include_shadow=include_shadow) for item in observations
+                ],
                 "events": [item.as_payload() for item in events],
             }
         except (TypeError, ValueError, OverflowError):

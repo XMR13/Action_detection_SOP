@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,6 +13,14 @@ import cv2
 import numpy as np
 
 from Action_Detection_SOP.roi import RoiPolygon, draw_roi
+from helmet_diagnostics_schema import (
+    HELMET_DIAGNOSTICS_SCHEMA_VERSION,
+    HELMET_DIAGNOSTIC_MAX_RECENT_FRAMES,
+    HELMET_DIAGNOSTIC_MAX_TRACKS,
+    require_diagnostic_int as _diagnostic_int,
+    validate_candidate_track_ids,
+    validate_shadow_payload,
+)
 from Action_Detection_SOP.source_security import redact_source_credentials
 from yolo_kit.types import Detection
 
@@ -22,12 +31,10 @@ ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
 DEFAULT_HELMET_REQUIRED_SECONDS = 10
 DEFAULT_HELMET_ALERT_CONFIDENCE = 0.15
-HELMET_DIAGNOSTICS_SCHEMA_VERSION = 2
 HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY = 32
 HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS = 8
 HELMET_DIAGNOSTIC_IOU_THRESHOLD = 0.25
 HELMET_DIAGNOSTIC_MAX_MISSED_FRAMES = 2
-HELMET_DIAGNOSTIC_MAX_TRACKS = 32
 HELMET_DIAGNOSTIC_MAX_PENDING_OBSERVATIONS = 256
 HELMET_DIAGNOSTIC_MAX_PENDING_EVENTS = 256
 
@@ -58,14 +65,6 @@ def _diagnostic_float(
     if maximum is not None and number > maximum:
         raise ValueError(f"{field_name} must be <= {maximum}")
     return number
-
-
-def _diagnostic_int(value: int, field_name: str, *, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be an integer")
-    if value < minimum:
-        raise ValueError(f"{field_name} must be >= {minimum}")
-    return int(value)
 
 
 def _diagnostic_bool(value: bool, field_name: str) -> bool:
@@ -173,6 +172,31 @@ class HelmetDiagnosticAssociation:
 
 
 @dataclass(frozen=True)
+class HelmetShadowSnapshot:
+    """Person-specific counterfactual; it never changes alert decisions."""
+
+    required_frames: int
+    window_frames: int
+    observed_frames: int
+    verified_frames: int
+    unverified_streak_frames: int
+    sustained_unverified: bool
+
+    def __post_init__(self) -> None:
+        validate_shadow_payload(self.as_payload())
+
+    def as_payload(self) -> Dict[str, Any]:
+        return {
+            "required_frames": self.required_frames,
+            "window_frames": self.window_frames,
+            "observed_frames": self.observed_frames,
+            "verified_frames": self.verified_frames,
+            "unverified_streak_frames": self.unverified_streak_frames,
+            "sustained_unverified": self.sustained_unverified,
+        }
+
+
+@dataclass(frozen=True)
 class HelmetDiagnosticObservation:
     """
     Immutable, bounded per-frame observation for a diagnostic-only track.
@@ -195,6 +219,7 @@ class HelmetDiagnosticObservation:
     track_history_length: int = 1
     track_history_limit: int = HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY
     track_history_truncated: bool = False
+    shadow: Optional[HelmetShadowSnapshot] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -302,8 +327,10 @@ class HelmetDiagnosticObservation:
             "track_history_truncated",
             _diagnostic_bool(self.track_history_truncated, "track_history_truncated"),
         )
+        if self.shadow is not   None and not isinstance(self.shadow, HelmetShadowSnapshot):
+            raise TypeError("shadow must be a HelmetShadowSnapshot")
 
-    def as_payload(self) -> Dict[str, Any]:
+    def as_payload(self, *, include_shadow: bool = True) -> Dict[str, Any]:
         return {
             "schema_version": HELMET_DIAGNOSTICS_SCHEMA_VERSION,
             "diagnostic_track_id": self.diagnostic_track_id,
@@ -329,6 +356,8 @@ class HelmetDiagnosticObservation:
                 "limit": self.track_history_limit,
                 "truncated": self.track_history_truncated,
             },
+            # Optional schema-v2 extension; older captures remain readable.
+            **({"shadow": self.shadow.as_payload()} if include_shadow and self.shadow is not None else {}),
         }
 
 
@@ -345,6 +374,7 @@ class HelmetDiagnosticEvent:
     episode_start_frame_idx: int
     episode_start_time_s: float
     alert_uid: Optional[str] = None
+    candidate_track_ids: Tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event", _diagnostic_text(self.event, "event", max_length=64))
@@ -367,6 +397,9 @@ class HelmetDiagnosticEvent:
         )
         if self.alert_uid is not None:
             object.__setattr__(self, "alert_uid", _diagnostic_text(self.alert_uid, "alert_uid"))
+        object.__setattr__(
+            self, "candidate_track_ids", validate_candidate_track_ids(self.candidate_track_ids)
+        )
 
     def as_payload(self) -> Dict[str, Any]:
         return {
@@ -378,6 +411,7 @@ class HelmetDiagnosticEvent:
             "episode_start_frame_idx": self.episode_start_frame_idx,
             "episode_start_time_s": _diagnostic_round(self.episode_start_time_s),
             "alert_uid": self.alert_uid,
+            **({"candidate_track_ids": list(self.candidate_track_ids)} if self.candidate_track_ids else {}),
         }
 
 
@@ -391,6 +425,9 @@ class _HelmetDiagnosticTrack:
     best_helmet_score: Optional[float] = None
     score_history: List[float] = field(default_factory=list)
     history_truncated: bool = False
+    recent_verified: deque[bool] = field(default_factory=deque)
+    recent_verified_count: int = 0
+    unverified_streak_frames: int = 0
 
 
 class HelmetDiagnosticTracker:
@@ -405,6 +442,7 @@ class HelmetDiagnosticTracker:
         max_missed_frames: int = HELMET_DIAGNOSTIC_MAX_MISSED_FRAMES,
         max_tracks: int = HELMET_DIAGNOSTIC_MAX_TRACKS,
         score_history_limit: int = HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY,
+        shadow_required_frames: int = 50,
     ) -> None:
         self.iou_threshold = _diagnostic_float(
             iou_threshold,
@@ -427,6 +465,10 @@ class HelmetDiagnosticTracker:
                 "diagnostic score_history_limit must be <= "
                 f"{HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY}"
             )
+        self.shadow_required_frames = _diagnostic_int(
+            shadow_required_frames, "diagnostic shadow_required_frames", minimum=1
+        )
+        self.shadow_window_frames = min(self.shadow_required_frames, HELMET_DIAGNOSTIC_MAX_RECENT_FRAMES)
         self._tracks: List[_HelmetDiagnosticTrack] = []
         self._next_track_id = 1
 
@@ -504,6 +546,10 @@ class HelmetDiagnosticTracker:
         for track_index, track in enumerate(self._tracks):
             if track_index not in matched_track_indices:
                 track.missed_frames += 1
+                # A missing person breaks the continuous shadow streak.
+                track.unverified_streak_frames = 0
+                track.recent_verified.clear()
+                track.recent_verified_count = 0
         self._tracks = [track for track in self._tracks if track.missed_frames <= self.max_missed_frames]
 
         for person_index, person in enumerate(ordered_persons):
@@ -532,8 +578,16 @@ class HelmetDiagnosticTracker:
             associations = _prioritize_diagnostic_associations(all_associations)
             frame_best_score = max(associated_scores) if associated_scores else None
             track.observation_count += 1
-            if any(score >= verification_confidence for score in associated_scores):
+            verified = any(score >= verification_confidence for score in associated_scores)
+            if verified:
                 track.hit_count += 1
+                track.unverified_streak_frames = 0
+            else:
+                track.unverified_streak_frames += 1
+            if len(track.recent_verified) >= self.shadow_window_frames:
+                track.recent_verified_count -= int(track.recent_verified.popleft())
+            track.recent_verified.append(verified)
+            track.recent_verified_count += int(verified)
             if frame_best_score is not None:
                 track.best_helmet_score = (
                     frame_best_score
@@ -568,6 +622,14 @@ class HelmetDiagnosticTracker:
                     track_history_length=len(track.score_history),
                     track_history_limit=self.score_history_limit,
                     track_history_truncated=track.history_truncated,
+                    shadow=HelmetShadowSnapshot(
+                        required_frames=self.shadow_required_frames,
+                        window_frames=self.shadow_window_frames,
+                        observed_frames=len(track.recent_verified),
+                        verified_frames=track.recent_verified_count,
+                        unverified_streak_frames=track.unverified_streak_frames,
+                        sustained_unverified=track.unverified_streak_frames >= self.shadow_required_frames,
+                    ),
                 )
             )
         return tuple(sorted(observations, key=lambda item: item.diagnostic_track_id))
@@ -741,7 +803,7 @@ class HelmetAlertEngine:
         if diagnostic_tracker is not None and not diagnostics_enabled:
             raise ValueError("diagnostic_tracker requires diagnostics_enabled=True")
         if diagnostics_enabled and diagnostic_tracker is None:
-            diagnostic_tracker = HelmetDiagnosticTracker()
+            diagnostic_tracker = HelmetDiagnosticTracker(shadow_required_frames=cfg.required_frames)
         self._diagnostic_tracker = diagnostic_tracker
         self._diagnostic_observations: List[HelmetDiagnosticObservation] = []
         self._diagnostic_events: List[HelmetDiagnosticEvent] = []
@@ -892,6 +954,7 @@ class HelmetAlertEngine:
                     frame_idx=int(frame_idx),
                     time_s=float(time_s),
                     alert_uid=alert.alert_uid,
+                    candidate_persons=candidate_persons,
                 )
                 return (alert,)
             return ()
@@ -969,10 +1032,20 @@ class HelmetAlertEngine:
         frame_idx: int,
         time_s: float,
         alert_uid: Optional[str] = None,
+        candidate_persons: Sequence[Detection] = (),
     ) -> None:
         if self._diagnostic_tracker is None:
             return
         try:
+            candidate_boxes = {
+                (float(person.x1), float(person.y1), float(person.x2), float(person.y2))
+                for person in candidate_persons
+            }
+            candidate_track_ids = tuple(sorted({
+                observation.diagnostic_track_id
+                for observation in self._diagnostic_observations
+                if observation.frame_idx == frame_idx and observation.person_box in candidate_boxes
+            }))
             diagnostic_event = HelmetDiagnosticEvent(
                 event=event,
                 reason=reason,
@@ -981,6 +1054,7 @@ class HelmetAlertEngine:
                 episode_start_frame_idx=self._episode_start_frame_idx,
                 episode_start_time_s=self._episode_start_time_s,
                 alert_uid=alert_uid,
+                candidate_track_ids=candidate_track_ids,
             )
         except Exception:
             self._diagnostic_error_count += 1

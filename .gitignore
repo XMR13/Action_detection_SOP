@@ -11,7 +11,8 @@ Progress/
 Models/
 Media/
 datasets/
-docs/
+docs/*
+!docs/sop_status_decisions.md
 data/
 configs/*
 !configs/retention.yaml

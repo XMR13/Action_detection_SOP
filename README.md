@@ -80,6 +80,7 @@ Jetson rather than transferring an engine built on the laptop.
 - Next roll SOP metadata: `configs/metadata_roll_sop_v1.yaml`
 - Roadmap: `plan.md`
 - Domain terms: `CONTEXT.md`
+- SOP status rules and `UNKNOWN` diagnosis: `docs/sop_status_decisions.md`
 
 ## Current MVP Run
 

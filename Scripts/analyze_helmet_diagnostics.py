@@ -11,10 +11,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Optional, Sequence
 
+if __package__ in (None, ""):
+    # Direct script execution starts with Scripts/ on sys.path, not the repo root.
+    import sys
 
-# Keep this reader independent of OpenCV/TensorRT runtime imports. Bump this
-# contract marker when the writer's diagnostics payload schema changes.
-HELMET_DIAGNOSTICS_SCHEMA_VERSION = 2
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from helmet_diagnostics_schema import (
+    HELMET_DIAGNOSTICS_SCHEMA_VERSION,
+    is_diagnostic_int as _is_int,
+    validate_candidate_track_ids,
+    validate_shadow_payload,
+)
+
+# Keep this reader independent of OpenCV/TensorRT runtime imports. The shared
+# schema module owns the version marker; optional fields remain v2.
+_MAX_SHADOW_ALERT_SAMPLES = 100
 _RECORD_TYPES = {"run_start", "frame", "final_drain", "capture_segment", "run_end"}
 
 
@@ -74,6 +86,18 @@ class TrackSummary:
         return None
 
 
+@dataclass(frozen=True)
+class ShadowAlertSample:
+    alert_uid: str
+    segment_id: int
+    track_id: int
+    observed_frames: int
+    verified_frames: int
+    unverified_streak_frames: int
+    required_frames: int
+    sustained_unverified: bool
+
+
 @dataclass
 class RunSummary:
     path: Path
@@ -85,6 +109,8 @@ class RunSummary:
     event_reasons: Counter[tuple[str, str]] = field(default_factory=Counter)
     segment_ids: set[int] = field(default_factory=set)
     tracks: dict[tuple[int, int], TrackSummary] = field(default_factory=dict)
+    shadow_alert_samples: list[ShadowAlertSample] = field(default_factory=list)
+    shadow_alert_samples_omitted: int = 0
     observation_count: int = 0
     event_count: int = 0
     malformed_count: int = 0
@@ -183,14 +209,6 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def _is_int(value: Any, *, minimum: Optional[int] = None) -> bool:
-    return (
-        isinstance(value, int)
-        and not isinstance(value, bool)
-        and (minimum is None or value >= minimum)
-    )
-
-
 def _is_number(value: Any, *, minimum: Optional[float] = None, maximum: Optional[float] = None) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -266,13 +284,32 @@ def _valid_observation(value: Any) -> bool:
         and _is_int(history.get("length"), minimum=0)
         and _is_int(history.get("limit"), minimum=1)
         and isinstance(history.get("truncated"), bool)
+        and ("shadow" not in value or _valid_shadow(value["shadow"]))
     )
+
+def _valid_shadow(value: Any) -> bool:
+    try:
+        validate_shadow_payload(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _valid_candidate_track_ids(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    try:
+        validate_candidate_track_ids(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _valid_event(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
     alert_uid = value.get("alert_uid")
+    candidate_ids = value.get("candidate_track_ids", [])
     return (
         _is_int(value.get("schema_version"), minimum=1)
         and value.get("schema_version") == HELMET_DIAGNOSTICS_SCHEMA_VERSION
@@ -285,6 +322,7 @@ def _valid_event(value: Any) -> bool:
         and _is_int(value.get("episode_start_frame_idx"), minimum=0)
         and _is_number(value.get("episode_start_time_s"), minimum=0.0)
         and (alert_uid is None or isinstance(alert_uid, str))
+        and _valid_candidate_track_ids(candidate_ids)
     )
 
 
@@ -458,6 +496,32 @@ def _process_record(run: RunSummary, record: dict[str, Any], line_number: int) -
             run.event_count += 1
             _add_offset(run, event["time_s"])
             run.event_reasons[(event["event"], event["reason"])] += 1
+            if event["event"] == "alert_emitted" and valid_segment and isinstance(observations, list):
+                observation_by_track = {
+                    item["diagnostic_track_id"]: item
+                    for item in observations
+                    if _valid_observation(item)
+                }
+                for track_id in event.get("candidate_track_ids", []):
+                    observation = observation_by_track.get(track_id)
+                    shadow = observation.get("shadow") if observation is not None else None
+                    if shadow is None:
+                        continue
+                    if len(run.shadow_alert_samples) >= _MAX_SHADOW_ALERT_SAMPLES:
+                        run.shadow_alert_samples_omitted += 1
+                        continue
+                    run.shadow_alert_samples.append(
+                        ShadowAlertSample(
+                            alert_uid=str(event.get("alert_uid") or ""),
+                            segment_id=segment_id,
+                            track_id=track_id,
+                            observed_frames=shadow["observed_frames"],
+                            verified_frames=shadow["verified_frames"],
+                            unverified_streak_frames=shadow["unverified_streak_frames"],
+                            required_frames=shadow["required_frames"],
+                            sustained_unverified=shadow["sustained_unverified"],
+                        )
+                    )
 
 
 def _finalize_run(run: RunSummary) -> None:
@@ -662,6 +726,39 @@ def _print_summary(runs: Sequence[RunSummary], max_tracks: int) -> None:
         f"{event}/{reason}={count}" for (event, reason), count in sorted(event_reasons.items())
     ) or "none"
     print("Events/reasons: " + event_reason_text)
+
+    alert_count = sum(
+        count
+        for run in runs
+        for (event, _reason), count in run.event_reasons.items()
+        if event == "alert_emitted"
+    )
+    if alert_count:
+        shadow_samples = [
+            (run.display_path, sample)
+            for run in runs
+            for sample in run.shadow_alert_samples
+        ]
+        shadow_samples.sort(key=lambda item: (item[0], item[1].alert_uid, item[1].track_id))
+        shown = shadow_samples[:_MAX_SHADOW_ALERT_SAMPLES]
+        omitted = sum(run.shadow_alert_samples_omitted for run in runs) + len(shadow_samples) - len(shown)
+        print(
+            f"\nAlert shadow: {len(shadow_samples) + sum(run.shadow_alert_samples_omitted for run in runs)} "
+            f"linked person sample(s) at {alert_count} emitted alert(s)."
+        )
+        if shown:
+            print("file | alert_uid | seg:track | verified/observed | streak/required | sustained")
+            for filename, sample in shown:
+                print(
+                    f"{filename} | {sample.alert_uid} | {sample.segment_id}:{sample.track_id} | "
+                    f"{sample.verified_frames}/{sample.observed_frames} | "
+                    f"{sample.unverified_streak_frames}/{sample.required_frames} | "
+                    f"{'yes' if sample.sustained_unverified else 'no'}"
+                )
+            if omitted:
+                print(f"  {omitted} additional linked person samples omitted.")
+        else:
+            print("No linked shadow state; this capture may predate the optional fields.")
 
     print("\nRuns: file | UTC start | duration | MiB | records | obs | events | segments | status")
     for run in runs:

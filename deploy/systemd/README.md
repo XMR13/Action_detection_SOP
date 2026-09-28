@@ -148,6 +148,29 @@ RTSP environment example enables this 30-second threshold by default. Set the
 variable to an empty string to keep sessions of all durations. Rerender the
 RTSP unit with the installer and restart the worker after changing it.
 
+## Backup and restore acceptance
+
+For the live deployment, record the source commit and the configured data and
+database paths from `/etc/action-sop/common.env` and
+`/etc/action-sop/web.env`. The repository's example `data/` paths may differ
+from the installed paths. Keep the protected environment files out of shared
+reports.
+
+At an agreed maintenance window, stop the RTSP worker, uploader (if deployed),
+and web service before copying the SQLite database or session artifacts. Back
+up the configured data root (including sessions, reports, and uploader spool),
+any database outside that root, the deployed model/engine and metadata,
+ROI/config, service units, and protected environment files. Store the copy on
+a separate restricted disk and record its checksum. Restart services and
+verify health and new session ingestion.
+
+Prove the restore in an isolated location before relying on the backup:
+restore to test paths, verify SQLite integrity, session and alert counts,
+review decisions, a sample checklist/media file, and report downloads. Do not
+replace production files during this test. A production recovery requires all
+writers stopped before replacement and a post-restore rescan and ingestion
+check.
+
 ## Optional helmet diagnostics
 
 Set `SOP_HELMET_DIAGNOSTICS_ARGS` in `/etc/action-sop/rtsp.env` to
@@ -163,6 +186,19 @@ for the installed service. Add `--start` to render the unit, reload systemd,
 and restart the worker. Logs are written under
 `<SOP_DATA_DIR>/diagnostics/helmet/YYYY-MM-DD/`. The diagnostics analyzer can
 read the copied JSONL files after capture.
+
+On diagnostic event frames, each tracked person observation may contain an
+optional `shadow` object. It records the person's recent verified-helmet count
+and consecutive unverified frames against the configured alert duration.
+An `alert_emitted` event lists `candidate_track_ids` when those people can be
+matched to diagnostic tracks in the same frame; use those IDs to interpret
+the shadow state in scenes with multiple people. The analyzer prints linked
+shadow values at each emitted alert when these fields are present.
+`sustained_unverified` is a counterfactual for review, not an emitted alert;
+the live helmet rule, 10-second default, and alert artifacts are unchanged.
+The recent window is capped at 150 analyzed frames. Missing person frames
+reset the shadow streak, and temporary track IDs may change when association
+is lost. Older schema-v2 captures remain readable without this object.
 
 ## Stop or restart
 

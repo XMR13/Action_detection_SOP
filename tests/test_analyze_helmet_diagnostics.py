@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Scripts.analyze_helmet_diagnostics import TrackSummary, _analyze_file, main
+from Scripts.analyze_helmet_diagnostics import (
+    TrackSummary,
+    _analyze_file,
+    _valid_event,
+    _valid_observation,
+    main,
+)
 
 
 SCHEMA_VERSION = 2
@@ -150,6 +156,58 @@ def test_analyzer_summarizes_run_events_and_track_traits(tmp_path: Path, capsys)
     assert "run_one.jsonl | 0:1 | 2 | 190 [180-200] | 0.50,0.50" in output
     assert "50%/50% | 2/5 (40%) | 0.510 | 100%/0%" in output
     assert "descriptive diagnostics only" in output.lower()
+
+
+def test_analyzer_accepts_old_observations_and_validates_optional_shadow() -> None:
+    old = _observation()
+    assert _valid_observation(old)
+
+    new = _observation()
+    new["shadow"] = {
+        "required_frames": 50,
+        "window_frames": 50,
+        "observed_frames": 4,
+        "verified_frames": 1,
+        "unverified_streak_frames": 2,
+        "sustained_unverified": False,
+    }
+    assert _valid_observation(new)
+    new["shadow"]["verified_frames"] = 2
+    new["shadow"]["unverified_streak_frames"] = 0
+    assert _valid_observation(new)
+    new["shadow"]["verified_frames"] = 5
+    assert not _valid_observation(new)
+
+    event = _event()
+    event["candidate_track_ids"] = [1, 2]
+    assert _valid_event(event)
+    event["candidate_track_ids"] = [1, 1]
+    assert not _valid_event(event)
+
+
+def test_analyzer_links_shadow_state_to_alert_candidate_track(tmp_path: Path, capsys) -> None:
+    records = _run_records("2026-09-23")
+    records[2]["observations"][0]["shadow"] = {
+        "required_frames": 50,
+        "window_frames": 50,
+        "observed_frames": 50,
+        "verified_frames": 21,
+        "unverified_streak_frames": 1,
+        "sustained_unverified": False,
+    }
+    records[2]["events"][0].update(
+        event="alert_emitted",
+        reason="sustained_no_helmet",
+        alert_uid="alert-example",
+        candidate_track_ids=[1],
+    )
+    path = tmp_path / "shadow.jsonl"
+    _write_jsonl(path, records)
+
+    assert main([str(path)]) == 0
+    output = capsys.readouterr().out
+    assert "1 linked person sample(s) at 1 emitted alert(s)" in output
+    assert "alert-example | 0:1 | 21/50 | 1/50 | no" in output
 
 
 def test_run_start_requires_integer_supported_schema_version(tmp_path: Path, capsys) -> None:
