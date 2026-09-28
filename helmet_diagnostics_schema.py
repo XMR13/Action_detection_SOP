@@ -9,19 +9,17 @@ HELMET_DIAGNOSTICS_SCHEMA_VERSION = 2
 HELMET_DIAGNOSTIC_MAX_TRACKS = 32
 HELMET_DIAGNOSTIC_MAX_RECENT_FRAMES = 150
 
-
+#collection of basics diagnostic helper functions to validate and help 
 def is_diagnostic_int(value: Any, *, minimum: int = 0) -> bool:
     """Accept JSON integers, but never booleans or floating-point values."""
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
-
 def require_diagnostic_int(value: Any, field_name: str, *, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be an integer")
+    if isinstance(value,bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} harus berupa integer")
     if value < minimum:
-        raise ValueError(f"{field_name} must be >= {minimum}")
+        raise ValueError(f"{field_name} harus lebih besar dibandingan dengan {minimum}")
     return int(value)
-
 
 def validate_shadow_payload(value: Any) -> None:
     """Validate the fields and count relationships shared by writer and reader."""

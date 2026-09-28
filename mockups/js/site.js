@@ -1779,8 +1779,11 @@
           clips.forEach((clip, idx) => {
             const clipNameRaw = clip && clip.name ? String(clip.name) : `clip_${idx + 1}`;
             const clipName = clipNameRaw.replaceAll("_", " ");
-            const eventS = Number(clip && clip.event_time_s);
-            const timeTag = Number.isFinite(eventS) ? ` +${eventS.toFixed(1)}s` : "";
+            const eventS = clip && clip.event_time_s != null ? Number(clip.event_time_s) : Number.NaN;
+            const offsetS = eventS - startS;
+            const timeTag = Number.isFinite(offsetS) && offsetS >= -0.05
+              ? ` +${Math.max(0, offsetS).toFixed(1)}s`
+              : "";
             const clipKey = `clip-${idx}`;
             const btn = document.createElement("button");
             btn.type = "button";
