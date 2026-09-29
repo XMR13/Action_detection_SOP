@@ -1813,7 +1813,10 @@
       form.onsubmit = async (event) => {
         event.preventDefault();
         const reviewError = document.getElementById("detail-review-error");
-        if (reviewError) reviewError.textContent = "";
+        if (reviewError) {
+          reviewError.className = "caption";
+          reviewError.textContent = "Menyimpan keputusan...";
+        }
         const reviewStatus = statusInput instanceof HTMLInputElement ? statusInput.value : "PENDING";
         const note = noteBox instanceof HTMLTextAreaElement ? noteBox.value : "";
         const overrides = {};
@@ -1845,9 +1848,27 @@
             window.location.assign(buildUiHrefWithDate("review-queue.html"));
           }
         } catch (err) {
+          form.classList.remove("is-submitting");
+          form.querySelectorAll("button[data-review-status]").forEach((button) => {
+            if (button instanceof HTMLButtonElement) button.disabled = false;
+          });
           if (reviewError) {
-            reviewError.textContent = String(err).includes("HTTP 400")
-              ? "Keputusan belum disimpan. Sesuaikan Hasil SOP akhir dengan keputusan yang dipilih, lalu coba lagi."
+            const errorText = String(err);
+            let apiDetail = "";
+            const jsonStart = errorText.indexOf("{");
+            if (jsonStart >= 0) {
+              try {
+                const responseBody = JSON.parse(errorText.slice(jsonStart));
+                apiDetail = typeof responseBody.detail === "string" ? responseBody.detail : "";
+              } catch (_) {
+                apiDetail = "";
+              }
+            }
+            reviewError.className = "validation-summary no";
+            reviewError.textContent = errorText.includes("Review decision requires final SOP result")
+              ? "Belum disimpan: hasil SOP akhir belum sesuai keputusan ini. Periksa bukti, lalu koreksi hasil langkah atau hasil akhir sebelum mencoba lagi."
+              : errorText.includes("HTTP 400")
+              ? `Belum disimpan: ${apiDetail || "periksa isian review, lalu coba lagi."}`
               : "Keputusan belum tersimpan. Coba lagi.";
           }
         }
