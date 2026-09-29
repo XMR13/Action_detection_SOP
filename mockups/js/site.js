@@ -25,8 +25,11 @@
   };
 
   const displayStepStatus = (raw) => {
-    if (!raw) return "-";
-    return String(raw).replaceAll("_", " ").toUpperCase();
+    const status = String(raw || "").toUpperCase();
+    if (status === "DONE") return "Sudah dilakukan";
+    if (status === "NOT_DONE") return "Belum dilakukan";
+    if (status === "UNKNOWN") return "Bukti belum cukup";
+    return "-";
   };
 
   const escapeHtml = (raw) =>
@@ -45,11 +48,33 @@
     return "";
   };
 
-  const displayReviewStatus = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "QUALIFIED") return "QUALIFIED";
-    if (v === "NOT_QUALIFIED") return "NOT QUALIFIED";
-    return "PENDING";
+  const operatorVerdict = (row) => {
+    const fromApi = String((row && row.operator_verdict) || "").toUpperCase();
+    if (["DONE", "NOT_DONE", "NEEDS_REVIEW"].includes(fromApi)) return fromApi;
+    const review = String((row && row.review_status) || "PENDING").toUpperCase();
+    const final = sopStatusValue(row, "final");
+    if (review === "QUALIFIED" && final === "DONE") return "DONE";
+    if (review === "NOT_QUALIFIED" && final === "NOT_DONE") return "NOT_DONE";
+    return "NEEDS_REVIEW";
+  };
+
+  const verdictLabel = (verdict) => {
+    if (verdict === "DONE") return "Sesuai SOP";
+    if (verdict === "NOT_DONE") return "Tidak sesuai SOP";
+    return "Perlu ditinjau";
+  };
+
+  const verdictClass = (verdict) => {
+    if (verdict === "DONE") return "yes";
+    if (verdict === "NOT_DONE") return "no";
+    return "pending";
+  };
+
+  const reviewSourceLabel = (raw) => {
+    const source = String(raw || "PENDING").toUpperCase();
+    if (source === "AUTO") return "Otomatis";
+    if (source === "MANUAL") return "Ditinjau petugas";
+    return "Menunggu tinjauan";
   };
 
   const pillClassForReviewStatus = (raw) => {
@@ -94,84 +119,43 @@
   };
 
   const dashboardTrendStatus = (row) => {
-    const reviewStatus = String((row && row.review_status) || "").toUpperCase();
-    if (reviewStatus === "PENDING") return "NEEDS_REVIEW";
-
-    const finalStatus = sopStatusValue(row, "final");
-    if (finalStatus === "DONE") return "DONE";
-    if (finalStatus === "NOT_DONE") return "NOT_DONE";
-    return "NEEDS_REVIEW";
+    return operatorVerdict(row);
   };
 
   const rollOverallDisplay = (raw) => {
     const v = String(raw || "UNKNOWN").toUpperCase();
     if (v === "SESUAI SOP") return "Sesuai SOP";
     if (v === "TIDAK SESUAI SOP") return "Tidak sesuai SOP";
-    return "Unknown";
+    return "Bukti belum cukup";
   };
 
-  const sopQueueSummary = (row, scope) => {
+  const queueStepSummary = (row) => {
     const sop = structuredSop(row);
     if (!sop || sop.profile !== "roll_sop_v1") return "";
-    const data = sopScope(row, scope);
+    const steps = sopScope(row, "final");
     return [
-      `Cleaned ${displayStepStatus(data.cleaned || "UNKNOWN")}`,
-      `Labeled ${displayStepStatus(data.labeled || "UNKNOWN")}`,
+      `Cleaning: ${String(steps.cleaned || "UNKNOWN").toUpperCase()}`,
+      `Labeling: ${String(steps.labeled || "UNKNOWN").toUpperCase()}`,
     ].join(" · ");
   };
 
   const queueDecision = (row) => {
-    const machine = sopStatusValue(row, "machine");
-    const final = sopStatusValue(row, "final");
     const review = String((row && row.review_status) || "PENDING").toUpperCase();
-    const summary = sopQueueSummary(row, "final") || sopQueueSummary(row, "machine");
-
-    if (review === "PENDING") {
-      return {
-        label: "Pending review",
-        className: "pending",
-        meta: summary || `AI ${displayStepStatus(machine)}`,
-      };
-    }
-
-    if (review === "NOT_QUALIFIED") {
-      const changed = machine !== final;
-      return {
-        label: "Rejected",
-        className: "no",
-        meta:
-          final === "DONE"
-            ? `Reviewer rejected; AI ${displayStepStatus(machine)}`
-            : changed
-            ? `AI ${displayStepStatus(machine)} -> Final ${displayStepStatus(final)}`
-            : summary || `AI ${displayStepStatus(machine)}`,
-      };
-    }
-
-    const changed = machine !== final;
+    const verdict = operatorVerdict(row);
     return {
-      label: displayStepStatus(final),
-      className: pillClassForStepStatus(final),
-      meta: changed ? `AI ${displayStepStatus(machine)} -> Final ${displayStepStatus(final)}` : summary || `AI ${displayStepStatus(machine)}`,
+      label: verdictLabel(verdict),
+      className: verdictClass(verdict),
+      steps: queueStepSummary(row),
+      meta:
+        verdict === "NEEDS_REVIEW" && review !== "PENDING"
+          ? "Keputusan review dan hasil SOP berbeda; periksa detail"
+          : "",
     };
   };
 
   const dashboardSopPills = (session) => {
-    const sop = structuredSop(session);
-    if (sop && sop.profile === "roll_sop_v1") {
-      const final = sopScope(session, "final");
-      const cleaned = String(final.cleaned || "UNKNOWN");
-      const labeled = String(final.labeled || "UNKNOWN");
-      const finalStatus = sopStatusValue(session, "final");
-      return [
-        `<span class="pill ${pillClassForStepStatus(cleaned)}">Cleaned ${displayStepStatus(cleaned)}</span>`,
-        `<span class="pill ${pillClassForStepStatus(labeled)}">Labeled ${displayStepStatus(labeled)}</span>`,
-        `<span class="pill ${pillClassForStepStatus(finalStatus)}">Final ${displayStepStatus(finalStatus)}</span>`,
-      ].join(" ");
-    }
-    const roi = String(session.machine_roi_dwell || "UNKNOWN");
-    const sopStatus = String(session.final_sop || session.machine_sop || "UNKNOWN");
-    return `<span class="pill ${pillClassForStepStatus(roi)}">ROI ${displayStepStatus(roi)}</span> <span class="pill ${pillClassForStepStatus(sopStatus)}">SOP ${displayStepStatus(sopStatus)}</span>`;
+    const verdict = operatorVerdict(session);
+    return `<span class="pill ${verdictClass(verdict)}">${verdictLabel(verdict)}</span>`;
   };
 
   const renderOverrideSelect = ({ key, label, machineValue, finalValue, overrideValue, values, displayValue }) => {
@@ -212,7 +196,7 @@
       const rows = [
         renderOverrideSelect({
           key: "cleaned",
-          label: "Cleaned",
+          label: "Pembersihan",
           machineValue: machine.cleaned || "UNKNOWN",
           finalValue: final.cleaned || "UNKNOWN",
           overrideValue: reviewOverrides.cleaned || "",
@@ -221,7 +205,7 @@
         }),
         renderOverrideSelect({
           key: "labeled",
-          label: "Labeled",
+          label: "Pemberian label",
           machineValue: machine.labeled || "UNKNOWN",
           finalValue: final.labeled || "UNKNOWN",
           overrideValue: reviewOverrides.labeled || "",
@@ -230,7 +214,7 @@
         }),
         renderOverrideSelect({
           key: "overall_status",
-          label: "Final status",
+          label: "Hasil SOP akhir",
           machineValue: machine.overall_status || "UNKNOWN",
           finalValue: final.overall_status || "UNKNOWN",
           overrideValue: reviewOverrides.overall_status || "",
@@ -245,7 +229,7 @@
         <div class="detail-sop-head">
           <div>
             <strong>Roll SOP</strong>
-            <p class="caption">Override hanya jika bukti menunjukkan hasil AI perlu dikoreksi.</p>
+            <p class="caption">Ubah hasil langkah atau hasil akhir jika bukti berbeda dari penilaian AI.</p>
           </div>
           ${inconsistent}
         </div>
@@ -818,7 +802,7 @@
     const sortSel = document.getElementById("queue-sort");
     const pageSizeSel = document.getElementById("queue-page-size");
 
-    const reviewStatus = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
+    const selectedVerdict = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "") : "";
     const evidenceFilter = evidenceSel instanceof HTMLSelectElement ? String(evidenceSel.value || "ANY") : "ANY";
     const shiftFilter = shiftSel instanceof HTMLSelectElement ? String(shiftSel.value || "ALL") : "ALL";
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
@@ -832,8 +816,8 @@
     params.set("sort", sort || "NEWEST");
     params.set("evidence", evidenceFilter || "ANY");
     params.set("shift", shiftFilter || "ALL");
-    if (reviewStatus && reviewStatus !== "ALL") {
-      params.set("review_status", reviewStatus);
+    if (selectedVerdict && selectedVerdict !== "ALL") {
+      params.set("operator_verdict", selectedVerdict);
     }
 
     const query = params.toString();
@@ -893,7 +877,7 @@
       selectedSessionInline.textContent = resolvedSessionId;
     }
     if (selectedSessionLabel) {
-      selectedSessionLabel.textContent = `${resolvedSessionId} | ${resolvedDate} | ${resolvedShift} | Machine ${resolvedMachine}`;
+      selectedSessionLabel.textContent = `${resolvedSessionId} | ${resolvedDate} | ${resolvedShift} | Hasil akhir: ${resolvedFinal}`;
     }
     if (selectedSessionUid) {
       selectedSessionUid.textContent = resolvedSessionUid;
@@ -1081,15 +1065,6 @@
       return;
     }
 
-    if (key === "s") {
-      if (!form) {
-        return;
-      }
-      event.preventDefault();
-      submitWithStatus("PENDING");
-      return;
-    }
-
     if (key === "j") {
       if (queueLinks.length === 0) {
         return;
@@ -1125,17 +1100,17 @@
     // Sync summary counters on the queue page (topbar + cards).
     try {
       const stats = await apiFetchJson(withDateApiQuery("/api/stats"));
-      const pending = stats && stats.pending != null ? Number(stats.pending) : null;
-      const approved = stats && stats.approved != null ? Number(stats.approved) : null;
-      const rejected = stats && stats.rejected != null ? Number(stats.rejected) : null;
+      const pending = stats && stats.verdict_needs_review != null ? Number(stats.verdict_needs_review) : null;
+      const approved = stats && stats.verdict_done != null ? Number(stats.verdict_done) : null;
+      const rejected = stats && stats.verdict_not_done != null ? Number(stats.verdict_not_done) : null;
 
       const queueLengthHint = document.getElementById("queue-length-hint");
       if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
-        queueLengthHint.textContent = `Jumlah antrian: ${pending}`;
+        queueLengthHint.textContent = `Perlu ditinjau: ${pending}`;
       }
       const pendingPill = document.getElementById("queue-pending-pill");
       if (pendingPill && pending != null && !Number.isNaN(pending)) {
-        pendingPill.textContent = `menunggu ${pending}`;
+        pendingPill.textContent = `perlu ditinjau ${pending}`;
       }
       const pendingNode = document.getElementById("queue-stat-pending");
       if (pendingNode && pending != null && !Number.isNaN(pending)) {
@@ -1198,7 +1173,6 @@
         const rawSid = String(s.session_id || "").trim();
         const sid = rawSid || (uid ? `Session ${String((queuePage - 1) * queuePageSize + index + 1).padStart(2, "0")}` : "-");
         const machine = sopStatusValue(s, "machine");
-        const final = sopStatusValue(s, "final");
         const decision = queueDecision(s);
         const date = String(s.date || "-");
         const shift = shiftLabel(s.shift_id, s.shift_name);
@@ -1223,9 +1197,9 @@
             data-session-uid="${escapeHtml(uid)}"
             data-date="${escapeHtml(date)}"
             data-shift="${escapeHtml(shift)}"
-            data-machine="${displayStepStatus(machine)}"
-            data-human="${escapeHtml(decision.label)}"
-            data-final="${displayStepStatus(final)}"
+            data-machine="${escapeHtml(machine === "UNKNOWN" ? "Bukti belum cukup" : verdictLabel(machine))}"
+            data-human="${escapeHtml(reviewSourceLabel(s.review_source))}"
+            data-final="${escapeHtml(decision.label)}"
             data-evidence="${escapeHtml(evidenceLabel)}"
           >
             <td>
@@ -1239,6 +1213,7 @@
             <td>
               <div class="queue-decision-cell">
                 <span class="pill ${decision.className}">${escapeHtml(decision.label)}</span>
+                ${decision.steps ? `<div class="table-sub queue-decision-meta">${escapeHtml(decision.steps)}</div>` : ""}
                 ${decision.meta ? `<div class="table-sub queue-decision-meta">${escapeHtml(decision.meta)}</div>` : ""}
               </div>
             </td>
@@ -1611,7 +1586,7 @@
 
     const resolveNextPending = async () => {
       try {
-        const list = await apiFetchJson(withDateApiQuery("/api/sessions?review_status=PENDING&sort=NEWEST&limit=200"));
+        const list = await apiFetchJson(withDateApiQuery("/api/sessions?operator_verdict=NEEDS_REVIEW&sort=NEWEST&limit=200"));
         const sessions = Array.isArray(list.sessions) ? list.sessions : [];
         if (sessions.length === 0) return null;
         const idx = sessions.findIndex((s) => String(s.session_uid || "") === String(sessionUid));
@@ -1631,21 +1606,21 @@
       const nextUid = await resolveNextPending();
       if (nextUid && nextUid !== sessionUid) {
         nextLink.href = buildSessionDetailHref(nextUid);
-        nextLink.textContent = "Next Pending";
+        nextLink.textContent = "Sesi berikutnya";
       } else {
         nextLink.href = buildUiHrefWithDate("review-queue.html");
-        nextLink.textContent = "No Pending";
+        nextLink.textContent = "Tidak ada sesi lain";
       }
     }
 
     const machine = sopStatusValue(payload, "machine");
-    const final = sopStatusValue(payload, "final");
     const review = String(payload.review_status || (payload.review && payload.review.review_status) || "PENDING");
+    const verdict = operatorVerdict(payload);
     const machinePill = document.getElementById("detail-machine-status");
     const reviewPill = document.getElementById("detail-review-status");
     const finalPill = document.getElementById("detail-final-status");
     if (overviewAi) {
-      overviewAi.textContent = displayStepStatus(machine);
+      overviewAi.textContent = machine === "UNKNOWN" ? "Bukti belum cukup" : verdictLabel(machine);
     }
     if (overviewStatusCard instanceof HTMLElement) {
       overviewStatusCard.classList.remove("status-yes", "status-no", "status-unknown");
@@ -1656,15 +1631,15 @@
     }
     if (machinePill) {
       machinePill.className = `pill ${pillClassForStepStatus(machine)}`;
-      machinePill.textContent = `AI ${displayStepStatus(machine)}`;
+      machinePill.textContent = `Hasil AI: ${machine === "UNKNOWN" ? "Bukti belum cukup" : verdictLabel(machine)}`;
     }
     if (reviewPill) {
       reviewPill.className = `pill ${pillClassForReviewStatus(review)}`;
-      reviewPill.textContent = `Review ${displayReviewStatus(review)}`;
+      reviewPill.textContent = reviewSourceLabel(payload.review_source);
     }
     if (finalPill) {
-      finalPill.className = `pill ${pillClassForStepStatus(final)}`;
-      finalPill.textContent = `Final ${displayStepStatus(final)}`;
+      finalPill.className = `pill ${verdictClass(verdict)}`;
+      finalPill.textContent = `Hasil akhir: ${verdictLabel(verdict)}`;
     }
 
     renderSopPanel(payload);
@@ -1834,6 +1809,8 @@
     if (form) {
       form.onsubmit = async (event) => {
         event.preventDefault();
+        const reviewError = document.getElementById("detail-review-error");
+        if (reviewError) reviewError.textContent = "";
         const reviewStatus = statusInput instanceof HTMLInputElement ? statusInput.value : "PENDING";
         const note = noteBox instanceof HTMLTextAreaElement ? noteBox.value : "";
         const overrides = {};
@@ -1854,7 +1831,7 @@
           });
           if (reviewPill) {
             reviewPill.className = `pill ${pillClassForReviewStatus(reviewStatus)}`;
-            reviewPill.textContent = `Review ${displayReviewStatus(reviewStatus)}`;
+            reviewPill.textContent = "Ditinjau petugas";
           }
           if (String(reviewStatus || "").toUpperCase() !== "PENDING") {
             const nextUid = await resolveNextPending();
@@ -1865,7 +1842,11 @@
             window.location.assign(buildUiHrefWithDate("review-queue.html"));
           }
         } catch (err) {
-          alert("Failed to save review");
+          if (reviewError) {
+            reviewError.textContent = String(err).includes("HTTP 400")
+              ? "Keputusan belum disimpan. Sesuaikan Hasil SOP akhir dengan keputusan yang dipilih, lalu coba lagi."
+              : "Keputusan belum tersimpan. Coba lagi.";
+          }
         }
       };
     }
@@ -2290,48 +2271,47 @@
     try {
       const s = await apiFetchJson(withDateApiQuery("/api/stats"));
       if (totalNode) totalNode.textContent = String(s.total_sessions ?? "-");
-      if (pendingNode) pendingNode.textContent = String(s.pending ?? "-");
+      if (pendingNode) pendingNode.textContent = String(s.verdict_needs_review ?? "-");
 
       const totalHint = document.getElementById("kpi-total-hint");
       if (totalHint) {
-        totalHint.textContent = `lolos ${String(s.approved ?? 0)} | tidak lolos ${String(s.rejected ?? 0)}`;
+        totalHint.textContent = `${String(s.verdict_done ?? 0)} sesuai | ${String(s.verdict_not_done ?? 0)} tidak sesuai`;
       }
 
       const pendingHint = document.getElementById("kpi-pending-hint");
       if (pendingHint) {
-        const reviewed = Number(s.reviewed ?? 0);
+        const reviewed = Number(s.verdict_done ?? 0) + Number(s.verdict_not_done ?? 0);
         const total = Number(s.total_sessions ?? 0);
-        const completionPct = Number(s.review_completion_pct ?? 0);
+        const completionPct = total > 0 ? (100 * reviewed) / total : 0;
         pendingHint.textContent =
           total > 0
-            ? `${reviewed}/${total} decided (${completionPct.toFixed(1)}%)`
+            ? `${reviewed}/${total} sudah memiliki hasil akhir (${completionPct.toFixed(1)}%)`
             : "Belum ada sesi";
       }
 
       const bannerPending = document.getElementById("banner-pending-pill");
-      if (bannerPending) bannerPending.textContent = `pending ${String(s.pending ?? "-")}`;
+      if (bannerPending) bannerPending.textContent = `perlu ditinjau ${String(s.verdict_needs_review ?? "-")}`;
 
       const helmetCheckedNode = document.getElementById("kpi-helmet-checked");
-      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.final_sop_done ?? "-");
+      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.verdict_done ?? "-");
       const helmetCheckedHint = document.getElementById("kpi-helmet-checked-hint");
       if (helmetCheckedHint) {
-        const pct = Number(s.reviewed_final_sop_done_pct ?? 0);
-        helmetCheckedHint.textContent = `${pct.toFixed(1)}% DONE across reviewed sessions`;
+        helmetCheckedHint.textContent = "Hasil akhir sesuai SOP";
       }
 
       const manualReviewNode = document.getElementById("kpi-manual-review");
-      if (manualReviewNode) manualReviewNode.textContent = String(s.human_reviewed ?? s.reviewed ?? "-");
+      if (manualReviewNode) manualReviewNode.textContent = String(s.verdict_not_done ?? "-");
       const manualReviewHint = document.getElementById("kpi-manual-review-hint");
       if (manualReviewHint) {
-        manualReviewHint.textContent = `${String(s.manual_overrides ?? 0)} manual overrides`;
+        manualReviewHint.textContent = "Hasil akhir tidak sesuai SOP";
       }
 
       const compactApproved = document.getElementById("dashboard-compact-approved");
-      if (compactApproved) compactApproved.textContent = String(s.approved ?? "-");
+      if (compactApproved) compactApproved.textContent = String(s.verdict_done ?? "-");
       const compactRejected = document.getElementById("dashboard-compact-rejected");
-      if (compactRejected) compactRejected.textContent = String(s.rejected ?? "-");
+      if (compactRejected) compactRejected.textContent = String(s.verdict_not_done ?? "-");
       const compactPending = document.getElementById("dashboard-compact-pending");
-      if (compactPending) compactPending.textContent = String(s.pending ?? "-");
+      if (compactPending) compactPending.textContent = String(s.verdict_needs_review ?? "-");
 
       const renderDashboardTrend = async () => {
         const svg = document.querySelector(".trend-svg");
@@ -2547,11 +2527,11 @@
         const notDonePeak = peak(notDone);
 
         const trendDone = document.getElementById("trend-strip-done");
-        if (trendDone) trendDone.textContent = `peak DONE ${Math.max(0, donePeak.val)} @ ${labels[donePeak.idx] || "-"}`;
+        if (trendDone) trendDone.textContent = `puncak sesuai ${Math.max(0, donePeak.val)} @ ${labels[donePeak.idx] || "-"}`;
         const trendUnknown = document.getElementById("trend-strip-unknown");
-        if (trendUnknown) trendUnknown.textContent = `peak NEEDS REVIEW ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
+        if (trendUnknown) trendUnknown.textContent = `puncak perlu ditinjau ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
         const trendNotDone = document.getElementById("trend-strip-not-done");
-        if (trendNotDone) trendNotDone.textContent = `peak NOT DONE ${Math.max(0, notDonePeak.val)} @ ${labels[notDonePeak.idx] || "-"}`;
+        if (trendNotDone) trendNotDone.textContent = `puncak tidak sesuai ${Math.max(0, notDonePeak.val)} @ ${labels[notDonePeak.idx] || "-"}`;
 
         if (axisLabels.length >= 5 && labels.length >= 2) {
           if (useHourly) {
@@ -2589,7 +2569,7 @@
                 const uid = String(session.session_uid || "");
                 const sid = String(session.session_id || uid || "-");
                 const start = formatHmsFromIso(session.start_time_iso);
-                const review = String(session.review_status || "PENDING");
+                const source = String(session.review_source || "PENDING");
                 const remark =
                   Number(session.clip_count || 0) > 0
                     ? `${String(session.clip_count)} clip(s) attached`
@@ -2601,7 +2581,7 @@
                     <td> <strong>${sid}</strong></td>
                     <td>${start}</td>
                     <td>${dashboardSopPills(session)}</td>
-                    <td><span class="pill ${pillClassForReviewStatus(review)}">${displayReviewStatus(review)}</span></td>
+                    <td>${reviewSourceLabel(source)}</td>
                     <td>${remark}</td>
                     <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Inspect</a></td>
                   </tr>

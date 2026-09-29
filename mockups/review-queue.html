@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roll Wrap SOP | Review Queue Mockup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/site.css?v=20260929-sop-verdict" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-review-queue is-hydrating">
@@ -61,10 +61,10 @@
                 </span>
 	            </div>
 	            <div class="tl-item">
-	              <span class="t">Decision in detail page</span>
+	              <span class="t">Keputusan di halaman detail</span>
 	              <span class="d">
-                  Approve/Rejet untuk SOP yang masih ambigu dapat dilakukan di Session Detail.
-                </span>
+	                  Periksa bukti, lalu tetapkan hasil akhir yang sesuai di halaman detail.
+	              </span>
 	            </div>
 	          </div>
 	        </section>
@@ -74,7 +74,7 @@
         <header class="topbar">
           <div class="title">
             <h2>Review Queue</h2>
-            <p>List pengecekan hasil SOP otomatis, lakuan review manual jika perlu.</p>
+	            <p>Periksa hasil akhir setiap sesi. Buka detail jika perlu melihat bukti atau memperbaiki hasil.</p>
           </div>
 	          <div class="filters">
 	            <span class="hint" id="queue-length-hint">Queue length: --</span>
@@ -108,21 +108,22 @@
 	            </span>
 	          </div>
 	          <div class="mode-tags">
-	            <span class="pill" id="queue-pending-pill">pending --</span>
+	            <span class="pill" id="queue-pending-pill">perlu ditinjau --</span>
 	          </div>
 	        </section>
 
-        <section class="queue-status-grid">
+	        <p class="caption">Ringkasan ini mengikuti rentang tanggal di atas. Filter tabel di bawah tidak mengubah angka ringkasan.</p>
+	        <section class="queue-status-grid">
 	          <article class="queue-status-card">
-            <div class="label">Pending</div>
+            <div class="label">Perlu ditinjau</div>
             <div class="value" id="queue-stat-pending">--</div>
           </article>
           <article class="queue-status-card yes">
-            <div class="label">Diterima</div>
+            <div class="label">Sesuai SOP</div>
             <div class="value" id="queue-stat-approved">--</div>
           </article>
           <article class="queue-status-card no">
-            <div class="label">Ditolak</div>
+            <div class="label">Tidak sesuai SOP</div>
             <div class="value" id="queue-stat-rejected">--</div>
           </article>
 	        </section>
@@ -132,7 +133,7 @@
 	            <div class="section-head">
 	              <div>
 	                <h3>Tabel sesi</h3>
-	                <p class="caption"> Event hasil pengecekan, hasil review ditangani sebagai berikut.</p>
+		                <p class="caption">Hasil akhir menggabungkan pemeriksaan SOP dan keputusan review. Ketidaksesuaian data lama perlu ditinjau.</p>
 	              </div>
 	              <div class="queue-table-actions">
 	                <a class="pill" id="queue-export-csv" href="/api/sessions/export.csv" download>Download CSV</a>
@@ -142,12 +143,12 @@
 
 	            <form class="filters queue-table-filters" aria-label="Queue table filters">
               <div class="field">
-	                <label for="queue-status">Status</label>
-	                <select id="queue-status" name="queue-status">
-		                  <option value="PENDING">Review Pending</option>
-		                  <option value="ALL" selected>Semua status</option>
-	                  <option value="NOT_QUALIFIED">Rejected only</option>
-	                  <option value="QUALIFIED">Approved only</option>
+		                <label for="queue-status">Hasil akhir</label>
+		                <select id="queue-status" name="queue-status">
+		                  <option value="NEEDS_REVIEW">Perlu ditinjau</option>
+		                  <option value="ALL" selected>Semua hasil</option>
+	                  <option value="NOT_DONE">Tidak sesuai SOP</option>
+	                  <option value="DONE">Sesuai SOP</option>
 	                </select>
 	              </div>
               <div class="field">
@@ -171,7 +172,7 @@
               <div class="field">
                 <label for="queue-sort">Sort by</label>
                 <select id="queue-sort" name="queue-sort">
-                  <option value="PENDING_FIRST">Pending first</option>
+	                  <option value="NEEDS_REVIEW_FIRST">Perlu ditinjau dulu</option>
                   <option value="NEWEST" selected>Newest first</option>
 	                </select>
 	              </div>
@@ -205,7 +206,7 @@
                     <th scope="col">Start</th>
                     <th scope="col">End</th>
                     <th scope="col">Durasi</th>
-                    <th scope="col">Decision</th>
+                    <th scope="col">Hasil akhir</th>
                     <th scope="col">Evidence</th>
                     <th scope="col">Action</th>
 	                  </tr>
@@ -260,15 +261,15 @@
                   <span class="val" id="selected-session-shift">-</span>
                 </div>
                 <div class="row">
-                  <span class="key">AI SOP</span>
+                  <span class="key">Hasil AI</span>
                   <span class="val" id="selected-machine-status">-</span>
                 </div>
 		                <div class="row">
-		                  <span class="key">Decision</span>
+		                  <span class="key">Pemeriksaan</span>
 		                  <span class="val" id="selected-human-status">-</span>
 		                </div>
                 <div class="row">
-                  <span class="key">Final</span>
+                  <span class="key">Hasil akhir</span>
                   <span class="val" id="selected-final-status">-</span>
                 </div>
 	                <div class="row">
@@ -286,6 +287,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js"></script>
+    <script src="js/site.js?v=20260929-sop-verdict-steps-en"></script>
   </body>
 </html>

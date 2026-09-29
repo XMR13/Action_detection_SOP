@@ -10,7 +10,9 @@ from Action_Detection_SOP.web_mvp.sop_status import (
     effective_review_for_session,
     evaluate_sop_status,
     normalize_session_checklist_payload,
+    operator_verdict,
     validate_review_overrides,
+    validate_roll_review_decision,
 )
 
 
@@ -26,6 +28,27 @@ def _review(overrides: dict[str, object]) -> ReviewRecord:
         overrides=overrides,
         created_at_utc="2026-06-10T00:00:00+00:00",
         updated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+
+
+def test_operator_verdict_requires_matching_review_and_final_sop() -> None:
+    assert operator_verdict(review_status="QUALIFIED", final_sop="DONE") == "DONE"
+    assert operator_verdict(review_status="NOT_QUALIFIED", final_sop="NOT_DONE") == "NOT_DONE"
+    assert operator_verdict(review_status="PENDING", final_sop="DONE") == "NEEDS_REVIEW"
+    assert operator_verdict(review_status="QUALIFIED", final_sop="NOT_DONE") == "NEEDS_REVIEW"
+    assert operator_verdict(review_status="NOT_QUALIFIED", final_sop="DONE") == "NEEDS_REVIEW"
+
+
+def test_roll_review_decision_requires_matching_final_result() -> None:
+    session = _session(
+        {"sop_profile": "roll_sop_v1", "cleaned": "DONE", "labeled": "DONE", "overall_status": "SESUAI SOP"}
+    )
+    with pytest.raises(ReviewOverrideError, match="Tidak sesuai SOP"):
+        validate_roll_review_decision(session=session, review_status="NOT_QUALIFIED", overrides={})
+    validate_roll_review_decision(
+        session=session,
+        review_status="NOT_QUALIFIED",
+        overrides={"overall_status": "TIDAK SESUAI SOP"},
     )
 
 
