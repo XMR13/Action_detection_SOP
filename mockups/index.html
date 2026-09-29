@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+    <html lang="id">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +7,7 @@
     <link rel="preload" as="image" href="assets/images.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/site.css?v=20260929-sop-verdict" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-dashboard is-hydrating">
@@ -124,9 +124,7 @@
             </span>
           </div>
           <div class="mode-tags">
-            <span class="pill" id="banner-pending-pill">pending --</span>
-            <span class="pill ink">avg review 3.1 min</span>
-            <span class="pill brand">target &lt; 10 min</span>
+            <span class="pill" id="banner-pending-pill">perlu ditinjau --</span>
             <span class="pill" id="dashboard-active-date-slice">date: all</span>
           </div>
         </section>
@@ -145,7 +143,7 @@
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-                <span class="kpi-label">Review pending</span>
+                <span class="kpi-label">Perlu ditinjau</span>
                 <span class="kpi-accent brand">Q</span>
               </div>
               <div class="kpi-value" id="kpi-pending">--</div>
@@ -155,7 +153,7 @@
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-	                <span class="kpi-label">Final SOP DONE</span>
+	                <span class="kpi-label">Sesuai SOP</span>
                 <span class="kpi-accent yes">Y</span>
               </div>
               <div class="kpi-value" id="kpi-helmet-checked">--</div>
@@ -165,7 +163,7 @@
           <article class="card">
             <div class="pad">
               <div class="kpi-top">
-                <span class="kpi-label">Pengecekan manual</span>
+                <span class="kpi-label">Tidak sesuai SOP</span>
                 <span class="kpi-accent no">M</span>
               </div>
               <div class="kpi-value" id="kpi-manual-review">--</div>
@@ -178,9 +176,9 @@
           <article class="dashboard-trend">
             <div class="pad">
               <div class="btn-row">
-                <span class="pill dir-a">DONE</span>
-                <span class="pill dir-b">Needs review</span>
-                <span class="pill no">NOT DONE</span>
+                <span class="pill dir-a">Sesuai SOP</span>
+                <span class="pill dir-b">Perlu ditinjau</span>
+                <span class="pill no">Tidak sesuai SOP</span>
               </div>
               <div class="trend-context">
                 <p class="trend-meaning">
@@ -188,9 +186,9 @@
                 </p>
                 <p class="caption" id="trend-active-slice">Date: all</p>
                 <div class="trend-meta-pills">
-                  <span class="trend-key"><span class="trend-key-line dir-a"></span>DONE</span>
-                  <span class="trend-key"><span class="trend-key-line dir-b"></span>Needs review</span>
-                  <span class="trend-key"><span class="trend-key-line no"></span>NOT DONE</span>
+                  <span class="trend-key"><span class="trend-key-line dir-a"></span>Sesuai SOP</span>
+                  <span class="trend-key"><span class="trend-key-line dir-b"></span>Perlu ditinjau</span>
+                  <span class="trend-key"><span class="trend-key-line no"></span>Tidak sesuai SOP</span>
                 </div>
               </div>
               <div class="trend-chart-wrap">
@@ -216,9 +214,9 @@
                 <div class="trend-x-title" id="trend-x-title">Time (local)</div>
               </div>
               <div class="trend-value-strip">
-                <span class="pill" id="trend-strip-done">selesai --</span>
-                <span class="pill" id="trend-strip-unknown">needs review --</span>
-                <span class="pill no" id="trend-strip-not-done">tidak selesai --</span>
+                <span class="pill" id="trend-strip-done">sesuai --</span>
+                <span class="pill" id="trend-strip-unknown">perlu ditinjau --</span>
+                <span class="pill no" id="trend-strip-not-done">tidak sesuai --</span>
               </div>
             </div>
           </article>
@@ -226,20 +224,20 @@
           <article class="panel">
             <h3>Antrian review</h3>
             <p class="caption">
-              Hasil pengecekan otomatis beserta dengan penjelasannya
+              Jumlah sesi menurut hasil akhir yang dapat ditampilkan kepada operator.
               
             </p>
             <div class="queue-status-grid compact-grid">
               <div class="queue-status-card yes">
-                <div class="label">Diterima</div>
+                <div class="label">Sesuai SOP</div>
                 <div class="value" id="dashboard-compact-approved">--</div>
               </div>
               <div class="queue-status-card no">
-                <div class="label">Ditolak</div>
+                <div class="label">Tidak sesuai SOP</div>
                 <div class="value" id="dashboard-compact-rejected">--</div>
               </div>
               <div class="queue-status-card">
-                <div class="label">Menunggu review</div>
+                <div class="label">Perlu ditinjau</div>
                 <div class="value" id="dashboard-compact-pending">--</div>
               </div>
             </div>
@@ -278,7 +276,7 @@
                   <th scope="col">Sesi</th>
                   <th scope="col">Mulai</th>
                   <th scope="col">Pengecekan SOP</th>
-                  <th scope="col">Keadaan mesin</th>
+                  <th scope="col">Pemeriksaan</th>
                   <th scope="col">Remark</th>
                   <th scope="col">Action</th>
                 </tr>
@@ -293,6 +291,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js"></script>
+    <script src="js/site.js?v=20260929-sop-verdict"></script>
   </body>
 </html>

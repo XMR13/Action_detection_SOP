@@ -18,6 +18,7 @@ else:
     TestClient = object  # type: ignore[misc,assignment]
 
 from Action_Detection_SOP.web_mvp.app import API_CONTRACT_VERSION, create_app
+from Action_Detection_SOP.web_mvp.review_store import upsert_review
 from Action_Detection_SOP.web_mvp.settings import WebMvpSettings
 
 
@@ -302,6 +303,7 @@ def test_roll_session_api_exposes_structured_sop_and_auto_approves_with_evidence
         assert row["machine_sop"] == "DONE"
         assert row["final_sop"] == "DONE"
         assert row["review_status"] == "QUALIFIED"
+        assert row["operator_verdict"] == "DONE"
         assert row["review_source"] == "AUTO"
         assert row["machine_helmet"] == "UNKNOWN"
         assert row["sop"]["profile"] == "roll_sop_v1"
@@ -340,6 +342,7 @@ def test_roll_session_api_exposes_structured_sop_and_auto_approves_with_evidence
         stats = client.get("/api/stats", headers=_auth_headers())
         assert stats.status_code == 200
         assert stats.json()["auto_approved"] == 1
+        assert stats.json()["verdict_done"] == 1
 
 
 def test_roll_sessions_do_not_count_as_unknown_helmet_stats(tmp_path: Path) -> None:
@@ -394,6 +397,47 @@ def test_roll_review_allows_step_and_overall_overrides(tmp_path: Path) -> None:
         assert sop_overall["final"]["labeled"] == "DONE"
         assert sop_overall["final"]["overall_status"] == "TIDAK SESUAI SOP"
         assert sop_overall["final"]["status"] == "NOT_DONE"
+
+        rows = client.get(
+            "/api/sessions", headers=_auth_headers(), params={"operator_verdict": "NOT_DONE"}
+        )
+        assert rows.status_code == 200
+        assert [row["session_uid"] for row in rows.json()["sessions"]] == ["uid_roll_review"]
+
+
+def test_roll_review_rejects_decision_that_conflicts_with_final_sop(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(client, session_uid="uid_roll_conflict")
+        rejected = client.put(
+            "/api/sessions/uid_roll_conflict/review",
+            headers=_auth_headers(),
+            json={"review_status": "NOT_QUALIFIED", "review_note": "", "overrides": {}},
+        )
+        assert rejected.status_code == 400
+        detail = client.get("/api/sessions/uid_roll_conflict", headers=_auth_headers())
+        assert detail.json()["review"] is None
+
+
+def test_existing_conflicting_roll_review_needs_attention_in_operator_view(tmp_path: Path) -> None:
+    with _build_client(tmp_path) as client:
+        _put_roll_session(client, session_uid="uid_old_conflict")
+        upsert_review(
+            db_path=tmp_path / "reviews.sqlite3",
+            session_uid="uid_old_conflict",
+            review_status="NOT_QUALIFIED",
+            review_note="old decision",
+            overrides={},
+        )
+
+        rows = client.get(
+            "/api/sessions", headers=_auth_headers(), params={"operator_verdict": "NEEDS_REVIEW"}
+        )
+        assert rows.status_code == 200
+        assert [row["session_uid"] for row in rows.json()["sessions"]] == ["uid_old_conflict"]
+        stats = client.get("/api/stats", headers=_auth_headers()).json()
+        assert stats["verdict_done"] == 0
+        assert stats["verdict_not_done"] == 0
+        assert stats["verdict_needs_review"] == 1
 
 
 def test_roll_review_rejects_legacy_keys_and_noncanonical_overall_status(tmp_path: Path) -> None:

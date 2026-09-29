@@ -39,7 +39,9 @@ from .sop_status import (
     evaluate_sop_status,
     effective_review_for_session,
     normalize_session_checklist_payload,
+    operator_verdict,
     validate_review_overrides,
+    validate_roll_review_decision,
 )
 from ..shifts import assign_shift_for_interval, parse_iso_datetime
 from ..source_security import redact_source_credentials, redact_source_fields
@@ -1233,12 +1235,22 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         final_sop_done = 0
         final_sop_not_done = 0
         final_sop_unknown = 0
+        verdict_done = 0
+        verdict_not_done = 0
+        verdict_needs_review = 0
 
         for s in sessions:
             r = reviews.get(s.session_uid)
             sop_status = evaluate_sop_status(session=s, review=r)
             eff = _effective_review_for_web(session=s, review=r, settings=settings)
             status = eff.status
+            verdict = operator_verdict(review_status=status, final_sop=sop_status.final_sop)
+            if verdict == "DONE":
+                verdict_done += 1
+            elif verdict == "NOT_DONE":
+                verdict_not_done += 1
+            else:
+                verdict_needs_review += 1
             if status == "QUALIFIED":
                 approved += 1
                 decided += 1
@@ -1331,6 +1343,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "final_sop_done": final_sop_done,
             "final_sop_not_done": final_sop_not_done,
             "final_sop_unknown": final_sop_unknown,
+            "verdict_done": verdict_done,
+            "verdict_not_done": verdict_not_done,
+            "verdict_needs_review": verdict_needs_review,
             "final_sop_unknown_pct": final_sop_unknown_pct,
             "reviewed_final_sop_done_pct": reviewed_final_sop_done_pct,
             "date_from": applied_date_from,
@@ -1627,9 +1642,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date_from: Optional[str],
         date_to: Optional[str],
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]],
+        operator_verdict_filter: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]],
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"],
         shift: str,
-        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"],
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"],
     ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], str]:
         sessions = index.list()
         sessions, applied_date_from, applied_date_to = _filter_sessions_by_date_window(
@@ -1676,6 +1692,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 continue
 
             sop_status = evaluate_sop_status(session=s, review=r)
+            verdict = operator_verdict(review_status=rs, final_sop=sop_status.final_sop)
+            if operator_verdict_filter and verdict != operator_verdict_filter:
+                continue
 
             out.append(
                 {
@@ -1695,6 +1714,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "review_source": eff.source,
                     "final_helmet": sop_status.final_helmet,
                     "final_sop": sop_status.final_sop,
+                    "operator_verdict": verdict,
                     "sop": sop_status.summary,
                     "has_thumbnail": has_thumbnail,
                     "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if has_thumbnail else None,
@@ -1724,6 +1744,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     str(x.get("session_uid") or ""),
                 )
             )
+        elif sort == "NEEDS_REVIEW_FIRST":
+            out.sort(
+                key=lambda x: (
+                    0 if x.get("operator_verdict") == "NEEDS_REVIEW" else 1,
+                    -float(x.get("_sort_start_ts") or 0.0),
+                    str(x.get("session_uid") or ""),
+                )
+            )
         else:
             out.sort(key=lambda x: (-float(x.get("_sort_start_ts") or 0.0), str(x.get("session_uid") or "")))
 
@@ -1736,9 +1764,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]] = None,
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
         shift: str = Query(default="ALL"),
-        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"] = Query(default="NEWEST"),
         page: int = Query(default=1, ge=1),
         page_size: Optional[int] = Query(default=None, ge=1, le=2000),
         limit: int = Query(default=200, ge=1, le=2000),
@@ -1748,6 +1777,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             date_from=date_from,
             date_to=date_to,
             review_status=review_status,
+            operator_verdict_filter=operator_verdict,
             evidence=evidence,
             shift=shift,
             sort=sort,
@@ -1787,9 +1817,10 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
+        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]] = None,
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
         shift: str = Query(default="ALL"),
-        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST"] = Query(default="NEWEST"),
+        sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"] = Query(default="NEWEST"),
     ) -> Response:
 
         """
@@ -1801,6 +1832,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             date_from=date_from,
             date_to=date_to,
             review_status=review_status,
+            operator_verdict_filter=operator_verdict,
             evidence=evidence,
             shift=shift,
             sort=sort,
@@ -1819,6 +1851,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "review_status",
             "review_source",
             "final_sop",
+            "operator_verdict",
             "machine_cleaned",
             "machine_labeled",
             "machine_overall_status",
@@ -1852,6 +1885,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "review_status": row.get("review_status"),
                     "review_source": row.get("review_source"),
                     "final_sop": row.get("final_sop"),
+                    "operator_verdict": row.get("operator_verdict"),
                     "machine_cleaned": machine.get("cleaned"),
                     "machine_labeled": machine.get("labeled"),
                     "machine_overall_status": machine.get("overall_status"),
@@ -1933,6 +1967,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "machine_roi_dwell": sop_status.machine_roi_dwell,
             "final_helmet": sop_status.final_helmet,
             "final_sop": sop_status.final_sop,
+            "operator_verdict": operator_verdict(review_status=eff.status, final_sop=sop_status.final_sop),
             "sop": sop_status.summary,
             "review_status": eff.status,
             "review_source": eff.source,
@@ -1988,6 +2023,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         _validate_review_note(payload.review_note)
         validated_overrides = _validate_review_overrides(checklist=s.checklist, raw=payload.overrides)
+        try:
+            validate_roll_review_decision(
+                session=s, review_status=payload.review_status, overrides=validated_overrides
+            )
+        except ReviewOverrideError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         rec = upsert_review(
             db_path=settings.db_path,
             session_uid=session_uid,

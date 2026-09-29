@@ -75,6 +75,40 @@ def validate_review_overrides(*, checklist: Dict[str, Any], raw: Dict[str, Any])
     return _policy_for_checklist(checklist).validate_overrides(raw)
 
 
+def operator_verdict(*, review_status: str, final_sop: str) -> str:
+    """Return one operator-facing outcome; conflicting stored values need review."""
+    if review_status == "QUALIFIED" and final_sop == "DONE":
+        return "DONE"
+    if review_status == "NOT_QUALIFIED" and final_sop == "NOT_DONE":
+        return "NOT_DONE"
+    return "NEEDS_REVIEW"
+
+
+def validate_roll_review_decision(
+    *, session: Any, review_status: str, overrides: Dict[str, str]
+) -> None:
+    """Keep a new roll review decision aligned with its final SOP result."""
+    if _policy_for_checklist(session.checklist).profile != ROLL_PROFILE:
+        return
+    if review_status == "PENDING":
+        return
+    candidate = ReviewRecord(
+        session_uid="",
+        review_status=review_status,
+        review_note="",
+        overrides=overrides,
+        created_at_utc="",
+        updated_at_utc="",
+    )
+    final_sop = evaluate_sop_status(session=session, review=candidate).final_sop
+    expected = "DONE" if review_status == "QUALIFIED" else "NOT_DONE"
+    if final_sop != expected:
+        label = "Sesuai SOP" if expected == "DONE" else "Tidak sesuai SOP"
+        raise ReviewOverrideError(
+            f"Review decision requires final SOP result {label}; correct the step or final SOP override before saving"
+        )
+
+
 def normalize_session_checklist_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _policy_for_checklist(payload).normalize_payload(payload)
 

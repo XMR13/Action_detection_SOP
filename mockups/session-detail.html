@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roll Wrap SOP | Session Detail Mockup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/site.css?v=20260929-sop-verdict" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-event-detail">
@@ -131,15 +131,15 @@
             <article class="panel detail-decision-panel">
               <div class="section-head">
                 <div>
-	                <h3>Review manual</h3>
-                  <p class="caption">Pilih hasil yang paling sesuai setelah memeriksa bukti sesi.</p>
+	                <h3>Tentukan hasil akhir</h3>
+                  <p class="caption">Periksa bukti dan koreksi penilaian AI bila perlu. Hasil akhir harus sesuai dengan keputusan yang disimpan.</p>
                 </div>
               </div>
 
 	              <div class="detail-status-row">
 	                <span class="pill dir-b" id="detail-machine-status">AI -</span>
-	                <span class="pill pending" id="detail-review-status">Review -</span>
-	                <span class="pill" id="detail-final-status">Final -</span>
+	                <span class="pill pending" id="detail-review-status">Pemeriksaan -</span>
+	                <span class="pill" id="detail-final-status">Hasil akhir -</span>
 	                <span class="pill" id="detail-evidence-pill">Bukti -</span>
 	              </div>
 
@@ -159,15 +159,16 @@
 	                  ></textarea>
 	                </div>
 
-                <div class="detail-decision-grid">
-	                  <button class="btn yes detail-decision-btn" type="submit" data-review-status="QUALIFIED">Approve</button>
-	                  <button class="btn no detail-decision-btn" type="submit" data-review-status="NOT_QUALIFIED">Reject</button>
-	                  <button class="btn secondary detail-decision-btn" type="submit" data-review-status="PENDING">Unknown</button>
-	                </div>
+	                <div class="detail-decision-grid">
+		                  <button class="btn yes detail-decision-btn" type="submit" data-review-status="QUALIFIED">Tetapkan sesuai SOP</button>
+		                  <button class="btn no detail-decision-btn" type="submit" data-review-status="NOT_QUALIFIED">Tetapkan tidak sesuai SOP</button>
+		                </div>
+	                <p class="caption" id="detail-review-error" role="status" aria-live="polite"></p>
+	                <p class="caption">Belum yakin? Kembali ke antrian tanpa menyimpan keputusan.</p>
 
 	                <div class="detail-nav-row">
 	                  <a class="btn" id="detail-back-link" href="review-queue.html">Back to Queue</a>
-	                  <a class="btn primary" id="detail-next-link" href="review-queue.html">Next Pending</a>
+	                  <a class="btn primary" id="detail-next-link" href="review-queue.html">Sesi berikutnya</a>
 	                </div>
               </form>
             </article>
@@ -175,6 +176,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js?v=20260928-session-event-offset"></script>
+    <script src="js/site.js?v=20260929-sop-verdict-event-offset"></script>
   </body>
 </html>
