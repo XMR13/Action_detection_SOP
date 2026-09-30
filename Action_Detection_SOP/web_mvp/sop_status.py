@@ -34,7 +34,7 @@ class WebSopStatus:
 
 @dataclass(frozen=True)
 class EffectiveReview:
-    status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]
+    status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING", "OUT_OF_SCOPE"]
     source: Literal["MANUAL", "AUTO", "PENDING"]
     auto_reason: Optional[str] = None
 
@@ -77,6 +77,8 @@ def validate_review_overrides(*, checklist: Dict[str, Any], raw: Dict[str, Any])
 
 def operator_verdict(*, review_status: str, final_sop: str) -> str:
     """Return one operator-facing outcome; conflicting stored values need review."""
+    if review_status == "OUT_OF_SCOPE":
+        return "OUT_OF_SCOPE"
     if review_status == "QUALIFIED" and final_sop == "DONE":
         return "DONE"
     if review_status == "NOT_QUALIFIED" and final_sop == "NOT_DONE":
@@ -85,9 +87,20 @@ def operator_verdict(*, review_status: str, final_sop: str) -> str:
 
 
 def validate_roll_review_decision(
-    *, session: Any, review_status: str, overrides: Dict[str, str]
+    *, session: Any, review_status: str, overrides: Dict[str, str],
+    scope_reason: Optional[str] = None, review_note: str = "",
 ) -> None:
     """Keep a new roll review decision aligned with its final SOP result."""
+    if review_status == "OUT_OF_SCOPE":
+        if _policy_for_checklist(session.checklist).profile != ROLL_PROFILE:
+            raise ReviewOverrideError("Di luar cakupan SOP hanya berlaku untuk sesi roll")
+        if scope_reason not in {"PASSING_THROUGH", "ALREADY_WRAPPED", "OTHER"}:
+            raise ReviewOverrideError("Pilih alasan di luar cakupan SOP")
+        if scope_reason == "OTHER" and not review_note.strip():
+            raise ReviewOverrideError("Tuliskan penjelasan untuk alasan Lainnya")
+        return
+    if scope_reason is not None:
+        raise ReviewOverrideError("Alasan di luar cakupan hanya berlaku untuk keputusan Di luar cakupan SOP")
     if _policy_for_checklist(session.checklist).profile != ROLL_PROFILE:
         return
     if review_status == "PENDING":
@@ -123,6 +136,8 @@ def effective_review_for_session(
 ) -> EffectiveReview:
     if review is not None:
         manual_status = str(review.review_status).upper()
+        if manual_status == "OUT_OF_SCOPE":
+            return EffectiveReview(status="OUT_OF_SCOPE", source="MANUAL")
         if manual_status == "QUALIFIED":
             return EffectiveReview(status="QUALIFIED", source="MANUAL")
         if manual_status == "NOT_QUALIFIED":

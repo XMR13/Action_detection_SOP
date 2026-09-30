@@ -6,7 +6,7 @@
     <title>Roll Wrap SOP | Review Queue Mockup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css?v=20260929-sop-verdict" />
+    <link rel="stylesheet" href="css/site.css?v=20260930-scope-review" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-review-queue is-hydrating">
@@ -136,6 +136,7 @@
 		                <p class="caption">Hasil akhir menggabungkan pemeriksaan SOP dan keputusan review. Ketidaksesuaian data lama perlu ditinjau.</p>
 	              </div>
 	              <div class="queue-table-actions">
+                  <span class="pill" id="queue-out-of-scope">Di luar cakupan: --</span>
 	                <a class="pill" id="queue-export-csv" href="/api/sessions/export.csv" download>Download CSV</a>
 	                <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
 	              </div>
@@ -149,6 +150,7 @@
 		                  <option value="ALL" selected>Semua hasil</option>
 	                  <option value="NOT_DONE">Tidak sesuai SOP</option>
 	                  <option value="DONE">Sesuai SOP</option>
+                      <option value="OUT_OF_SCOPE">Di luar cakupan SOP</option>
 	                </select>
 	              </div>
               <div class="field">
@@ -287,6 +289,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js?v=20260929-sop-verdict-steps-en"></script>
+    <script src="js/site.js?v=20260930-scope-review-steps-en"></script>
   </body>
 </html>

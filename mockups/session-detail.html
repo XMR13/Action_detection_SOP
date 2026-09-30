@@ -6,7 +6,7 @@
     <title>Roll Wrap SOP | Session Detail Mockup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css?v=20260929-sop-verdict" />
+    <link rel="stylesheet" href="css/site.css?v=20260930-scope-review" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-event-detail">
@@ -104,6 +104,29 @@
           </article>
         </section>
 
+        <section class="detail-review-toolbar panel" aria-label="Keputusan tinjauan">
+          <div class="field">
+            <label for="review-status">Keputusan tinjauan</label>
+            <select id="review-status" name="review_status" form="review-form" required disabled>
+              <option value="">Pilih keputusan...</option>
+              <option value="QUALIFIED">Sesuai SOP</option>
+              <option value="NOT_QUALIFIED">Tidak sesuai SOP</option>
+              <option value="OUT_OF_SCOPE">Di luar cakupan SOP</option>
+            </select>
+          </div>
+          <div class="field" id="scope-reason-field" hidden>
+            <label for="scope-reason">Alasan di luar cakupan</label>
+            <select id="scope-reason" name="scope_reason" form="review-form" disabled>
+              <option value="">Pilih alasan...</option>
+              <option value="PASSING_THROUGH">Hanya melintas</option>
+              <option value="ALREADY_WRAPPED">Sudah dibungkus</option>
+              <option value="OTHER">Lainnya — jelaskan di catatan</option>
+            </select>
+          </div>
+          <button id="review-save" class="btn primary detail-decision-btn" type="submit" form="review-form" disabled>Simpan hasil tinjauan</button>
+          <p class="caption detail-review-feedback" id="detail-review-error" role="status" aria-live="polite">Periksa bukti sebelum memilih keputusan.</p>
+        </section>
+
         <section class="detail-shell">
           <section class="detail-main">
             <article class="panel detail-evidence-panel">
@@ -143,14 +166,13 @@
 	                <span class="pill" id="detail-evidence-pill">Bukti -</span>
 	              </div>
 
-              <form id="review-form" class="detail-decision-form" data-disable-on-submit>
-                <input id="review-status" name="review_status" type="hidden" value="PENDING" />
+              <form id="review-form" class="detail-decision-form">
                 <input id="selected-session-id" name="selected_session_id" type="hidden" value="" />
                 <div class="detail-sop-panel" id="detail-sop-panel">
                   <span class="pill">Memuat status SOP...</span>
                 </div>
 	                <div class="field">
-	                  <label for="review-note">Reviewer note</label>
+	                  <label for="review-note">Catatan tinjauan</label>
 	                  <textarea
 	                    id="review-note"
 	                    name="review_note"
@@ -159,11 +181,6 @@
 	                  ></textarea>
 	                </div>
 
-	                <div class="detail-decision-grid">
-		                  <button class="btn yes detail-decision-btn" type="submit" data-review-status="QUALIFIED">Tetapkan sesuai SOP</button>
-		                  <button class="btn no detail-decision-btn" type="submit" data-review-status="NOT_QUALIFIED">Tetapkan tidak sesuai SOP</button>
-		                </div>
-	                <p class="caption" id="detail-review-error" role="alert" aria-live="polite"></p>
 	                <p class="caption">Belum yakin? Kembali ke antrian tanpa menyimpan keputusan.</p>
 
 	                <div class="detail-nav-row">
@@ -176,6 +193,6 @@
         </section>
       </main>
     </div>
-    <script src="js/site.js?v=20260929-review-retry"></script>
+    <script src="js/site.js?v=20260930-scope-review"></script>
   </body>
 </html>

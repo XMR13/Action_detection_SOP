@@ -50,21 +50,26 @@
 
   const operatorVerdict = (row) => {
     const fromApi = String((row && row.operator_verdict) || "").toUpperCase();
-    if (["DONE", "NOT_DONE", "NEEDS_REVIEW"].includes(fromApi)) return fromApi;
+    if (["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"].includes(fromApi)) return fromApi;
     const review = String((row && row.review_status) || "PENDING").toUpperCase();
     const final = sopStatusValue(row, "final");
+    if (review === "OUT_OF_SCOPE") return "OUT_OF_SCOPE";
     if (review === "QUALIFIED" && final === "DONE") return "DONE";
     if (review === "NOT_QUALIFIED" && final === "NOT_DONE") return "NOT_DONE";
     return "NEEDS_REVIEW";
   };
 
+  const scopeReasonLabel = (reason) => ({ PASSING_THROUGH: "Hanya melintas", ALREADY_WRAPPED: "Sudah dibungkus", OTHER: "Lainnya" }[reason] || "");
+
   const verdictLabel = (verdict) => {
+    if (verdict === "OUT_OF_SCOPE") return "Di luar cakupan SOP";
     if (verdict === "DONE") return "Sesuai SOP";
     if (verdict === "NOT_DONE") return "Tidak sesuai SOP";
     return "Perlu ditinjau";
   };
 
   const verdictClass = (verdict) => {
+    if (verdict === "OUT_OF_SCOPE") return "dir-b";
     if (verdict === "DONE") return "yes";
     if (verdict === "NOT_DONE") return "no";
     return "pending";
@@ -79,6 +84,7 @@
 
   const pillClassForReviewStatus = (raw) => {
     const v = String(raw || "PENDING").toUpperCase();
+    if (v === "OUT_OF_SCOPE") return "dir-b";
     if (v === "QUALIFIED") return "yes";
     if (v === "NOT_QUALIFIED") return "no";
     return "pending";
@@ -147,6 +153,7 @@
       className: verdictClass(verdict),
       steps: queueStepSummary(row),
       meta:
+        verdict === "OUT_OF_SCOPE" ? scopeReasonLabel(row.scope_reason) :
         verdict === "NEEDS_REVIEW" && review !== "PENDING"
           ? "Keputusan review dan hasil SOP berbeda; periksa detail"
           : "",
@@ -695,6 +702,12 @@
   const form = formNode instanceof HTMLFormElement ? formNode : null;
   const statusInput = document.getElementById("review-status");
   const actionButtons = form ? form.querySelectorAll("button[data-review-status]") : [];
+  const toolbar = document.querySelector(".detail-review-toolbar");
+  if (toolbar instanceof HTMLElement) {
+    const updateToolbarHeight = () => document.documentElement.style.setProperty("--review-toolbar-height", `${toolbar.offsetHeight}px`);
+    updateToolbarHeight();
+    new ResizeObserver(updateToolbarHeight).observe(toolbar);
+  }
   let queueLinks = [];
   const selectedSessionIdInput = document.getElementById("selected-session-id");
   const selectedSessionInline = document.getElementById("selected-session-inline");
@@ -949,16 +962,11 @@
       return;
     }
 
-    if (statusInput instanceof HTMLInputElement) {
+    if (statusInput instanceof HTMLSelectElement && !statusInput.disabled) {
       statusInput.value = status;
+      statusInput.dispatchEvent(new Event("change"));
+      document.getElementById("review-save")?.focus();
     }
-
-    if (typeof form.requestSubmit === "function") {
-      form.requestSubmit();
-      return;
-    }
-
-    form.submit();
   };
 
   const navigateQueue = (step) => {
@@ -1104,6 +1112,8 @@
       const approved = stats && stats.verdict_done != null ? Number(stats.verdict_done) : null;
       const rejected = stats && stats.verdict_not_done != null ? Number(stats.verdict_not_done) : null;
 
+      const excludedNode = document.getElementById("queue-out-of-scope");
+      if (excludedNode) excludedNode.textContent = `Di luar cakupan: ${Number(stats.out_of_scope || 0)}`;
       const queueLengthHint = document.getElementById("queue-length-hint");
       if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
         queueLengthHint.textContent = `Perlu ditinjau: ${pending}`;
@@ -1644,6 +1654,44 @@
 
     renderSopPanel(payload);
 
+    const reasonSelect = document.getElementById("scope-reason");
+    const reasonField = document.getElementById("scope-reason-field");
+    const saveButton = document.getElementById("review-save");
+    const reviewFeedback = document.getElementById("detail-review-error");
+    const syncReviewDecision = () => {
+      const excluded = statusInput instanceof HTMLSelectElement && statusInput.value === "OUT_OF_SCOPE";
+      if (reasonField) reasonField.hidden = !excluded;
+      if (reasonSelect instanceof HTMLSelectElement) {
+        reasonSelect.disabled = !excluded;
+        reasonSelect.required = excluded;
+      }
+      const sopPanel = document.getElementById("detail-sop-panel");
+      if (sopPanel) sopPanel.hidden = excluded;
+      const note = document.getElementById("review-note");
+      if (note instanceof HTMLTextAreaElement) {
+        note.required = excluded && reasonSelect instanceof HTMLSelectElement && reasonSelect.value === "OTHER";
+      }
+      if (reviewFeedback) {
+        reviewFeedback.className = "caption detail-review-feedback";
+        reviewFeedback.textContent = excluded
+          ? "Sesi akan diselesaikan dan tidak dihitung dalam kepatuhan SOP."
+          : "Periksa bukti dan koreksi hasil SOP sebelum menyimpan keputusan.";
+      }
+    };
+    if (statusInput instanceof HTMLSelectElement) {
+      const scopeOption = statusInput.querySelector('option[value="OUT_OF_SCOPE"]');
+      if (scopeOption) scopeOption.disabled = !(payload.sop && payload.sop.profile === "roll_sop_v1");
+      statusInput.disabled = false;
+      statusInput.value = ["QUALIFIED", "NOT_QUALIFIED", "OUT_OF_SCOPE"].includes(review) ? review : "";
+      statusInput.onchange = syncReviewDecision;
+    }
+    if (reasonSelect instanceof HTMLSelectElement) {
+      reasonSelect.value = String(payload.scope_reason || "");
+      reasonSelect.onchange = syncReviewDecision;
+    }
+    if (saveButton instanceof HTMLButtonElement) saveButton.disabled = false;
+    syncReviewDecision();
+
     const noteBox = document.getElementById("review-note");
     if (noteBox instanceof HTMLTextAreaElement) {
       noteBox.value = payload.review && payload.review.review_note ? String(payload.review.review_note) : "";
@@ -1812,12 +1860,16 @@
     if (form) {
       form.onsubmit = async (event) => {
         event.preventDefault();
+        if (form.classList.contains("is-submitting")) return;
         const reviewError = document.getElementById("detail-review-error");
         if (reviewError) {
-          reviewError.className = "caption";
+          reviewError.className = "caption detail-review-feedback";
           reviewError.textContent = "Menyimpan keputusan...";
         }
-        const reviewStatus = statusInput instanceof HTMLInputElement ? statusInput.value : "PENDING";
+        const reviewStatus = statusInput instanceof HTMLSelectElement ? statusInput.value : "";
+        if (!reviewStatus) return;
+        form.classList.add("is-submitting");
+        if (saveButton instanceof HTMLButtonElement) saveButton.disabled = true;
         const note = noteBox instanceof HTMLTextAreaElement ? noteBox.value : "";
         const overrides = {};
         form.querySelectorAll("select[data-override-key]").forEach((node) => {
@@ -1827,6 +1879,7 @@
           if (key && value) overrides[key] = value;
         });
         const body = { review_status: reviewStatus, review_note: note };
+        if (reviewStatus === "OUT_OF_SCOPE" && reasonSelect instanceof HTMLSelectElement) body.scope_reason = reasonSelect.value;
         if (Object.keys(overrides).length > 0) {
           body.overrides = overrides;
         }
@@ -1849,9 +1902,7 @@
           }
         } catch (err) {
           form.classList.remove("is-submitting");
-          form.querySelectorAll("button[data-review-status]").forEach((button) => {
-            if (button instanceof HTMLButtonElement) button.disabled = false;
-          });
+          if (saveButton instanceof HTMLButtonElement) saveButton.disabled = false;
           if (reviewError) {
             const errorText = String(err);
             let apiDetail = "";
@@ -1864,10 +1915,10 @@
                 apiDetail = "";
               }
             }
-            reviewError.className = "validation-summary no";
+            reviewError.className = "validation-summary no detail-review-feedback";
             reviewError.textContent = errorText.includes("Review decision requires final SOP result")
               ? "Belum disimpan: hasil SOP akhir belum sesuai keputusan ini. Periksa bukti, lalu koreksi hasil langkah atau hasil akhir sebelum mencoba lagi."
-              : errorText.includes("HTTP 400")
+              : (errorText.includes("HTTP 400") || errorText.includes("HTTP 422"))
               ? `Belum disimpan: ${apiDetail || "periksa isian review, lalu coba lagi."}`
               : "Keputusan belum tersimpan. Coba lagi.";
           }
@@ -2302,9 +2353,16 @@
         totalHint.textContent = `${String(s.verdict_done ?? 0)} sesuai | ${String(s.verdict_not_done ?? 0)} tidak sesuai`;
       }
 
+      const excluded = document.getElementById("kpi-out-of-scope");
+      if (excluded instanceof HTMLAnchorElement) {
+        excluded.textContent = `Di luar cakupan: ${Number(s.out_of_scope || 0)}`;
+        excluded.href = `${buildUiHrefWithDate("review-queue.html")}${buildUiHrefWithDate("review-queue.html").includes("?") ? "&" : "?"}verdict=OUT_OF_SCOPE`;
+      }
+      const compliance = document.getElementById("kpi-compliance");
+      if (compliance) compliance.textContent = `Kepatuhan: ${s.compliance_pct == null ? "—" : Number(s.compliance_pct).toFixed(1) + "%"}`;
       const pendingHint = document.getElementById("kpi-pending-hint");
       if (pendingHint) {
-        const reviewed = Number(s.verdict_done ?? 0) + Number(s.verdict_not_done ?? 0);
+        const reviewed = Number(s.verdict_done ?? 0) + Number(s.verdict_not_done ?? 0) + Number(s.out_of_scope ?? 0);
         const total = Number(s.total_sessions ?? 0);
         const completionPct = total > 0 ? (100 * reviewed) / total : 0;
         pendingHint.textContent =
@@ -2442,7 +2500,7 @@
             const status = dashboardTrendStatus(row);
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
-            else unknown[idx] += 1;
+            else if (status === "NEEDS_REVIEW") unknown[idx] += 1;
           });
         } else {
           // Daily buckets across the filtered sessions window.
@@ -2483,7 +2541,7 @@
             const status = dashboardTrendStatus(row);
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
-            else unknown[idx] += 1;
+            else if (status === "NEEDS_REVIEW") unknown[idx] += 1;
           });
         }
 
@@ -2642,6 +2700,8 @@
       },
     });
     const statusSel = document.getElementById("queue-status");
+    const requestedVerdict = new URLSearchParams(window.location.search).get("verdict");
+    if (statusSel instanceof HTMLSelectElement && ["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"].includes(requestedVerdict)) statusSel.value = requestedVerdict;
     const evidenceSel = document.getElementById("queue-evidence");
     const shiftSel = document.getElementById("queue-shift");
     const sortSel = document.getElementById("queue-sort");

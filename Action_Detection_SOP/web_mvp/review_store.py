@@ -16,6 +16,7 @@ class ReviewRecord:
     overrides: Dict[str, Any]
     created_at_utc: str
     updated_at_utc: str
+    scope_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,9 @@ def init_db(db_path: Path) -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_updated ON reviews(updated_at_utc)")
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
+        if "scope_reason" not in columns:
+            conn.execute("ALTER TABLE reviews ADD COLUMN scope_reason TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS alert_reviews (
@@ -70,7 +74,7 @@ def init_db(db_path: Path) -> None:
 def get_review(db_path: Path, session_uid: str) -> Optional[ReviewRecord]:
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc FROM reviews WHERE session_uid = ?",
+            "SELECT session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc, scope_reason FROM reviews WHERE session_uid = ?",
             (session_uid,),
         ).fetchone()
         if row is None:
@@ -83,6 +87,7 @@ def get_review(db_path: Path, session_uid: str) -> Optional[ReviewRecord]:
             overrides=overrides if isinstance(overrides, dict) else {},
             created_at_utc=str(row["created_at_utc"]),
             updated_at_utc=str(row["updated_at_utc"]),
+            scope_reason=row["scope_reason"],
         )
 
 
@@ -92,7 +97,7 @@ def get_reviews_by_uid(db_path: Path, session_uids: Iterable[str]) -> Dict[str, 
         return {}
     placeholders = ",".join("?" for _ in uids)
     query = (
-        "SELECT session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc "
+        "SELECT session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc, scope_reason "
         f"FROM reviews WHERE session_uid IN ({placeholders})"
     )
     out: Dict[str, ReviewRecord] = {}
@@ -106,6 +111,7 @@ def get_reviews_by_uid(db_path: Path, session_uids: Iterable[str]) -> Dict[str, 
                 overrides=overrides if isinstance(overrides, dict) else {},
                 created_at_utc=str(row["created_at_utc"]),
                 updated_at_utc=str(row["updated_at_utc"]),
+                scope_reason=row["scope_reason"],
             )
             out[rec.session_uid] = rec
     return out
@@ -118,6 +124,7 @@ def upsert_review(
     review_status: str,
     review_note: str,
     overrides: Dict[str, Any],
+    scope_reason: Optional[str] = None,
 ) -> ReviewRecord:
     now = _utc_now_iso()
     overrides_json = json.dumps(overrides or {}, sort_keys=True)
@@ -129,15 +136,16 @@ def upsert_review(
         created = now if existing is None else str(existing["created_at_utc"])
         conn.execute(
             """
-            INSERT INTO reviews (session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO reviews (session_uid, review_status, review_note, overrides_json, created_at_utc, updated_at_utc, scope_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_uid) DO UPDATE SET
               review_status=excluded.review_status,
               review_note=excluded.review_note,
               overrides_json=excluded.overrides_json,
-              updated_at_utc=excluded.updated_at_utc
+              updated_at_utc=excluded.updated_at_utc,
+              scope_reason=excluded.scope_reason
             """,
-            (session_uid, review_status, review_note, overrides_json, created, now),
+            (session_uid, review_status, review_note, overrides_json, created, now, scope_reason),
         )
     return ReviewRecord(
         session_uid=session_uid,
@@ -146,6 +154,7 @@ def upsert_review(
         overrides=overrides or {},
         created_at_utc=created,
         updated_at_utc=now,
+        scope_reason=scope_reason,
     )
 
 

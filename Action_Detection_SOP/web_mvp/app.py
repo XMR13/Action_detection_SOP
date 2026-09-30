@@ -689,7 +689,8 @@ class LoginIn(BaseModel):
 
 
 class ReviewUpsertIn(BaseModel):
-    review_status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"] = Field(...)
+    scope_reason: Optional[Literal["PASSING_THROUGH", "ALREADY_WRAPPED", "OTHER"]] = None
+    review_status: Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING", "OUT_OF_SCOPE"] = Field(...)
     review_note: str = Field(default="")
     overrides: Dict[str, Any] = Field(default_factory=dict)
 
@@ -1235,6 +1236,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         final_sop_done = 0
         final_sop_not_done = 0
         final_sop_unknown = 0
+        out_of_scope = 0
         verdict_done = 0
         verdict_not_done = 0
         verdict_needs_review = 0
@@ -1245,13 +1247,17 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             eff = _effective_review_for_web(session=s, review=r, settings=settings)
             status = eff.status
             verdict = operator_verdict(review_status=status, final_sop=sop_status.final_sop)
-            if verdict == "DONE":
+            if verdict == "OUT_OF_SCOPE":
+                out_of_scope += 1
+            elif verdict == "DONE":
                 verdict_done += 1
             elif verdict == "NOT_DONE":
                 verdict_not_done += 1
             else:
                 verdict_needs_review += 1
-            if status == "QUALIFIED":
+            if status == "OUT_OF_SCOPE":
+                decided += 1
+            elif status == "QUALIFIED":
                 approved += 1
                 decided += 1
             elif status == "NOT_QUALIFIED":
@@ -1301,6 +1307,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             else:
                 machine_sop_unknown += 1
 
+            if status == "OUT_OF_SCOPE":
+                continue
             final_sop = sop_status.final_sop
             if final_sop == "DONE":
                 final_sop_done += 1
@@ -1310,11 +1318,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 final_sop_unknown += 1
 
         total = len(sessions)
-        review_completion_pct = (float(decided) * 100.0 / float(total)) if total > 0 else 0.0
+        resolved = verdict_done + verdict_not_done + out_of_scope
+        eligible_decisions = verdict_done + verdict_not_done
+        in_scope = total - out_of_scope
+        review_completion_pct = (float(resolved) * 100.0 / float(total)) if total > 0 else 0.0
         final_unknown_pct = (float(final_unknown) * 100.0 / float(helmet_sessions)) if helmet_sessions > 0 else 0.0
         reviewed_final_done_pct = (float(final_done) * 100.0 / float(helmet_decided)) if helmet_decided > 0 else 0.0
-        final_sop_unknown_pct = (float(final_sop_unknown) * 100.0 / float(total)) if total > 0 else 0.0
-        reviewed_final_sop_done_pct = (float(final_sop_done) * 100.0 / float(decided)) if decided > 0 else 0.0
+        final_sop_unknown_pct = (float(final_sop_unknown) * 100.0 / float(in_scope)) if in_scope > 0 else 0.0
+        reviewed_final_sop_done_pct = (float(verdict_done) * 100.0 / float(eligible_decisions)) if eligible_decisions > 0 else None
         return {
             "total_sessions": total,
             "pending": pending,
@@ -1343,6 +1354,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "final_sop_done": final_sop_done,
             "final_sop_not_done": final_sop_not_done,
             "final_sop_unknown": final_sop_unknown,
+            "out_of_scope": out_of_scope,
+            "in_scope_sessions": in_scope,
+            "compliance_pct": reviewed_final_sop_done_pct,
             "verdict_done": verdict_done,
             "verdict_not_done": verdict_not_done,
             "verdict_needs_review": verdict_needs_review,
@@ -1641,8 +1655,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date: Optional[str],
         date_from: Optional[str],
         date_to: Optional[str],
-        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]],
-        operator_verdict_filter: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]],
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING", "OUT_OF_SCOPE"]],
+        operator_verdict_filter: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"]],
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"],
         shift: str,
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"],
@@ -1711,6 +1725,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "machine_sop": sop_status.machine_sop,
                     "machine_roi_dwell": sop_status.machine_roi_dwell,
                     "review_status": rs,
+                    "scope_reason": r.scope_reason if r else None,
+                    "review_note": r.review_note if r else "",
                     "review_source": eff.source,
                     "final_helmet": sop_status.final_helmet,
                     "final_sop": sop_status.final_sop,
@@ -1763,8 +1779,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
-        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
-        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]] = None,
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING", "OUT_OF_SCOPE"]] = None,
+        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"]] = None,
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
         shift: str = Query(default="ALL"),
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"] = Query(default="NEWEST"),
@@ -1816,8 +1832,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         date: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
-        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING"]] = None,
-        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW"]] = None,
+        review_status: Optional[Literal["QUALIFIED", "NOT_QUALIFIED", "PENDING", "OUT_OF_SCOPE"]] = None,
+        operator_verdict: Optional[Literal["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"]] = None,
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"] = Query(default="ANY"),
         shift: str = Query(default="ALL"),
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"] = Query(default="NEWEST"),
@@ -1852,6 +1868,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "review_source",
             "final_sop",
             "operator_verdict",
+            "scope_reason",
+            "review_note",
             "machine_cleaned",
             "machine_labeled",
             "machine_overall_status",
@@ -1886,6 +1904,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "review_source": row.get("review_source"),
                     "final_sop": row.get("final_sop"),
                     "operator_verdict": row.get("operator_verdict"),
+                    "scope_reason": row.get("scope_reason"),
+                    "review_note": _csv_safe_cell(row.get("review_note") or ""),
                     "machine_cleaned": machine.get("cleaned"),
                     "machine_labeled": machine.get("labeled"),
                     "machine_overall_status": machine.get("overall_status"),
@@ -1970,6 +1990,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "operator_verdict": operator_verdict(review_status=eff.status, final_sop=sop_status.final_sop),
             "sop": sop_status.summary,
             "review_status": eff.status,
+            "scope_reason": r.scope_reason if r else None,
             "review_source": eff.source,
             "auto_review_reason": eff.auto_reason,
             "review": None if r is None else r.__dict__,
@@ -2022,10 +2043,16 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found")
         _validate_review_note(payload.review_note)
-        validated_overrides = _validate_review_overrides(checklist=s.checklist, raw=payload.overrides)
+        raw_overrides = payload.overrides
+        if payload.review_status == "OUT_OF_SCOPE" and "overrides" not in payload.model_fields_set:
+            previous = get_review(settings.db_path, session_uid)
+            if previous is not None:
+                raw_overrides = previous.overrides
+        validated_overrides = _validate_review_overrides(checklist=s.checklist, raw=raw_overrides)
         try:
             validate_roll_review_decision(
-                session=s, review_status=payload.review_status, overrides=validated_overrides
+                session=s, review_status=payload.review_status, overrides=validated_overrides,
+                scope_reason=payload.scope_reason, review_note=payload.review_note,
             )
         except ReviewOverrideError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -2035,6 +2062,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             review_status=payload.review_status,
             review_note=payload.review_note,
             overrides=validated_overrides,
+            scope_reason=payload.scope_reason,
         )
         return {"review": rec.__dict__}
 

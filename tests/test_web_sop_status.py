@@ -52,6 +52,37 @@ def test_roll_review_decision_requires_matching_final_result() -> None:
     )
 
 
+def test_out_of_scope_is_manual_and_preserves_machine_results() -> None:
+    session = _session({"sop_profile": "roll_sop_v1", "cleaned": "UNKNOWN", "labeled": "NOT_DONE"})
+    review = ReviewRecord("roll", "OUT_OF_SCOPE", "", {}, "created", "updated", "PASSING_THROUGH")
+    validate_roll_review_decision(session=session, review_status="OUT_OF_SCOPE", overrides={},
+                                  scope_reason="PASSING_THROUGH")
+    status = evaluate_sop_status(session=session, review=review)
+    assert status.machine_sop == status.final_sop == "NOT_DONE"
+    assert operator_verdict(review_status=review.review_status, final_sop=status.final_sop) == "OUT_OF_SCOPE"
+    effective = effective_review_for_session(session=session, review=review, auto_approve_done_enabled=True,
+                                             auto_approve_min_duration_s=0, has_evidence=True)
+    assert (effective.status, effective.source) == ("OUT_OF_SCOPE", "MANUAL")
+
+
+@pytest.mark.parametrize("reason,note", [(None, ""), ("INVALID", ""), ("OTHER", "  ")])
+def test_out_of_scope_requires_valid_reason_and_other_explanation(reason: str | None, note: str) -> None:
+    session = _session({"sop_profile": "roll_sop_v1", "cleaned": "UNKNOWN", "labeled": "UNKNOWN"})
+    with pytest.raises(ReviewOverrideError):
+        validate_roll_review_decision(session=session, review_status="OUT_OF_SCOPE", overrides={},
+                                      scope_reason=reason, review_note=note)
+
+
+def test_scope_reason_cannot_be_used_for_approval_or_legacy_profile() -> None:
+    roll = _session({"sop_profile": "roll_sop_v1", "cleaned": "DONE", "labeled": "DONE"})
+    with pytest.raises(ReviewOverrideError):
+        validate_roll_review_decision(session=roll, review_status="QUALIFIED", overrides={},
+                                      scope_reason="PASSING_THROUGH")
+    with pytest.raises(ReviewOverrideError):
+        validate_roll_review_decision(session=_session({}), review_status="OUT_OF_SCOPE", overrides={},
+                                      scope_reason="PASSING_THROUGH")
+
+
 def test_legacy_sop_summary_keeps_old_operator_fields() -> None:
     summary = evaluate_sop_status(
         session=_session({"operator_present": "DONE", "roi_dwell": "DONE", "helmet": "UNKNOWN"}),
