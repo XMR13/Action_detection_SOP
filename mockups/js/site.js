@@ -1,9 +1,10 @@
-import { formatDateTimeFromIso,
-          formatHmsFromIso,
-          formatDuration,
-          normalizeShiftId,
-          shiftLabel,
-          escapeHtml,
+import {
+  formatDateTimeFromIso,
+  formatHmsFromIso,
+  formatDuration,
+  normalizeShiftId,
+  shiftLabel,
+  escapeHtml,
  } from "./shared/format.js";
 
 import {
@@ -19,6 +20,10 @@ import {
   applyDateSliceToStaticNav,
   bindDateControls,
 } from "./shared/dates.js";
+
+import { apiFetchJson } from "./shared/api.js";
+
+import { initAuthUi } from "./shared/auth.js";
 
 import {
   displayStepStatus,
@@ -39,31 +44,6 @@ import {
 } from "./shared/status.js";
 
 (function () {
-  const apiFetchJson = async (path, options) => {
-    const res = await fetch(path, {
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", ...(options && options.headers ? options.headers : {}) },
-      ...options,
-    });
-    if (res.status === 401) {
-      const body = document.body;
-      const onLogin = body && body.classList.contains("page-login");
-      if (!onLogin) {
-        const herePath = window.location.pathname || "";
-        const underUi = herePath.startsWith("/ui/") ? herePath.slice("/ui/".length) : "";
-        const next = `${underUi || ""}${window.location.search || ""}${window.location.hash || ""}`;
-        const nextParam = next ? `?next=${encodeURIComponent(next)}` : "";
-        window.location.assign(`login.html${nextParam}`);
-      }
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
-    }
-    return await res.json();
-  };
-
   const dashboardSopPills = (session) => {
     const verdict = operatorVerdict(session);
     return `<span class="pill ${verdictClass(verdict)}">${verdictLabel(verdict)}</span>`;
@@ -260,68 +240,7 @@ import {
     }
   });
 
-  const initAuthUi = () => {
-    const logoutLink = document.querySelector(".nav-logout");
-    if (logoutLink instanceof HTMLAnchorElement) {
-      logoutLink.addEventListener("click", async (event) => {
-        event.preventDefault();
-        try {
-          await apiFetchJson("/api/auth/logout", { method: "POST" });
-        } catch (err) {
-          // ignore
-        } finally {
-          window.location.assign("login.html");
-        }
-      });
-    }
-
-    const body = document.body;
-    if (!body || !body.classList.contains("page-login")) {
-      return;
-    }
-
-    const loginForm = document.getElementById("login-form");
-    if (!(loginForm instanceof HTMLFormElement)) {
-      return;
-    }
-
-    const usernameInput = document.getElementById("username");
-    const passwordInput = document.getElementById("password");
-    const statusBox = document.getElementById("login-status");
-    const submitBtn = loginForm.querySelector("button[type='submit']");
-
-    const setStatus = (text, kind) => {
-      if (!(statusBox instanceof HTMLElement)) return;
-      const cls = kind === "error" ? "validation-summary no" : kind === "ok" ? "validation-summary yes" : "validation-summary";
-      statusBox.className = cls;
-      statusBox.innerHTML = `<p>${text}</p>`;
-    };
-
-    loginForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const username = usernameInput instanceof HTMLInputElement ? String(usernameInput.value || "").trim() : "";
-      const password = passwordInput instanceof HTMLInputElement ? String(passwordInput.value || "") : "";
-      if (!username || !password) {
-        setStatus("Enter username and password.", "error");
-        return;
-      }
-      if (submitBtn instanceof HTMLButtonElement) submitBtn.setAttribute("disabled", "disabled");
-      setStatus("Signing in...", "ok");
-      try {
-        await apiFetchJson("/api/auth/login", {
-          method: "POST",
-          body: JSON.stringify({ username, password }),
-        });
-        const params = new URLSearchParams(window.location.search || "");
-        const next = params.get("next");
-        window.location.assign(next && !next.startsWith("http") ? String(next) : "index.html");
-      } catch (err) {
-        setStatus("Login failed. Check your credentials.", "error");
-        if (submitBtn instanceof HTMLButtonElement) submitBtn.removeAttribute("disabled");
-      }
-    });
-  };
-
+  // Register auth handlers once; importing auth.js does not initialize them.
   initAuthUi();
 
   const formNode = document.getElementById("review-form");
