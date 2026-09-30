@@ -20,6 +20,24 @@ import {
   bindDateControls,
 } from "./shared/dates.js";
 
+import {
+  displayStepStatus,
+  pillClassForStepStatus,
+  operatorVerdict,
+  verdictLabel,
+  verdictClass,
+  reviewSourceLabel,
+  pillClassForReviewStatus,
+  displayAlertStatus,
+  pillClassForAlertStatus,
+  structuredSop,
+  sopScope,
+  sopStatusValue,
+  dashboardTrendStatus,
+  rollOverallDisplay,
+  queueDecision,
+} from "./shared/status.js";
+
 (function () {
   const apiFetchJson = async (path, options) => {
     const res = await fetch(path, {
@@ -44,134 +62,6 @@ import {
       throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
     }
     return await res.json();
-  };
-
-  const displayStepStatus = (raw) => {
-    const status = String(raw || "").toUpperCase();
-    if (status === "DONE") return "Sudah dilakukan";
-    if (status === "NOT_DONE") return "Belum dilakukan";
-    if (status === "UNKNOWN") return "Bukti belum cukup";
-    return "-";
-  };
-
-  const pillClassForStepStatus = (raw) => {
-    const v = String(raw || "").toUpperCase();
-    if (v === "DONE") return "yes";
-    if (v === "NOT_DONE") return "no";
-    if (v === "UNKNOWN") return "dir-b";
-    return "";
-  };
-
-  const operatorVerdict = (row) => {
-    const fromApi = String((row && row.operator_verdict) || "").toUpperCase();
-    if (["DONE", "NOT_DONE", "NEEDS_REVIEW", "OUT_OF_SCOPE"].includes(fromApi)) return fromApi;
-    const review = String((row && row.review_status) || "PENDING").toUpperCase();
-    const final = sopStatusValue(row, "final");
-    if (review === "OUT_OF_SCOPE") return "OUT_OF_SCOPE";
-    if (review === "QUALIFIED" && final === "DONE") return "DONE";
-    if (review === "NOT_QUALIFIED" && final === "NOT_DONE") return "NOT_DONE";
-    return "NEEDS_REVIEW";
-  };
-
-  const scopeReasonLabel = (reason) => ({ PASSING_THROUGH: "Hanya melintas", ALREADY_WRAPPED: "Sudah dibungkus", OTHER: "Lainnya" }[reason] || "");
-
-  const verdictLabel = (verdict) => {
-    if (verdict === "OUT_OF_SCOPE") return "Di luar cakupan SOP";
-    if (verdict === "DONE") return "Sesuai SOP";
-    if (verdict === "NOT_DONE") return "Tidak sesuai SOP";
-    return "Perlu ditinjau";
-  };
-
-  const verdictClass = (verdict) => {
-    if (verdict === "OUT_OF_SCOPE") return "dir-b";
-    if (verdict === "DONE") return "yes";
-    if (verdict === "NOT_DONE") return "no";
-    return "pending";
-  };
-
-  const reviewSourceLabel = (raw) => {
-    const source = String(raw || "PENDING").toUpperCase();
-    if (source === "AUTO") return "Otomatis";
-    if (source === "MANUAL") return "Ditinjau petugas";
-    return "Menunggu tinjauan";
-  };
-
-  const pillClassForReviewStatus = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "OUT_OF_SCOPE") return "dir-b";
-    if (v === "QUALIFIED") return "yes";
-    if (v === "NOT_QUALIFIED") return "no";
-    return "pending";
-  };
-
-  const displayAlertStatus = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "CONFIRMED") return "CONFIRMED";
-    if (v === "DISMISSED") return "DISMISSED";
-    return "PENDING";
-  };
-
-  const pillClassForAlertStatus = (raw) => {
-    const v = String(raw || "PENDING").toUpperCase();
-    if (v === "CONFIRMED") return "yes";
-    if (v === "DISMISSED") return "no";
-    return "pending";
-  };
-
-  const structuredSop = (row) => {
-    const sop = row && row.sop && typeof row.sop === "object" ? row.sop : null;
-    return sop && sop.profile ? sop : null;
-  };
-
-  const sopScope = (row, scope) => {
-    const sop = structuredSop(row);
-    const data = sop && sop[scope] && typeof sop[scope] === "object" ? sop[scope] : null;
-    return data || {};
-  };
-
-  const sopStatusValue = (row, scope) => {
-    const data = sopScope(row, scope);
-    const fallback =
-      scope === "final"
-        ? row && (row.final_sop || row.final_helmet || row.machine_sop || row.machine_helmet)
-        : row && (row.machine_sop || row.machine_helmet);
-    return String(data.status || fallback || "UNKNOWN").toUpperCase();
-  };
-
-  const dashboardTrendStatus = (row) => {
-    return operatorVerdict(row);
-  };
-
-  const rollOverallDisplay = (raw) => {
-    const v = String(raw || "UNKNOWN").toUpperCase();
-    if (v === "SESUAI SOP") return "Sesuai SOP";
-    if (v === "TIDAK SESUAI SOP") return "Tidak sesuai SOP";
-    return "Bukti belum cukup";
-  };
-
-  const queueStepSummary = (row) => {
-    const sop = structuredSop(row);
-    if (!sop || sop.profile !== "roll_sop_v1") return "";
-    const steps = sopScope(row, "final");
-    return [
-      `Cleaning: ${String(steps.cleaned || "UNKNOWN").toUpperCase()}`,
-      `Labeling: ${String(steps.labeled || "UNKNOWN").toUpperCase()}`,
-    ].join(" · ");
-  };
-
-  const queueDecision = (row) => {
-    const review = String((row && row.review_status) || "PENDING").toUpperCase();
-    const verdict = operatorVerdict(row);
-    return {
-      label: verdictLabel(verdict),
-      className: verdictClass(verdict),
-      steps: queueStepSummary(row),
-      meta:
-        verdict === "OUT_OF_SCOPE" ? scopeReasonLabel(row.scope_reason) :
-        verdict === "NEEDS_REVIEW" && review !== "PENDING"
-          ? "Keputusan review dan hasil SOP berbeda; periksa detail"
-          : "",
-    };
   };
 
   const dashboardSopPills = (session) => {
