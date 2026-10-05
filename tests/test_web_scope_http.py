@@ -76,6 +76,120 @@ def _json(request: HttpRequest, path: str) -> dict:
     return json.loads(body)
 
 
+def test_next_review_excludes_archives_before_pagination(
+    request_api: HttpRequest, tmp_path: Path,
+) -> None:
+    archive = tmp_path / "data" / "sessions" / "2026-09-30" / "archive"
+    archive.mkdir(parents=True)
+    (archive / "checklist.json").write_text(json.dumps({
+        "session_uid": "archive", "session_id": "old", "sop_profile": "operator_mvp_a",
+        "operator_present": "DONE", "roi_dwell": "DONE", "helmet": "DONE",
+        "start_time_iso": "2026-09-30T12:00:00",
+    }))
+    _put_roll(request_api, "roll")
+
+    query = "/api/sessions?operator_verdict=NEEDS_REVIEW&sort=NEWEST&limit=1"
+    # The ordinary list keeps archives readable, and the archive sorts first.
+    assert _json(request_api, query)["sessions"][0]["session_uid"] == "archive"
+    pending = _json(request_api, query + "&reviewable_only=true")
+    assert pending["total"] == 1
+    assert [row["session_uid"] for row in pending["sessions"]] == ["roll"]
+
+    assert request_api("PUT", "/api/sessions/roll/review", {
+        "review_status": "QUALIFIED", "review_note": "checked",
+        "overrides": {"cleaned": "DONE", "labeled": "DONE"},
+    })[0] == 200
+    assert _json(request_api, query + "&reviewable_only=true")["sessions"] == []
+    assert _json(request_api, "/api/sessions/archive")["sop"]["read_only"] is True
+
+
+def test_archived_operator_evidence_is_readable_but_reviews_and_ingest_are_blocked(
+    request_api: HttpRequest, tmp_path: Path,
+) -> None:
+    session_dir = tmp_path / "data" / "sessions" / "2026-09-30" / "archived"
+    session_dir.mkdir(parents=True)
+    checklist = {
+        "session_uid": "archived", "session_id": "old1", "start_date": "2026-09-30",
+        "sop_profile": "operator_mvp_a", "start_time_s": 0, "end_time_s": 100,
+        "operator_present": "DONE", "roi_dwell": "DONE", "helmet": "UNKNOWN",
+    }
+    checklist_path = session_dir / "checklist.json"
+    checklist_path.write_text(json.dumps(checklist))
+    thumbnail = session_dir / "thumbnail.jpg"
+    thumbnail.write_bytes(b"archived-picture")
+    upsert_review(db_path=tmp_path / "reviews.sqlite3", session_uid="archived",
+                  review_status="QUALIFIED", review_note="old review", overrides={"helmet": "DONE"})
+    assert request_api("POST", "/api/admin/rescan")[0] == 200
+
+    detail = _json(request_api, "/api/sessions/archived")
+    assert detail["sop"]["read_only"] is True
+    assert detail["sop"]["final"]["helmet"] == "DONE"
+    assert detail["review_status"] == "QUALIFIED"
+    assert request_api("GET", detail["thumbnail_url"])[1] == b"archived-picture"
+    assert request_api("PUT", "/api/sessions/archived/review", {
+        "review_status": "NOT_QUALIFIED", "review_note": "new review",
+    })[0] == 400
+    assert _json(request_api, "/api/sessions/archived")["review"]["review_note"] == "old review"
+
+    original = checklist_path.read_bytes()
+    assert request_api("PUT", "/api/sessions/archived", checklist)[0] == 400
+    roll_payload = {**checklist, "sop_profile": "roll_sop_v1", "cleaned": "DONE",
+                    "labeled": "DONE", "overall_status": "SESUAI SOP"}
+    assert request_api("PUT", "/api/sessions/archived", roll_payload)[0] == 400
+    for rel_path in ("thumbnail.jpg", "checklist.json"):
+        assert request_api("POST", f"/api/sessions/archived/artifacts?rel_path={rel_path}", roll_payload)[0] == 400
+    assert checklist_path.read_bytes() == original
+    assert thumbnail.read_bytes() == b"archived-picture"
+
+    # An unreviewed archive must stay pending even with DONE steps and evidence.
+    unchecked = session_dir.with_name("unchecked")
+    unchecked.mkdir()
+    (unchecked / "checklist.json").write_text(json.dumps({
+        **checklist, "session_uid": "unchecked", "helmet": "DONE",
+    }))
+    (unchecked / "thumbnail.jpg").write_bytes(b"picture")
+    assert request_api("POST", "/api/admin/rescan")[0] == 200
+    assert _json(request_api, "/api/sessions/unchecked")["review_source"] == "PENDING"
+
+
+def test_new_operator_upload_is_rejected_before_storage_changes(
+    request_api: HttpRequest, tmp_path: Path,
+) -> None:
+    code, body = request_api("PUT", "/api/sessions/removed", {
+        "session_uid": "removed", "session_id": "old", "start_date": "2026-09-30",
+        "operator_present": "DONE", "roi_dwell": "DONE", "helmet": "DONE",
+    })
+    assert code == 400
+    assert "archived and read-only" in body.decode()
+    assert not (tmp_path / "data" / "sessions" / "2026-09-30" / "removed").exists()
+
+
+def test_roll_upload_cannot_replace_archive_before_rescan(
+    request_api: HttpRequest, tmp_path: Path,
+) -> None:
+    path = tmp_path / "data" / "sessions" / "2026-09-30" / "unscanned" / "checklist.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "session_uid": "unscanned", "session_id": "old", "operator_present": "DONE",
+    }))
+    original = path.read_bytes()
+    assert request_api("PUT", "/api/sessions/unscanned", {
+        "session_uid": "unscanned", "session_id": "new", "start_date": "2026-09-30",
+        "sop_profile": "roll_sop_v1", "cleaned": "DONE", "labeled": "DONE",
+        "overall_status": "SESUAI SOP",
+    })[0] == 400
+    assert path.read_bytes() == original
+
+
+def test_artifact_upload_cannot_bypass_roll_metadata_validation(request_api: HttpRequest) -> None:
+    _put_roll(request_api, "roll")
+    assert request_api("POST", "/api/sessions/roll/artifacts?rel_path=checklist.json", {
+        "session_uid": "roll", "operator_present": "DONE",
+    })[0] == 400
+    assert _json(request_api, "/api/sessions/roll")["sop"]["profile"] == "roll_sop_v1"
+    assert request_api("POST", "/api/sessions/roll/artifacts?rel_path=thumbnail.jpg", {})[0] == 200
+
+
 def test_passing_roll_resolves_review_and_stays_out_of_compliance(request_api: HttpRequest) -> None:
     request = request_api
     _put_roll(request, "passing")
