@@ -12,7 +12,7 @@ from Action_Detection_SOP.reporting import (
     write_session_artifacts,
 )
 from Action_Detection_SOP.roll_sop_engine import RollComplianceStatus, RollSessionResult
-from Action_Detection_SOP.sop_engine import StepStatus
+from Action_Detection_SOP.sop_types import StepStatus
 
 
 def _roll_session(

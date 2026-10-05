@@ -11,7 +11,6 @@ class SopProfile:
     schema_version: int
     session_start_seconds: float
     session_end_seconds: float
-    roi_dwell_seconds: float
     min_session_seconds: float = 0.0
     notes: Optional[str] = None
 
@@ -24,8 +23,6 @@ class SopProfile:
             raise ValueError("session_end_seconds must be > 0")
         if self.min_session_seconds < 0:
             raise ValueError("min_session_seconds must be >= 0")
-        if self.roi_dwell_seconds <= 0:
-            raise ValueError("roi_dwell_seconds must be > 0")
 
 
 def _require_number(payload: Dict[str, Any], key: str) -> float:
@@ -62,7 +59,6 @@ def load_sop_profile(path: Path) -> SopProfile:
         "session_start_seconds",
         "session_end_seconds",
         "min_session_seconds",
-        "roi_dwell_seconds",
         "notes",
     }
     unknown = sorted(set(payload.keys()) - allowed)
@@ -75,7 +71,6 @@ def load_sop_profile(path: Path) -> SopProfile:
     min_session_seconds = float(payload.get("min_session_seconds", 0.0))
     if min_session_seconds < 0:
         raise ValueError("min_session_seconds must be >= 0")
-    roi_dwell_seconds = _require_number(payload, "roi_dwell_seconds")
     notes = payload.get("notes")
     if notes is not None and not isinstance(notes, str):
         raise ValueError("notes must be a string if provided")
@@ -85,6 +80,5 @@ def load_sop_profile(path: Path) -> SopProfile:
         session_start_seconds=session_start_seconds,
         session_end_seconds=session_end_seconds,
         min_session_seconds=min_session_seconds,
-        roi_dwell_seconds=roi_dwell_seconds,
         notes=notes,
     )

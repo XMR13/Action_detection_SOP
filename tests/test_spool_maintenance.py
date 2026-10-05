@@ -23,8 +23,8 @@ def _build_session_dir(tmp_path: Path) -> Tuple[Path, Path]:
         session_dir / "checklist.json",
         {
             "session_id": "001",
-            "operator_present": "DONE",
-            "roi_dwell": "DONE",
+            "sop_profile": "roll_sop_v1",
+            "cleaned": "DONE",
             "helmet": "DONE",
         },
     )

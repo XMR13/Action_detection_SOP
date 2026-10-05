@@ -60,9 +60,10 @@ def _put_min_session(
         "session_uid": session_uid,
         "session_id": "s001",
         "start_date": start_date,
-        "operator_present": "DONE",
-        "roi_dwell": "DONE",
-        "helmet": "UNKNOWN",
+        "sop_profile": "roll_sop_v1",
+        "cleaned": "DONE",
+        "labeled": "DONE",
+        "overall_status": "SESUAI SOP",
     }
     if extra:
         payload.update(extra)
@@ -274,7 +275,7 @@ def test_put_review_enforces_override_keys_and_values(tmp_path: Path) -> None:
         bad_value = {
             "review_status": "QUALIFIED",
             "review_note": "",
-            "overrides": {"helmet": "INVALID"},
+            "overrides": {"cleaned": "INVALID"},
         }
         res_bad_value = client.put("/api/sessions/uid_review/review", headers=_auth_headers(), json=bad_value)
         assert res_bad_value.status_code == 400
@@ -282,13 +283,13 @@ def test_put_review_enforces_override_keys_and_values(tmp_path: Path) -> None:
         good_overrides = {
             "review_status": "QUALIFIED",
             "review_note": "checked",
-            "overrides": {"helmet": "done", "roi_dwell": "unknown"},
+            "overrides": {"cleaned": "done", "labeled": "done"},
         }
         res_good = client.put("/api/sessions/uid_review/review", headers=_auth_headers(), json=good_overrides)
         assert res_good.status_code == 200
         review = res_good.json()["review"]
-        assert review["overrides"]["helmet"] == "DONE"
-        assert review["overrides"]["roi_dwell"] == "UNKNOWN"
+        assert review["overrides"]["cleaned"] == "DONE"
+        assert review["overrides"]["labeled"] == "DONE"
 
 
 def test_roll_session_api_exposes_structured_sop_and_auto_approves_with_evidence(tmp_path: Path) -> None:

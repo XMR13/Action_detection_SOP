@@ -83,7 +83,7 @@ def test_scope_reason_cannot_be_used_for_approval_or_legacy_profile() -> None:
                                       scope_reason="PASSING_THROUGH")
 
 
-def test_legacy_sop_summary_keeps_old_operator_fields() -> None:
+def test_archived_operator_summary_preserves_stored_fields_and_overrides() -> None:
     summary = evaluate_sop_status(
         session=_session({"operator_present": "DONE", "roi_dwell": "DONE", "helmet": "UNKNOWN"}),
         review=_review({"helmet": "DONE"}),
@@ -93,7 +93,49 @@ def test_legacy_sop_summary_keeps_old_operator_fields() -> None:
     assert summary["machine"]["status"] == "UNKNOWN"
     assert summary["final"]["status"] == "DONE"
     assert summary["final"]["helmet"] == "DONE"
+    assert summary["read_only"] is True
 
+
+@pytest.mark.parametrize("status", ["QUALIFIED", "NOT_QUALIFIED", "PENDING"])
+def test_archived_operator_review_is_preserved_without_auto_approval(status: str) -> None:
+    session = _session({
+        "operator_present": "DONE", "roi_dwell": "DONE", "helmet": "DONE",
+        "start_time_s": 0.0, "end_time_s": 100.0,
+    })
+    review = ReviewRecord("archived", status, "original review", {}, "created", "updated")
+    effective = effective_review_for_session(
+        session=session, review=review, auto_approve_done_enabled=True,
+        auto_approve_min_duration_s=0.0, has_evidence=True,
+    )
+    assert effective.status == status
+    assert effective.source == ("PENDING" if status == "PENDING" else "MANUAL")
+    if status == "PENDING":
+        assert effective.auto_reason == "archived_operator_session"
+
+
+def test_archived_operator_session_cannot_be_auto_approved_without_review() -> None:
+    effective = effective_review_for_session(
+        session=_session({"operator_present": "DONE", "roi_dwell": "DONE", "helmet": "DONE"}),
+        review=None, auto_approve_done_enabled=True,
+        auto_approve_min_duration_s=0.0, has_evidence=True,
+    )
+    assert effective.status == "PENDING"
+    assert effective.source == "PENDING"
+    assert effective.auto_reason == "archived_operator_session"
+
+
+@pytest.mark.parametrize("checklist", [
+    {"operator_present": "DONE", "roi_dwell": "DONE", "helmet": "DONE"},
+    {"sop_profile": "operator_mvp_a", "cleaned": "DONE", "labeled": "DONE",
+     "overall_status": "SESUAI SOP"},
+])
+def test_operator_payloads_and_review_writes_are_rejected(checklist: dict[str, object]) -> None:
+    with pytest.raises(ReviewOverrideError, match="archived and read-only"):
+        normalize_session_checklist_payload(checklist)
+    with pytest.raises(ReviewOverrideError, match="archived and read-only"):
+        validate_review_overrides(checklist=checklist, raw={})
+    with pytest.raises(ReviewOverrideError, match="archived and read-only"):
+        validate_roll_review_decision(session=_session(checklist), review_status="QUALIFIED", overrides={})
 
 def test_roll_sop_summary_uses_explicit_roll_fields() -> None:
     status = evaluate_sop_status(

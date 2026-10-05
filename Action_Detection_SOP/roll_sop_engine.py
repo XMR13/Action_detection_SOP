@@ -7,7 +7,7 @@ from typing import List, Optional, Sequence, Tuple
 from yolo_kit.types import Detection
 
 from .session import RollSessionConfig, RollSessionizer
-from .sop_engine import EvidenceEvent, StepStatus
+from .sop_types import EvidenceEvent, StepStatus
 
 class RollComplianceStatus(str, Enum):
     COMPLIANT = "SESUAI SOP"

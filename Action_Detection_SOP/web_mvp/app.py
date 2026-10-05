@@ -786,6 +786,19 @@ def _validate_review_overrides(*, checklist: Dict[str, Any], raw: Dict[str, Any]
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _validate_writable_checklist(path: Path) -> None:
+    """Protect archived files even when the session index has not rescanned."""
+    if not path.exists():
+        return
+    try:
+        checklist = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Existing checklist cannot be read; rescan or repair it before uploading") from e
+    if not isinstance(checklist, dict):
+        raise HTTPException(status_code=400, detail="Existing checklist must be a JSON object")
+    _validate_review_overrides(checklist=checklist, raw={})
+
+
 def _resolve_date_window(
     *,
     date: Optional[str],
@@ -1660,6 +1673,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         evidence: Literal["ANY", "CLIP_THUMB", "CLIP_ONLY", "THUMB_ONLY"],
         shift: str,
         sort: Literal["NEWEST", "OLDEST", "MACHINE_UNKNOWN_FIRST", "PENDING_FIRST", "NEEDS_REVIEW_FIRST"],
+        reviewable_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], str]:
         sessions = index.list()
         sessions, applied_date_from, applied_date_to = _filter_sessions_by_date_window(
@@ -1706,6 +1720,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                 continue
 
             sop_status = evaluate_sop_status(session=s, review=r)
+            if reviewable_only and sop_status.summary.get("read_only", False):
+                continue
             verdict = operator_verdict(review_status=rs, final_sop=sop_status.final_sop)
             if operator_verdict_filter and verdict != operator_verdict_filter:
                 continue
@@ -1787,6 +1803,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         page: int = Query(default=1, ge=1),
         page_size: Optional[int] = Query(default=None, ge=1, le=2000),
         limit: int = Query(default=200, ge=1, le=2000),
+        reviewable_only: bool = False,
     ) -> Dict[str, Any]:
         out, applied_date_from, applied_date_to, shift_filter = _filtered_session_rows(
             date=date,
@@ -1794,6 +1811,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             date_to=date_to,
             review_status=review_status,
             operator_verdict_filter=operator_verdict,
+            reviewable_only=reviewable_only,
             evidence=evidence,
             shift=shift,
             sort=sort,
@@ -2017,15 +2035,21 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             _validate_date_ymd(payload.end_date)
         _validate_date_ymd(date)
 
-        # In ingestion mode, store by UID to avoid collisions across devices/runs.
         session_dir = settings.data_dir / "sessions" / date / session_uid
-        session_dir.mkdir(parents=True, exist_ok=True)
-
         checklist_path = session_dir / "checklist.json"
+        # Validate before touching storage; archived operator records cannot be
+        # replaced by a roll upload using the same UID.
         try:
             checklist_payload = normalize_session_checklist_payload(payload.model_dump(mode="json"))
+            existing = index.get(session_uid)
+            if existing is not None:
+                _validate_review_overrides(checklist=existing.checklist, raw={})
         except ReviewOverrideError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+        _validate_writable_checklist(checklist_path)
+
+        # In ingestion mode, store by UID to avoid collisions across devices/runs.
+        session_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(checklist_path, checklist_payload)
 
         index.refresh()
@@ -2070,7 +2094,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
     async def post_artifact(
         session_uid: str,
         request: Request,
-        rel_path: str = Query(..., description="Relative path under the session dir, e.g. evidence/helmet_done_01.mp4"),
+        rel_path: str = Query(..., description="Relative path under the session dir, e.g. evidence/cleaned_done_01.mp4"),
     ) -> Dict[str, Any]:
         _validate_session_uid(session_uid)
         s = index.get(session_uid)
@@ -2080,8 +2104,12 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             s = index.get(session_uid)
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found (upsert first)")
+        _validate_review_overrides(checklist=s.checklist, raw={})
+        _validate_writable_checklist(s.paths.checklist_json)
 
         rel = _safe_rel_path(rel_path)
+        if rel == Path("checklist.json"):
+            raise HTTPException(status_code=400, detail="Upload checklist metadata through PUT /api/sessions/{session_uid}")
         base = s.paths.session_dir.resolve()
         target = (s.paths.session_dir / rel).resolve()
         try:

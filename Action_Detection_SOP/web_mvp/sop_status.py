@@ -5,7 +5,10 @@ from typing import Any, Dict, Literal, Optional, Protocol, Tuple
 
 from .review_store import ReviewRecord
 
-LEGACY_PROFILE = "operator_mvp_a"
+ARCHIVED_OPERATOR_PROFILE = "operator_mvp_a"
+ARCHIVED_SESSION_ERROR = (
+    "Operator sessions are archived and read-only. Upload and review roll_sop_v1 sessions instead."
+)
 ROLL_PROFILE = "roll_sop_v1"
 
 STEP_STATUS_VALUES = {"DONE", "NOT_DONE", "UNKNOWN"}
@@ -21,7 +24,7 @@ ROLL_OVERALL_STATUS_VALUES = {
 
 @dataclass(frozen=True)
 class WebSopStatus:
-    """Web-facing SOP status plus temporary legacy flat-field compatibility."""
+    """Web-facing roll status and read-only compatibility for archived sessions."""
 
     profile: str
     summary: Dict[str, Any]
@@ -49,12 +52,6 @@ class _SopPolicy(Protocol):
     def build_status(self, *, session: Any, review: Optional[ReviewRecord]) -> WebSopStatus:
         ...
 
-    def validate_overrides(self, raw: Dict[str, Any]) -> Dict[str, str]:
-        ...
-
-    def normalize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        ...
-
     def should_auto_approve(
         self,
         *,
@@ -72,7 +69,8 @@ def evaluate_sop_status(*, session: Any, review: Optional[ReviewRecord]) -> WebS
 
 
 def validate_review_overrides(*, checklist: Dict[str, Any], raw: Dict[str, Any]) -> Dict[str, str]:
-    return _policy_for_checklist(checklist).validate_overrides(raw)
+    _require_roll_checklist(checklist)
+    return _ROLL_POLICY.validate_overrides(raw)
 
 
 def operator_verdict(*, review_status: str, final_sop: str) -> str:
@@ -91,9 +89,8 @@ def validate_roll_review_decision(
     scope_reason: Optional[str] = None, review_note: str = "",
 ) -> None:
     """Keep a new roll review decision aligned with its final SOP result."""
+    _require_roll_checklist(session.checklist)
     if review_status == "OUT_OF_SCOPE":
-        if _policy_for_checklist(session.checklist).profile != ROLL_PROFILE:
-            raise ReviewOverrideError("Di luar cakupan SOP hanya berlaku untuk sesi roll")
         if scope_reason not in {"PASSING_THROUGH", "ALREADY_WRAPPED", "OTHER"}:
             raise ReviewOverrideError("Pilih alasan di luar cakupan SOP")
         if scope_reason == "OTHER" and not review_note.strip():
@@ -101,8 +98,6 @@ def validate_roll_review_decision(
         return
     if scope_reason is not None:
         raise ReviewOverrideError("Alasan di luar cakupan hanya berlaku untuk keputusan Di luar cakupan SOP")
-    if _policy_for_checklist(session.checklist).profile != ROLL_PROFILE:
-        return
     if review_status == "PENDING":
         return
     candidate = ReviewRecord(
@@ -123,7 +118,8 @@ def validate_roll_review_decision(
 
 
 def normalize_session_checklist_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return _policy_for_checklist(payload).normalize_payload(payload)
+    _require_roll_checklist(payload)
+    return _ROLL_POLICY.normalize_payload(payload)
 
 
 def effective_review_for_session(
@@ -277,64 +273,35 @@ class _RollSopPolicy:
         return _roll_overall_from_steps(cleaned=final_cleaned, labeled=final_labeled)
 
 
-class _LegacySopPolicy:
-    profile = LEGACY_PROFILE
-    override_keys = {"operator_present", "roi_dwell", "helmet"}
+class _ArchivedOperatorReader:
+    """Read historical checklists and stored overrides without an active SOP engine."""
+
+    profile = ARCHIVED_OPERATOR_PROFILE
 
     def build_status(self, *, session: Any, review: Optional[ReviewRecord]) -> WebSopStatus:
-        machine_operator = _normalize_step_status(session.checklist.get("operator_present"))
-        machine_roi = _normalize_step_status(session.checklist.get("roi_dwell"))
-        machine_helmet = _normalize_step_status(session.checklist.get("helmet"))
-        machine_sop = _sop_status_from_steps(machine_operator, machine_roi, machine_helmet)
-
-        final_operator = _review_step_status(
-            machine_status=machine_operator,
-            review=review,
-            step_key="operator_present",
-        )
-        final_roi = _review_step_status(
-            machine_status=machine_roi,
-            review=review,
-            step_key="roi_dwell",
-        )
-        final_helmet = _review_step_status(
-            machine_status=machine_helmet,
-            review=review,
-            step_key="helmet",
-        )
-        final_sop = _sop_status_from_steps(final_operator, final_roi, final_helmet)
-
-        summary = {
-            "profile": LEGACY_PROFILE,
-            "machine": {
-                "operator_present": machine_operator,
-                "roi_dwell": machine_roi,
-                "helmet": machine_helmet,
-                "status": machine_sop,
-            },
-            "final": {
-                "operator_present": final_operator,
-                "roi_dwell": final_roi,
-                "helmet": final_helmet,
-                "status": final_sop,
-            },
-            "inconsistent": False,
+        keys = ("operator_present", "roi_dwell", "helmet")
+        machine = {key: _normalize_step_status(session.checklist.get(key)) for key in keys}
+        final = {
+            key: _review_step_status(machine_status=machine[key], review=review, step_key=key)
+            for key in keys
         }
+        machine_sop = _sop_status_from_steps(*machine.values())
+        final_sop = _sop_status_from_steps(*final.values())
         return WebSopStatus(
-            profile=LEGACY_PROFILE,
-            summary=summary,
+            profile=self.profile,
+            summary={
+                "profile": self.profile,
+                "machine": {**machine, "status": machine_sop},
+                "final": {**final, "status": final_sop},
+                "inconsistent": False,
+                "read_only": True,
+            },
             machine_sop=machine_sop,
             final_sop=final_sop,
-            machine_helmet=machine_helmet,
-            final_helmet=final_helmet,
-            machine_roi_dwell=machine_roi,
+            machine_helmet=machine["helmet"],
+            final_helmet=final["helmet"],
+            machine_roi_dwell=machine["roi_dwell"],
         )
-
-    def validate_overrides(self, raw: Dict[str, Any]) -> Dict[str, str]:
-        return _validate_overrides(raw=raw, allowed_keys=self.override_keys)
-
-    def normalize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return dict(payload)
 
     def should_auto_approve(
         self,
@@ -344,36 +311,29 @@ class _LegacySopPolicy:
         auto_approve_min_duration_s: float,
         has_evidence: bool,
     ) -> Tuple[bool, Optional[str]]:
-        if status.machine_helmet != "DONE":
-            return False, "helmet_not_done"
-        if status.machine_roi_dwell != "DONE":
-            return False, "roi_not_done"
-        if _session_duration_s(session) < float(auto_approve_min_duration_s):
-            return False, "duration_too_short"
-
-        blocker = _auto_approve_blocker(session.checklist.get("notes"))
-        if blocker:
-            return False, f"blocked_by_note:{blocker}"
-        if not has_evidence:
-            return False, "no_evidence"
-        return True, "policy_pass"
+        return False, "archived_operator_session"
 
 
 _ROLL_POLICY = _RollSopPolicy()
-_LEGACY_POLICY = _LegacySopPolicy()
+_ARCHIVED_OPERATOR_READER = _ArchivedOperatorReader()
 
 
 def _policy_for_checklist(checklist: Dict[str, Any]) -> _SopPolicy:
     if _is_roll_profile(checklist):
         return _ROLL_POLICY
-    return _LEGACY_POLICY
+    return _ARCHIVED_OPERATOR_READER
 
 
 def _is_roll_profile(checklist: Dict[str, Any]) -> bool:
     profile = checklist.get("sop_profile")
-    if isinstance(profile, str) and profile.strip() == ROLL_PROFILE:
-        return True
+    if profile is not None:
+        return isinstance(profile, str) and profile.strip() == ROLL_PROFILE
     return any(key in checklist for key in ("cleaned", "labeled", "overall_status"))
+
+
+def _require_roll_checklist(checklist: Dict[str, Any]) -> None:
+    if not _is_roll_profile(checklist):
+        raise ReviewOverrideError(ARCHIVED_SESSION_ERROR)
 
 
 def _normalize_step_status(value: Any) -> str:
@@ -510,23 +470,3 @@ def _normalized_status_label(status: str) -> str:
         "UNKNOWN": "Belum jelas",
     }
     return labels[normalized]
-
-
-def _session_duration_s(session: Any) -> float:
-    start_s = float(session.checklist.get("start_time_s") or 0.0)
-    end_s = float(session.checklist.get("end_time_s") or 0.0)
-    return max(0.0, end_s - start_s)
-
-
-def _auto_approve_blocker(notes: Any) -> Optional[str]:
-    if not isinstance(notes, list):
-        return None
-    for raw in notes:
-        if not isinstance(raw, str):
-            continue
-        tag = raw.strip().lower()
-        if not tag:
-            continue
-        if ("too_short" in tag) or ("too_small" in tag) or ("disabled" in tag):
-            return tag
-    return None

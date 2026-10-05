@@ -23,9 +23,10 @@ def _build_session_dir(tmp_path: Path) -> Tuple[Path, Path]:
         checklist_path,
         {
             "session_id": "001",
-            "operator_present": "DONE",
-            "roi_dwell": "DONE",
-            "helmet": "UNKNOWN",
+            "sop_profile": "roll_sop_v1",
+            "cleaned": "DONE",
+            "labeled": "DONE",
+            "overall_status": "SESUAI SOP",
         },
     )
     return data_dir, session_dir

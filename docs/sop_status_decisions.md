@@ -1,7 +1,7 @@
 # SOP status decisions
 
 This document describes the implemented status rules for `roll_sop_v1` and the
-older `operator_mvp_a` profile. It describes code behavior, not a claim about
+read-only historical `operator_mvp_a` records. It describes code behavior, not a claim about
 the effective settings on a particular Jetson. Check that run's
 `run_config.json` before diagnosing a website row.
 
@@ -189,15 +189,14 @@ gate. That example does not establish what a particular running service uses.
 Read `sessionization.min_session_seconds` in its `run_config.json` and verify
 the running service arguments when diagnosing live behavior.
 
-## Older operator profile
+## Archived operator records
 
-`operator_mvp_a` checks operator presence, ROI dwell, and helmet association.
-ROI dwell or helmet can be `UNKNOWN` when the check is disabled, the session
-has fewer analyzed frames than the relevant threshold, or the person is too
-small under a configured minimum-height rule. That engine records notes such
-as `session_too_short_for_helmet_decision` and
-`person_too_small_for_reliable_helmet`. The roll cleaning and labeling rules
-above should not be applied to this older profile.
+The operator engine is removed; `roll_sop_v1` is the only runtime workflow.
+Previously saved operator checklists, evidence, and review overrides remain
+readable. Their structured API summary has `read_only: true`; the website shows
+stored step values without editing controls. New operator metadata uploads and
+review changes are rejected, and archived sessions cannot be auto-approved.
+Historical values are not reinterpreted as roll cleaning or labeling results.
 
 ## Diagnose a website `UNKNOWN` row
 
@@ -217,5 +216,5 @@ above should not be applied to this older profile.
    do not prove it did not.
 
 Implementation references: `Action_Detection_SOP/roll_sop_engine.py`,
-`Action_Detection_SOP/sop_engine.py`, `Action_Detection_SOP/runner_mvp.py`,
+`Action_Detection_SOP/session.py`, `Action_Detection_SOP/sop_types.py`, `Action_Detection_SOP/runner_mvp.py`,
 `Action_Detection_SOP/web_mvp/sop_status.py`, and `Scripts/run_sop_mvp.py`.

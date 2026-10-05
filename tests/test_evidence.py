@@ -9,7 +9,7 @@ class TestEvidenceClipper(unittest.TestCase):
         clipper = EvidenceClipper(cfg)
         for t in [1, 2, 3, 4, 5]:
             self.assertEqual(clipper.add_frame(time_s=float(t), frame=t), [])
-        clipper.trigger(name="roi_dwell_done", time_s=5.0, frame_idx=5)
+        clipper.trigger(name="cleaned_done", time_s=5.0, frame_idx=5)
         completed = []
         for t in [6, 7]:
             completed.extend(clipper.add_frame(time_s=float(t), frame=t))
@@ -23,7 +23,7 @@ class TestEvidenceClipper(unittest.TestCase):
         clipper = EvidenceClipper(cfg)
         for t in [1, 2, 3, 4, 5]:
             clipper.add_frame(time_s=float(t), frame=t)
-        clipper.trigger(name="helmet_done", time_s=5.0, frame_idx=5)
+        clipper.trigger(name="labeled_done", time_s=5.0, frame_idx=5)
         completed = clipper.flush()
         self.assertEqual(len(completed), 1)
         clip = completed[0]

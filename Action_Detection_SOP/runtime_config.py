@@ -6,33 +6,18 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from Action_Detection_SOP.config import SopProfile, load_sop_profile
+from Action_Detection_SOP.session import DEFAULT_ROLL_SESSION_END_S, DEFAULT_ROLL_SESSION_START_S
 from yolo_kit import load_class_names
 
-#THE CONSTANT CONFIG VALUES
-DEFAULT_SESSION_START_S = 2.0
-DEFAULT_SESSION_END_S = 3.0
-DEFAULT_ROLL_SESSION_START_S = 1.0
-DEFAULT_ROLL_SESSION_END_S = 2.0
-DEFAULT_ROI_DWELL_S = 8.0
-PROFILE_OPERATOR_MVP_A = "operator_mvp_a"
+# The runner supports roll sessions; safety alerts use a separate engine.
 PROFILE_ROLL_SOP_V1 = "roll_sop_v1"
-KNOWN_SOP_PROFILES = {PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1}
 
-"""
-----------------------------
-CONFIG
-----------------------------
-"""
 @dataclass(frozen=True)
 class ResolvedSessionTimingConfig:
     start_s: float
     end_s: float
     min_session_s: float
 
-
-@dataclass(frozen=True)
-class ResolvedOperatorRulesConfig:
-    roi_dwell_s: float
 
 @dataclass(frozen=True)
 class ResolvedSopProfileConfig:
@@ -49,18 +34,15 @@ class ResolvedClassConfig:
     active_class_ids: Tuple[int, ...]
     person_ids: Tuple[int, ...]
     helmet_ids: Tuple[int, ...]
-    helmet_disabled: bool
     roll_ids: Tuple[int, ...]
     cleaning_cloth_ids: Tuple[int, ...]
     paper_label_ids: Tuple[int, ...]
-    warnings: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class ResolvedRunConfig:
     sop_profile: ResolvedSopProfileConfig
     session_timing: ResolvedSessionTimingConfig
-    operator_rules: Optional[ResolvedOperatorRulesConfig]
     classes: ResolvedClassConfig
 
 
@@ -110,34 +92,31 @@ def _parse_label_conf(raw_values: Sequence[str], *, class_names: Dict[int, str])
     return out
 
 def _resolve_sop_profile(args: argparse.Namespace) -> ResolvedSopProfileConfig:
-    name = PROFILE_OPERATOR_MVP_A
+    name = PROFILE_ROLL_SOP_V1
     path = None
     profile = None
     raw = str(args.sop_profile).strip() if args.sop_profile else ""
-    if raw:
-        if raw in KNOWN_SOP_PROFILES:
-            name = raw
-        else:
-            path = Path(raw)
-            profile = load_sop_profile(path)
+    if raw == "operator_mvp_a":
+        raise ValueError("operator_mvp_a has been removed. Use roll_sop_v1 with roll/cleaning_cloth/label metadata.")
+    if raw and raw != PROFILE_ROLL_SOP_V1:
+        path = Path(raw)
+        profile = load_sop_profile(path)
 
     return ResolvedSopProfileConfig(name=name, path=path, profile=profile)
 
 def _resolve_session_timing(args: argparse.Namespace, sop_profile: ResolvedSopProfileConfig) -> ResolvedSessionTimingConfig:
     profile = sop_profile.profile
     #the default value
-    default_start_s = DEFAULT_ROLL_SESSION_START_S if sop_profile.name == PROFILE_ROLL_SOP_V1 else DEFAULT_SESSION_START_S
-    default_end_s = DEFAULT_ROLL_SESSION_END_S if sop_profile.name == PROFILE_ROLL_SOP_V1 else DEFAULT_SESSION_END_S
     return ResolvedSessionTimingConfig(
         start_s=_resolve_seconds(
             args.start_s,
             profile.session_start_seconds if profile else None,
-            default_start_s,
+            DEFAULT_ROLL_SESSION_START_S,
         ),
         end_s=_resolve_seconds(
             args.end_s,
             profile.session_end_seconds if profile else None,
-            default_end_s,
+            DEFAULT_ROLL_SESSION_END_S,
         ),
         min_session_s=_resolve_seconds(
             args.min_session_s,
@@ -147,35 +126,16 @@ def _resolve_session_timing(args: argparse.Namespace, sop_profile: ResolvedSopPr
     )
 
 
-def _resolve_operator_rules(
-    args: argparse.Namespace,
-    sop_profile: ResolvedSopProfileConfig,
-) -> Optional[ResolvedOperatorRulesConfig]:
-    if sop_profile.name != PROFILE_OPERATOR_MVP_A:
-        return None
-
-    profile = sop_profile.profile
-    return ResolvedOperatorRulesConfig(
-        roi_dwell_s=_resolve_seconds(
-            args.roi_dwell_s,
-            profile.roi_dwell_seconds if profile else None,
-            DEFAULT_ROI_DWELL_S,
-        ),
-    )
-
-
-def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> ResolvedClassConfig:
+def _resolve_classes(args: argparse.Namespace) -> ResolvedClassConfig:
     class_names = load_class_names(args.metadata) if args.metadata else {}
     class_conf_thresholds = _parse_label_conf(args.label_conf, class_names=class_names)
     person_ids = tuple(_name_to_ids(class_names, args.person_label))
-    helmet_disabled = bool(args.skip_helmet)
     helmet_alerts_enabled = bool(getattr(args, "enable_helmet_alerts", False))
     helmet_label_ids = tuple(_name_to_ids(class_names, args.helmet_label))
-    helmet_ids = helmet_label_ids if helmet_alerts_enabled or not helmet_disabled else ()
+    helmet_ids = helmet_label_ids if helmet_alerts_enabled else ()
     roll_ids = tuple(_name_to_ids(class_names, args.roll_label))
     cleaning_cloth_ids = tuple(_name_to_ids(class_names, args.cleaning_cloth_label))
     paper_label_ids = tuple(_name_to_ids(class_names, args.paper_label))
-    warnings: List[str] = []
 
     if helmet_alerts_enabled:
         "jika kelas helmet dan person tidak tersedia di config maka trhow an errors"
@@ -198,38 +158,18 @@ def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> Resolve
                 min(float(args.conf), helmet_alert_confidence),
             )
 
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not person_ids:
-        raise ValueError(f"Could not resolve person class ids from labels: {args.person_label!r}")
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        if not roll_ids:
-            raise ValueError(f"Could not resolve roll class ids from labels: {args.roll_label!r}")
-        if not cleaning_cloth_ids:
-            raise ValueError(
-                f"Could not resolve cleaning cloth class ids from labels: {args.cleaning_cloth_label!r}"
-            )
-        if not paper_label_ids:
-            raise ValueError(f"Could not resolve paper label class ids from labels: {args.paper_label!r}")
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not helmet_ids and not helmet_disabled:
-        if args.require_helmet_class:
-            raise ValueError(
-                f"Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
-                "Provide a metadata.yaml that includes a helmet class (or pass --skip-helmet)."
-            )
-        warnings.append(
-            f"WARNING: Could not resolve helmet class ids from labels: {args.helmet_label!r}. "
-            "Helmet check will be disabled (helmet=UNKNOWN)."
-        )
-        helmet_disabled = True
-        helmet_ids = ()
+    if not roll_ids:
+        raise ValueError(f"Could not resolve roll class ids from labels: {args.roll_label!r}")
+    if not cleaning_cloth_ids:
+        raise ValueError(f"Could not resolve cleaning cloth class ids from labels: {args.cleaning_cloth_label!r}")
+    if not paper_label_ids:
+        raise ValueError(f"Could not resolve paper label class ids from labels: {args.paper_label!r}")
 
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        active = set(roll_ids + cleaning_cloth_ids + paper_label_ids)
-        if helmet_alerts_enabled:
-            active.update(person_ids)
-            active.update(helmet_label_ids)
-        active_class_ids = tuple(sorted(active))
-    else:
-        active_class_ids = tuple(sorted(set(person_ids + helmet_ids)))
+    active = set(roll_ids + cleaning_cloth_ids + paper_label_ids)
+    if helmet_alerts_enabled:
+        active.update(person_ids)
+        active.update(helmet_ids)
+    active_class_ids = tuple(sorted(active))
 
     if class_conf_thresholds:
         selected_ids = set(active_class_ids)
@@ -247,11 +187,9 @@ def _resolve_classes(args: argparse.Namespace, sop_profile_name: str) -> Resolve
         active_class_ids=active_class_ids,
         person_ids=person_ids,
         helmet_ids=helmet_ids,
-        helmet_disabled=helmet_disabled,
         roll_ids=roll_ids,
         cleaning_cloth_ids=cleaning_cloth_ids,
         paper_label_ids=paper_label_ids,
-        warnings=tuple(warnings),
     )
 
 
@@ -262,11 +200,9 @@ def resolve_run_config(args: argparse.Namespace) -> ResolvedRunConfig:
 
     sop_profile = _resolve_sop_profile(args)
     session_timing = _resolve_session_timing(args, sop_profile)
-    operator_rules = _resolve_operator_rules(args, sop_profile)
-    classes = _resolve_classes(args, sop_profile.name)
+    classes = _resolve_classes(args)
     return ResolvedRunConfig(
         sop_profile=sop_profile,
         session_timing=session_timing,
-        operator_rules=operator_rules,
         classes=classes,
     )

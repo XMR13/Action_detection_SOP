@@ -38,15 +38,11 @@ from Action_Detection_SOP.reporting import (
     write_session_run_config,
 )
 from Action_Detection_SOP.roi import RoiPolygon, clamp_rect_to_frame, draw_roi, load_roi_json, resolve_roi_for_frame
-from Action_Detection_SOP.runtime_config import (
-    PROFILE_OPERATOR_MVP_A,
-    PROFILE_ROLL_SOP_V1,
-    resolve_run_config,
-)
+from Action_Detection_SOP.runtime_config import resolve_run_config
 from Action_Detection_SOP.runner_setup import (
     RunConfigPayloadInput,
     build_run_config_payload as _build_run_config_payload,
-    build_sop_engine as _build_sop_engine,
+    build_roll_sop_engine as _build_roll_sop_engine,
     _file_metadata,
     _sha256_path,
     source_label as _source_label,
@@ -56,12 +52,6 @@ from Action_Detection_SOP.safety_alerts import (
     HelmetAlertEngine,
     write_helmet_alert_artifacts,
 )
-from Action_Detection_SOP.sop_engine import (
-    SessionResult,
-    SopEngine,
-    helmet_associated_with_person,
-)
-from Action_Detection_SOP.roll_sop_engine import RollSopEngine
 from Action_Detection_SOP.source_security import redact_source_credentials
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
 from yolo_kit.types import Detection
@@ -313,15 +303,11 @@ def run_mvp(
 
     # Resolve profile, classes, timing, and ROI inputs.
     runtime = resolve_run_config(args)
-    sop_profile_name = runtime.sop_profile.name
-    if args.exclude_blue_rolls and sop_profile_name != PROFILE_ROLL_SOP_V1:
-        raise ValueError("--exclude-blue-rolls requires --sop-profile roll_sop_v1")
     if not (0.0 < args.blue_roll_min_fraction <= 1.0):
         raise ValueError("--blue-roll-min-fraction must be within (0, 1]")
     class_names = runtime.classes.class_names
     class_conf_thresholds = runtime.classes.class_conf_thresholds
     person_ids = list(runtime.classes.person_ids)
-    helmet_disabled = runtime.classes.helmet_disabled
     helmet_ids = list(runtime.classes.helmet_ids)
     helmet_alert_confidence_floor = float(args.conf)
     helmet_alert_strong_confidence = float(args.conf)
@@ -336,14 +322,10 @@ def run_mvp(
     cleaning_cloth_ids = list(runtime.classes.cleaning_cloth_ids)
     paper_label_ids = list(runtime.classes.paper_label_ids)
     class_ids = list(runtime.classes.active_class_ids)
-    for warning in runtime.classes.warnings:
-        print(warning)
 
     args.start_s = runtime.session_timing.start_s
     args.end_s = runtime.session_timing.end_s
     args.min_session_s = runtime.session_timing.min_session_s
-    if runtime.operator_rules is not None:
-        args.roi_dwell_s = runtime.operator_rules.roi_dwell_s
 
     roi_path = Path(args.roi)
     roi_base = load_roi_json(roi_path)
@@ -461,44 +443,23 @@ def run_mvp(
         raise ValueError("--rtsp-buffer-size must be >= 0")
     if args.trt_output_index < 0:
         raise ValueError("--trt-output-index must be >= 0")
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        if args.cleaning_s <= 0:
-            raise ValueError("--cleaning-s must be > 0")
-        if args.labeling_s <= 0:
-            raise ValueError("--labeling-s must be > 0")
-        if args.cleaning_max_gap < 0:
-            raise ValueError("--cleaning-max-gap must be >= 0")
-        if args.labeling_max_gap < 0:
-            raise ValueError("--labeling-max-gap must be >= 0")
+    if args.cleaning_s <= 0:
+        raise ValueError("--cleaning-s must be > 0")
+    if args.labeling_s <= 0:
+        raise ValueError("--labeling-s must be > 0")
+    if args.cleaning_max_gap < 0:
+        raise ValueError("--cleaning-max-gap must be >= 0")
+    if args.labeling_max_gap < 0:
+        raise ValueError("--labeling-max-gap must be >= 0")
 
     if args.roi_upscale < 1.0:
         raise ValueError("--roi-upscale must be >= 1.0")
     if args.roi_expand < 0:
         raise ValueError("--roi-expand must be >= 0")
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
-        if args.roi_dwell_s <= 0:
-            raise ValueError("--roi-dwell-s must be > 0")
-        if args.roi_dwell_max_gap < 0:
-            raise ValueError("--roi-dwell-max-gap must be >= 0 seconds")
-        if not (0.05 <= args.roi_dwell_iou <= 0.95):
-            raise ValueError("--roi-dwell-iou must be within [0.05, 0.95]")
-        if args.roi_dwell_miss is None:
-            args.roi_dwell_miss = float(args.roi_dwell_max_gap)
-        if args.roi_dwell_miss < 0:
-            raise ValueError("--roi-dwell-miss must be >= 0 seconds")
-        if args.roi_dwell_miss + 1e-9 < args.roi_dwell_max_gap:
-            raise ValueError("--roi-dwell-miss must be >= --roi-dwell-max-gap (seconds)")
-        if args.roi_min_person_height < 0:
-            raise ValueError("--roi-min-person-height must be >= 0")
     if args.start_s <= 0 or args.end_s <= 0:
         raise ValueError("--start-s/--end-s must be > 0")
     if args.min_session_s < 0:
         raise ValueError("--min-session-s must be >= 0")
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A and not helmet_disabled:
-        if args.helmet_s <= 0:
-            raise ValueError("--helmet-s must be > 0")
-        if args.helmet_max_gap < 0:
-            raise ValueError("--helmet-max-gap must be >= 0")
     if helmet_alerts_enabled:
         if args.helmet_alert_s <= 0:
             raise ValueError("--helmet-alert-s must be > 0")
@@ -605,14 +566,11 @@ def run_mvp(
         )
         evidence_clipper = EvidenceClipper(evidence_cfg)
 
-    engine_setup = _build_sop_engine(
+    engine = _build_roll_sop_engine(
         args=args,
-        sop_profile_name=sop_profile_name,
-        helmet_disabled=helmet_disabled,
         analysis_fps=analysis_fps,
         initial_session_counter=initial_session_counter,
     )
-    engine = engine_setup.engine
     helmet_alert_engine: Optional[HelmetAlertEngine] = None
     if helmet_alerts_enabled:
         helmet_alert_engine = HelmetAlertEngine(
@@ -660,7 +618,6 @@ def run_mvp(
             evidence_enabled=evidence_enabled,
             evidence_cfg=evidence_cfg,
             runtime=runtime,
-            engine_setup=engine_setup,
             rtsp_prefer_ffmpeg=rtsp_prefer_ffmpeg,
             rtsp_open_timeout_ms=rtsp_open_timeout_ms,
             rtsp_read_timeout_ms=rtsp_read_timeout_ms,
@@ -733,8 +690,6 @@ def run_mvp(
     active_session_start_dt: Optional[datetime] = None
     last_dets_global: List[Detection] = []
     last_dets_roi: List[Detection] = []
-    last_persons_all: List[Detection] = []
-    last_helmets_all: List[Detection] = []
     last_cleaning_roi: List[Detection] = []
     last_labels_roi: List[Detection] = []
 
@@ -756,7 +711,7 @@ def run_mvp(
         )
 
     # Configure progress display and the optional diagnostic sidecar.
-    win = "SOP roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else "SOP MVP-A"
+    win = "SOP roll_sop_v1"
     if args.show:
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
 
@@ -1006,45 +961,31 @@ def run_mvp(
 
                 dets_roi = _filter_by_roi(dets_global, roi_for_frame)
                 persons_all, helmets_all = _split_classes(dets_global, person_ids=person_ids, helmet_ids=helmet_ids)
-                persons_roi = _filter_by_roi(persons_all, roi_for_frame)
-                if sop_profile_name == PROFILE_ROLL_SOP_V1:
-                    roi_rolls = _filter_class_ids(dets_roi, roll_ids)
-                    sop_rolls = roi_rolls
-                    if args.exclude_blue_rolls:
-                        sop_rolls, blue_rolls = exclude_blue_rolls(
-                            frame,
-                            roi_rolls,
-                            min_blue_fraction=float(args.blue_roll_min_fraction),
-                        )
-                        if blue_rolls:
-                            blue_roll_exclusion["excluded_detections"] += len(blue_rolls)
-                            blue_roll_exclusion["frames_with_exclusions"] += 1
-                            
-                    cleaning_roi = _filter_class_ids(dets_roi, cleaning_cloth_ids)
-                    labels_roi = _filter_class_ids(dets_roi, paper_label_ids)
-                    assert isinstance(engine, RollSopEngine)
-                    result = engine.update(
-                        time_s=float(t_s),
-                        frame_idx=processed,
-                        rolls=sop_rolls,
-                        cleaning_cloths=cleaning_roi,
-                        labels=labels_roi,
+                roi_rolls = _filter_class_ids(dets_roi, roll_ids)
+                sop_rolls = roi_rolls
+                if args.exclude_blue_rolls:
+                    sop_rolls, blue_rolls = exclude_blue_rolls(
+                        frame,
+                        roi_rolls,
+                        min_blue_fraction=float(args.blue_roll_min_fraction),
                     )
-                    last_cleaning_roi = list(cleaning_roi)
-                    last_labels_roi = list(labels_roi)
-                else:
-                    assert isinstance(engine, SopEngine)
-                    result = engine.update(
-                        time_s=float(t_s),
-                        frame_idx=processed,
-                        persons_in_roi=persons_roi,
-                        persons_all=persons_all,
-                        helmets_all=helmets_all,
-                    )
+                    if blue_rolls:
+                        blue_roll_exclusion["excluded_detections"] += len(blue_rolls)
+                        blue_roll_exclusion["frames_with_exclusions"] += 1
+
+                cleaning_roi = _filter_class_ids(dets_roi, cleaning_cloth_ids)
+                labels_roi = _filter_class_ids(dets_roi, paper_label_ids)
+                result = engine.update(
+                    time_s=float(t_s),
+                    frame_idx=processed,
+                    rolls=sop_rolls,
+                    cleaning_cloths=cleaning_roi,
+                    labels=labels_roi,
+                )
+                last_cleaning_roi = list(cleaning_roi)
+                last_labels_roi = list(labels_roi)
                 last_dets_global = list(dets_global)
                 last_dets_roi = list(dets_roi)
-                last_persons_all = list(persons_all)
-                last_helmets_all = list(helmets_all)
 
                 alerts = ()
                 if helmet_alert_engine is not None:
@@ -1136,46 +1077,19 @@ def run_mvp(
                 vis = draw_detections(vis, dets_vis, class_names=class_names, show_score=True)
 
                 sid = engine.active_session_id or "-"
-                if sop_profile_name == PROFILE_ROLL_SOP_V1:
-                    assert isinstance(engine, RollSopEngine)
-                    clean_req = engine.cfg.cleaning.required_frames
-                    label_req = engine.cfg.labeling.required_frames
-                    clean_status = (
-                        "OK"
-                        if engine.active_cleaning_done
-                        else f"{engine.active_cleaning_positive_frames}/{clean_req}f"
-                    )
-                    label_status = (
-                        "OK"
-                        if engine.active_labeling_done
-                        else f"{engine.active_labeling_positive_frames}/{label_req}f"
-                    )
-                    overlay_text = f"session={sid} clean={clean_status} label={label_status}"
-                else:
-                    assert isinstance(engine, SopEngine)
-                    helmet_status = "-"
-                    roi_status = "-"
-                    if engine.active_session_id is not None:
-                        if engine.cfg.roi_dwell is not None:
-                            required_frames = engine.cfg.roi_dwell.required_frames
-                            dwell_frames = engine.active_roi_dwell_frames
-                            if required_frames > 0 and dwell_frames >= required_frames:
-                                roi_status = "OK"
-                            else:
-                                dwell_s = dwell_frames / analysis_fps if analysis_fps else float(dwell_frames)
-                                req_s = required_frames / analysis_fps if analysis_fps else float(required_frames)
-                                roi_status = f"{dwell_s:.1f}/{req_s:.1f}s"
-                        if helmet_disabled or engine.cfg.helmet is None:
-                            helmet_status = "UNKNOWN"
-                        else:
-                            helmet_status = (
-                                "OK"
-                                if helmet_associated_with_person(
-                                    last_persons_all, last_helmets_all, head_top_fraction=engine.cfg.helmet.head_top_fraction
-                                )
-                                else "..."
-                            )
-                    overlay_text = f"session={sid} roi={roi_status} helmet={helmet_status}"
+                clean_req = engine.cfg.cleaning.required_frames
+                label_req = engine.cfg.labeling.required_frames
+                clean_status = (
+                    "OK"
+                    if engine.active_cleaning_done
+                    else f"{engine.active_cleaning_positive_frames}/{clean_req}f"
+                )
+                label_status = (
+                    "OK"
+                    if engine.active_labeling_done
+                    else f"{engine.active_labeling_positive_frames}/{label_req}f"
+                )
+                overlay_text = f"session={sid} clean={clean_status} label={label_status}"
                 font_scale, thickness = _overlay_style(int(vis.shape[0]))
                 cv2.putText(
                     vis,
@@ -1306,20 +1220,19 @@ def run_mvp(
                     evidence_clip_counts = {}
                     evidence_clips = []
                 session_dirs.append(session_dir)
-                if sop_profile_name == PROFILE_ROLL_SOP_V1:
-                    write_daily_report(
-                        out_dir=out_dir,
-                        date=session_date,
-                        sessions=[result],
-                        append=True,
-                    )
-                    write_daily_csv(
-                        out_dir=out_dir,
-                        date=session_date,
-                        sessions=[result],
-                        append=True,
-                    )
-                    report_dates.add(session_date)
+                write_daily_report(
+                    out_dir=out_dir,
+                    date=session_date,
+                    sessions=[result],
+                    append=True,
+                )
+                write_daily_csv(
+                    out_dir=out_dir,
+                    date=session_date,
+                    sessions=[result],
+                    append=True,
+                )
+                report_dates.add(session_date)
 
                 # Close writer for this session
                 if writer is not None:
@@ -1340,12 +1253,7 @@ def run_mvp(
 
         # End-of-stream flush
         end_time_s = (frame_idx / source_fps) if source_fps else (processed / analysis_fps)
-        if sop_profile_name == PROFILE_ROLL_SOP_V1:
-            assert isinstance(engine, RollSopEngine)
-            tail = engine.flush(time_s=float(end_time_s), frame_idx=int(processed))
-        else:
-            assert isinstance(engine, SopEngine)
-            tail = engine.flush(time_s=float(end_time_s))
+        tail = engine.flush(time_s=float(end_time_s), frame_idx=int(processed))
         tail_events = engine.pop_events() if tail is not None else ()
         if tail is not None:
             tail = _stamp_session_result(tail)
@@ -1413,20 +1321,19 @@ def run_mvp(
                     evidence_clip_counts = {}
                     evidence_clips = []
                 session_dirs.append(session_dir)
-                if sop_profile_name == PROFILE_ROLL_SOP_V1:
-                    write_daily_report(
-                        out_dir=out_dir,
-                        date=session_date,
-                        sessions=[tail],
-                        append=True,
-                    )
-                    write_daily_csv(
-                        out_dir=out_dir,
-                        date=session_date,
-                        sessions=[tail],
-                        append=True,
-                    )
-                    report_dates.add(session_date)
+                write_daily_report(
+                    out_dir=out_dir,
+                    date=session_date,
+                    sessions=[tail],
+                    append=True,
+                )
+                write_daily_csv(
+                    out_dir=out_dir,
+                    date=session_date,
+                    sessions=[tail],
+                    append=True,
+                )
+                report_dates.add(session_date)
 
     # Close active episodes and release every opened output/capture handle.
     finally:
@@ -1465,7 +1372,7 @@ def run_mvp(
             pbar.close()
 
     # Write final daily reports and the complete run configuration.
-    if sop_profile_name == PROFILE_ROLL_SOP_V1 and report_dates:
+    if report_dates:
         report_date = max(report_dates)
         daily_json = out_dir / "reports" / report_date / "daily_report.json"
         daily_csv = out_dir / "reports" / report_date / "sessions.csv"
@@ -1474,7 +1381,6 @@ def run_mvp(
             out_dir=out_dir,
             date=date,
             sessions=sessions,
-            sop_profile="roll_sop_v1" if sop_profile_name == PROFILE_ROLL_SOP_V1 else None,
         )
         daily_csv = write_daily_csv(out_dir=out_dir, date=date, sessions=sessions)
     run_config["performance"] = {

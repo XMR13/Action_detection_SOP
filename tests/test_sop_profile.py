@@ -21,7 +21,6 @@ class TestSopProfile(unittest.TestCase):
                 "session_start_seconds": 1.5,
                 "session_end_seconds": 2.5,
                 "min_session_seconds": 1.0,
-                "roi_dwell_seconds": 7.0,
                 "notes": "test",
             }
         )
@@ -30,7 +29,6 @@ class TestSopProfile(unittest.TestCase):
         self.assertEqual(profile.session_start_seconds, 1.5)
         self.assertEqual(profile.session_end_seconds, 2.5)
         self.assertEqual(profile.min_session_seconds, 1.0)
-        self.assertEqual(profile.roi_dwell_seconds, 7.0)
         self.assertEqual(profile.notes, "test")
 
     def test_unknown_keys_rejected(self) -> None:
@@ -39,11 +37,18 @@ class TestSopProfile(unittest.TestCase):
                 "schema_version": 1,
                 "session_start_seconds": 1.0,
                 "session_end_seconds": 2.0,
-                "roi_dwell_seconds": 3.0,
                 "extra": 123,
             }
         )
         with self.assertRaises(ValueError):
+            load_sop_profile(path)
+
+    def test_operator_only_key_is_rejected(self) -> None:
+        path = self._write_profile({
+            "schema_version": 1, "session_start_seconds": 3,
+            "session_end_seconds": 5, "roi_dwell_seconds": 7,
+        })
+        with self.assertRaisesRegex(ValueError, "Unknown SOP profile keys"):
             load_sop_profile(path)
 
     def test_invalid_seconds_rejected(self) -> None:
@@ -52,7 +57,6 @@ class TestSopProfile(unittest.TestCase):
                 "schema_version": 1,
                 "session_start_seconds": 0,
                 "session_end_seconds": 2.0,
-                "roi_dwell_seconds": 3.0,
             }
         )
         with self.assertRaises(ValueError):
@@ -64,7 +68,6 @@ class TestSopProfile(unittest.TestCase):
                 "schema_version": 1,
                 "session_start_seconds": 1.0,
                 "session_end_seconds": 2.0,
-                "roi_dwell_seconds": 3.0,
             }
         )
         profile = load_sop_profile(path)

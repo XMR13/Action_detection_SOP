@@ -42,7 +42,9 @@ from .reporting import (
     write_session_run_config,
 )
 from .roi import RoiPolygon, draw_roi, load_roi_json, resolve_roi_for_frame, save_roi_json
-from .sop_engine import HelmetRuleConfig, SessionResult, SessionizationConfig, SopEngine, SopEngineConfig, StepStatus
+from .roll_sop_engine import RollSessionResult, RollSopEngine, RollSopEngineConfig
+from .session import RollSessionConfig, RollSessionizer
+from .sop_types import StepStatus
 
 __all__ = [
     "CaptureInfo",
@@ -61,10 +63,10 @@ __all__ = [
     "load_roi_json",
     "resolve_roi_for_frame",
     "save_roi_json",
-    "HelmetRuleConfig",
-    "SessionResult",
-    "SessionizationConfig",
-    "SopEngine",
-    "SopEngineConfig",
+    "RollSessionResult",
+    "RollSessionConfig",
+    "RollSessionizer",
+    "RollSopEngine",
+    "RollSopEngineConfig",
     "StepStatus",
 ]

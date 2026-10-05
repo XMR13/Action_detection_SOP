@@ -4,7 +4,7 @@ import argparse
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from Action_Detection_SOP.evidence import EvidenceClipConfig
 from Action_Detection_SOP.ingest import CaptureInfo
@@ -15,26 +15,10 @@ from Action_Detection_SOP.roll_sop_engine import (
     RollSopEngineConfig,
 )
 from Action_Detection_SOP.runtime_config import (
-    PROFILE_OPERATOR_MVP_A,
-    PROFILE_ROLL_SOP_V1,
     ResolvedRunConfig,
 )
 from Action_Detection_SOP.session import RollSessionConfig
-from Action_Detection_SOP.sop_engine import (
-    HelmetRuleConfig,
-    RoiDwellRuleConfig,
-    SessionizationConfig,
-    SopEngine,
-    SopEngineConfig,
-)
 from Action_Detection_SOP.source_security import redact_source_credentials, redact_source_fields
-
-
-@dataclass(frozen=True)
-class EngineSetup:
-    engine: Union[SopEngine, RollSopEngine]
-    roi_gap_frames: Optional[int] = None
-    roi_miss_frames: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -53,7 +37,6 @@ class RunConfigPayloadInput:
     evidence_enabled: bool
     evidence_cfg: Optional[EvidenceClipConfig]
     runtime: ResolvedRunConfig
-    engine_setup: EngineSetup
     rtsp_prefer_ffmpeg: bool
     rtsp_open_timeout_ms: Optional[int]
     rtsp_read_timeout_ms: Optional[int]
@@ -97,76 +80,32 @@ def source_label(args: argparse.Namespace) -> str:
     return "source"
 
 
-def build_sop_engine(
+def build_roll_sop_engine(
     *,
     args: argparse.Namespace,
-    sop_profile_name: str,
-    helmet_disabled: bool,
     analysis_fps: float,
     initial_session_counter: int = 0,
-) -> EngineSetup:
-    """
-    Build the selected SOP engine and its report-only configuration.
-    """
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        return EngineSetup(
-            engine=RollSopEngine(
-                RollSopEngineConfig(
-                    session=RollSessionConfig(
-                        start_seconds=float(args.start_s),
-                        end_seconds=float(args.end_s),
-                        analysis_fps=analysis_fps,
-                    ),
-                    cleaning=RollEvidenceRuleConfig(
-                        required_seconds=float(args.cleaning_s),
-                        analysis_fps=analysis_fps,
-                        max_gap_frames=int(args.cleaning_max_gap),
-                    ),
-                    labeling=RollEvidenceRuleConfig(
-                        required_seconds=float(args.labeling_s),
-                        analysis_fps=analysis_fps,
-                        max_gap_frames=int(args.labeling_max_gap),
-                    ),
-                ),
-                initial_session_counter=initial_session_counter,
-            )
-        )
-
-    helmet_cfg = None
-    if not helmet_disabled:
-        helmet_cfg = HelmetRuleConfig(
-            required_seconds=float(args.helmet_s),
-            analysis_fps=analysis_fps,
-            head_top_fraction=float(args.head_top_frac),
-            min_person_height_px=int(args.min_person_height),
-            max_gap_frames=int(args.helmet_max_gap),
-        )
-
-    roi_gap_frames = max(0, int(round(float(args.roi_dwell_max_gap) * analysis_fps)))
-    roi_miss_frames = max(0, int(round(float(args.roi_dwell_miss) * analysis_fps)))
-    if roi_miss_frames < roi_gap_frames:
-        roi_miss_frames = roi_gap_frames
-    roi_dwell_cfg = RoiDwellRuleConfig(
-        required_seconds=float(args.roi_dwell_s),
-        analysis_fps=analysis_fps,
-        max_gap_frames=roi_gap_frames,
-        max_track_missed=roi_miss_frames,
-        iou_match_threshold=float(args.roi_dwell_iou),
-        min_person_height_px=int(args.roi_min_person_height),
-    )
-    engine_cfg = SopEngineConfig(
-        session=SessionizationConfig(
-            start_seconds=float(args.start_s),
-            end_seconds=float(args.end_s),
-            analysis_fps=analysis_fps,
+) -> RollSopEngine:
+    """Build the roll engine using resolved session and evidence settings."""
+    return RollSopEngine(
+        RollSopEngineConfig(
+            session=RollSessionConfig(
+                start_seconds=float(args.start_s),
+                end_seconds=float(args.end_s),
+                analysis_fps=analysis_fps,
+            ),
+            cleaning=RollEvidenceRuleConfig(
+                required_seconds=float(args.cleaning_s),
+                analysis_fps=analysis_fps,
+                max_gap_frames=int(args.cleaning_max_gap),
+            ),
+            labeling=RollEvidenceRuleConfig(
+                required_seconds=float(args.labeling_s),
+                analysis_fps=analysis_fps,
+                max_gap_frames=int(args.labeling_max_gap),
+            ),
         ),
-        helmet=helmet_cfg,
-        roi_dwell=roi_dwell_cfg,
-    )
-    return EngineSetup(
-        engine=SopEngine(engine_cfg, initial_session_counter=initial_session_counter),
-        roi_gap_frames=roi_gap_frames,
-        roi_miss_frames=roi_miss_frames,
+        initial_session_counter=initial_session_counter,
     )
 
 
@@ -183,11 +122,7 @@ def build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object
         "post_seconds": float(args.evidence_post_s),
         "max_seconds": float(args.evidence_max_s),
         "analysis_fps": float(payload.analysis_fps),
-        "events": (
-            ["roll_entered", "cleaned_done", "labeled_done", "roll_left"]
-            if sop_profile_name == PROFILE_ROLL_SOP_V1
-            else ["roi_dwell_done", "helmet_done"]
-        ),
+        "events": ["roll_entered", "cleaned_done", "labeled_done", "roll_left"],
     }
     if payload.evidence_cfg is not None:
         pre_s, post_s = payload.evidence_cfg.resolved_window()
@@ -257,16 +192,6 @@ def build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object
         },
     }
 
-    if sop_profile_name == PROFILE_OPERATOR_MVP_A:
-        run_config["roi_dwell"] = {
-            "required_seconds": float(args.roi_dwell_s),
-            "max_gap_seconds": float(args.roi_dwell_max_gap),
-            "max_gap_frames": int(payload.engine_setup.roi_gap_frames or 0),
-            "max_track_missed_seconds": float(args.roi_dwell_miss),
-            "max_track_missed_frames": int(payload.engine_setup.roi_miss_frames or 0),
-            "iou_match_threshold": float(args.roi_dwell_iou),
-            "min_person_height_px": int(args.roi_min_person_height),
-        }
 
     if payload.config_path is None:
         run_config["config"] = {"path": None}
@@ -291,18 +216,17 @@ def build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object
             "file": _file_metadata(sop_profile.path),
         }
 
-    if sop_profile_name == PROFILE_ROLL_SOP_V1:
-        run_config["roll_sop_v1"] = {
-            "roll_labels": list(args.roll_label),
-            "roll_class_ids": list(classes.roll_ids),
-            "cleaning_cloth_labels": list(args.cleaning_cloth_label),
-            "cleaning_cloth_class_ids": list(classes.cleaning_cloth_ids),
-            "paper_label_labels": list(args.paper_label),
-            "paper_label_class_ids": list(classes.paper_label_ids),
-            "cleaning_required_seconds": float(args.cleaning_s),
-            "cleaning_max_gap_frames": int(args.cleaning_max_gap),
-            "labeling_required_seconds": float(args.labeling_s),
-            "labeling_max_gap_frames": int(args.labeling_max_gap),
-        }
+    run_config["roll_sop_v1"] = {
+        "roll_labels": list(args.roll_label),
+        "roll_class_ids": list(classes.roll_ids),
+        "cleaning_cloth_labels": list(args.cleaning_cloth_label),
+        "cleaning_cloth_class_ids": list(classes.cleaning_cloth_ids),
+        "paper_label_labels": list(args.paper_label),
+        "paper_label_class_ids": list(classes.paper_label_ids),
+        "cleaning_required_seconds": float(args.cleaning_s),
+        "cleaning_max_gap_frames": int(args.cleaning_max_gap),
+        "labeling_required_seconds": float(args.labeling_s),
+        "labeling_max_gap_frames": int(args.labeling_max_gap),
+    }
 
     return run_config

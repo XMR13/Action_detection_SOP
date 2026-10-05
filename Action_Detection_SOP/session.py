@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+DEFAULT_ROLL_SESSION_END_S = 5.0
+DEFAULT_ROLL_SESSION_START_S = 3.0
+
 #konfigurasi roll yang akan digunakan untuk hal - hal ini
 @dataclass(frozen=True)
 class RollSessionConfig:
-    start_seconds: float = 2.0
-    end_seconds: float = 3.0
+    start_seconds: float = DEFAULT_ROLL_SESSION_START_S
+    end_seconds: float = DEFAULT_ROLL_SESSION_END_S
     analysis_fps: float = 5.0
 
     def __post_init__(self) -> None:
@@ -29,11 +32,10 @@ class RollSessionConfig:
 
 class RollSessionizer:
     """
-    Template sessionizer for roll-based sessions.
+    Start after sustained roll presence and end after consecutive absence.
 
-    This mirrors the presence-based logic used for person sessions, but is not
-    wired into the MVP runner yet. It is intended as a starting point once
-    roll detections become reliable.
+    Used by roll_sop_v1. A detected roll resets the absence streak so temporary
+    occlusion shorter than end_seconds does not close the active session.
     """
     def __init__(self, cfg: RollSessionConfig) -> None:
         self.cfg = cfg

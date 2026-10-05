@@ -7,7 +7,7 @@ from Action_Detection_SOP.roll_sop_engine import (
     RollSopEngineConfig,
 )
 from Action_Detection_SOP.session import RollSessionConfig
-from Action_Detection_SOP.sop_engine import StepStatus
+from Action_Detection_SOP.sop_types import StepStatus
 from yolo_kit.types import Detection
 
 

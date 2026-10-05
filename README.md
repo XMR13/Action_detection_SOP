@@ -4,8 +4,8 @@ On-prem computer vision pipeline for roll-wrapping SOP review, built for Jetson 
 
 ## Current State
 
-- Working MVP: person-in-ROI sessions, helmet checks, evidence clips, daily reports, FastAPI review website, and Jetson-to-web uploader.
-- Next profile: `roll_sop_v1`, a roll-centric SOP flow for the moved CCTV viewpoint.
+- Working pipeline: roll-in-ROI sessions, cleaning/labeling checks, evidence clips, daily reports, FastAPI review website, and Jetson-to-web uploader.
+- Runtime profile: `roll_sop_v1`, the only supported session workflow for the moved CCTV viewpoint.
 - Current `roll_sop_v1` target checks: `cleaned`, `labeled`, and `overall_status`.
 - Separate safety flow: helmet alerts are independent website alert records, not part of roll `overall_status`.
 
@@ -24,6 +24,39 @@ Camera 16 RW3. Validate on recorded blue and non-blue rolls, including lighting
 changes and occlusions, before enabling it on the live worker. The existing
 session start/end timing handles short color misses; a sustained miss can still
 create a session. This rule does not change existing review records.
+
+### Roll exit delay and occlusion
+
+`roll_sop_v1` starts after three seconds of consecutive roll detections inside the ROI and closes
+after five seconds of consecutive missed roll detections by default. A valid
+roll detection resets the exit delay, keeping short operator occlusions within
+one session. Timing is counted in analyzed frames at the configured analysis FPS.
+Use `--end-s 8` to allow longer occlusions. An explicit `--end-s` takes priority
+over a profile file's `session_end_seconds`, which takes priority over the default.
+
+A longer delay also postpones finalization and can merge successive rolls when
+the detection gap between them is shorter than the delay. Validate small-roll
+occlusions and closely spaced rolls on the target camera before accepting the
+setting. Restart the deployed worker after updating its source or arguments.
+
+### Roll-only runtime
+
+The operator-based engine and its ROI dwell/session helmet settings have been
+removed. `Scripts/run_sop_mvp.py` now runs roll sessions by default;
+`--sop-profile roll_sop_v1` remains valid for existing deployment commands.
+A JSON path supplied to `--sop-profile` configures roll timing only.
+
+Remove `roi_dwell_seconds` from timing profiles and remove `roi_dwell_*`,
+`roi_min_person_height`, `helmet_s`, `helmet_max_gap`, `min_person_height`,
+`skip_helmet`, and `require_helmet_class` from run configs or corresponding CLI
+flags. These obsolete settings are rejected rather than silently ignored.
+Keep person/helmet labels and `head_top_frac` when using independent safety alerts.
+
+Historical operator sessions and their evidence/reviews remain readable in the
+website, but new operator metadata uploads, review changes, and automatic
+approval are disabled. Deploy the runner and website together after reviewing
+any pending historical uploads in the uploader spool. Existing roll artifacts
+and review storage require no migration for this cleanup.
 
 ## Requirements
 
@@ -92,14 +125,14 @@ python3 -m Scripts.calibrate_roi \
   --out configs/roi.json
 ```
 
-Run the existing SOP MVP:
+Run roll SOP with a roll-capable model and its matching class metadata:
 
 ```bash
 python3 -m Scripts.run_sop_mvp \
   --video path/to/video.mp4 \
   --roi configs/roi.json \
-  --model Models/yolo10s-PPE.onnx \
-  --metadata configs/metadata_PPE.yaml
+  --model Models/roll_sop_v1.onnx \
+  --metadata configs/metadata_roll_sop_v1.yaml
 ```
 
 Config-file mode is preferred for repeatable runs:

@@ -133,43 +133,27 @@ import {
 
     const machine = sopScope(payload, "machine");
     const final = sopScope(payload, "final");
-    const legacyRows = [
-      renderOverrideSelect({
-        key: "operator_present",
-        label: "Operator present",
-        machineValue: machine.operator_present || payload.machine_operator || "UNKNOWN",
-        finalValue: final.operator_present || "UNKNOWN",
-        overrideValue: reviewOverrides.operator_present || "",
-        values: ["DONE", "NOT_DONE", "UNKNOWN"],
-        displayValue: displayStepStatus,
-      }),
-      renderOverrideSelect({
-        key: "roi_dwell",
-        label: "ROI dwell",
-        machineValue: machine.roi_dwell || payload.machine_roi_dwell || "UNKNOWN",
-        finalValue: final.roi_dwell || "UNKNOWN",
-        overrideValue: reviewOverrides.roi_dwell || "",
-        values: ["DONE", "NOT_DONE", "UNKNOWN"],
-        displayValue: displayStepStatus,
-      }),
-      renderOverrideSelect({
-        key: "helmet",
-        label: "Helmet",
-        machineValue: machine.helmet || payload.machine_helmet || "UNKNOWN",
-        finalValue: final.helmet || payload.final_helmet || "UNKNOWN",
-        overrideValue: reviewOverrides.helmet || "",
-        values: ["DONE", "NOT_DONE", "UNKNOWN"],
-        displayValue: displayStepStatus,
-      }),
-    ].join("");
+    const archiveRows = [
+      ["operator_present", "Operator present"],
+      ["roi_dwell", "ROI dwell"],
+      ["helmet", "Helmet"],
+    ].map(([key, label]) => `
+      <div class="sop-override-row">
+        <div>
+          <span class="sop-override-label">${escapeHtml(label)}</span>
+          <span class="sop-override-machine">AI: ${escapeHtml(displayStepStatus(machine[key] || "UNKNOWN"))}</span>
+          <span class="sop-override-final">Final: ${escapeHtml(displayStepStatus(final[key] || "UNKNOWN"))}</span>
+        </div>
+      </div>
+    `).join("");
     panel.innerHTML = `
       <div class="detail-sop-head">
         <div>
-          <strong>Legacy operator MVP-A</strong>
-          <p class="caption">Kompatibilitas untuk sesi lama.</p>
+          <strong>Arsip sesi operator</strong>
+          <p class="caption">Sesi lama hanya dapat dibaca. Bukti dan hasil tinjauan sebelumnya tetap tersedia.</p>
         </div>
       </div>
-      <div class="sop-override-grid">${legacyRows}</div>
+      <div class="sop-override-grid">${archiveRows}</div>
     `;
   };
 
@@ -1143,7 +1127,7 @@ import {
 
     const resolveNextPending = async () => {
       try {
-        const list = await apiFetchJson(withDateApiQuery("/api/sessions?operator_verdict=NEEDS_REVIEW&sort=NEWEST&limit=200"));
+        const list = await apiFetchJson(withDateApiQuery("/api/sessions?operator_verdict=NEEDS_REVIEW&reviewable_only=true&sort=NEWEST&limit=200"));
         const sessions = Array.isArray(list.sessions) ? list.sessions : [];
         if (sessions.length === 0) return null;
         const idx = sessions.findIndex((s) => String(s.session_uid || "") === String(sessionUid));
@@ -1205,22 +1189,26 @@ import {
     const reasonField = document.getElementById("scope-reason-field");
     const saveButton = document.getElementById("review-save");
     const reviewFeedback = document.getElementById("detail-review-error");
+    const readOnly = Boolean(payload.sop && payload.sop.read_only);
     const syncReviewDecision = () => {
       const excluded = statusInput instanceof HTMLSelectElement && statusInput.value === "OUT_OF_SCOPE";
       if (reasonField) reasonField.hidden = !excluded;
       if (reasonSelect instanceof HTMLSelectElement) {
-        reasonSelect.disabled = !excluded;
+        reasonSelect.disabled = readOnly || !excluded;
         reasonSelect.required = excluded;
       }
       const sopPanel = document.getElementById("detail-sop-panel");
       if (sopPanel) sopPanel.hidden = excluded;
       const note = document.getElementById("review-note");
       if (note instanceof HTMLTextAreaElement) {
+        note.disabled = readOnly;
         note.required = excluded && reasonSelect instanceof HTMLSelectElement && reasonSelect.value === "OTHER";
       }
       if (reviewFeedback) {
         reviewFeedback.className = "caption detail-review-feedback";
-        reviewFeedback.textContent = excluded
+        reviewFeedback.textContent = readOnly
+          ? "Arsip sesi operator hanya dapat dibaca; keputusan sebelumnya tidak dapat diubah."
+          : excluded
           ? "Sesi akan diselesaikan dan tidak dihitung dalam kepatuhan SOP."
           : "Periksa bukti dan koreksi hasil SOP sebelum menyimpan keputusan.";
       }
@@ -1228,7 +1216,7 @@ import {
     if (statusInput instanceof HTMLSelectElement) {
       const scopeOption = statusInput.querySelector('option[value="OUT_OF_SCOPE"]');
       if (scopeOption) scopeOption.disabled = !(payload.sop && payload.sop.profile === "roll_sop_v1");
-      statusInput.disabled = false;
+      statusInput.disabled = readOnly;
       statusInput.value = ["QUALIFIED", "NOT_QUALIFIED", "OUT_OF_SCOPE"].includes(review) ? review : "";
       statusInput.onchange = syncReviewDecision;
     }
@@ -1236,7 +1224,7 @@ import {
       reasonSelect.value = String(payload.scope_reason || "");
       reasonSelect.onchange = syncReviewDecision;
     }
-    if (saveButton instanceof HTMLButtonElement) saveButton.disabled = false;
+    if (saveButton instanceof HTMLButtonElement) saveButton.disabled = readOnly;
     syncReviewDecision();
 
     const noteBox = document.getElementById("review-note");
@@ -1449,7 +1437,7 @@ import {
           }
         } catch (err) {
           form.classList.remove("is-submitting");
-          if (saveButton instanceof HTMLButtonElement) saveButton.disabled = false;
+          if (saveButton instanceof HTMLButtonElement) saveButton.disabled = readOnly;
           if (reviewError) {
             const errorText = String(err);
             let apiDetail = "";

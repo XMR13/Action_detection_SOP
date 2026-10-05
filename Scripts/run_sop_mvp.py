@@ -9,7 +9,7 @@ from typing import Dict, Optional
 from Action_Detection_SOP.run_config_loader import apply_run_config, collect_cli_dests, load_run_config
 from Action_Detection_SOP.roll_color_gate import DEFAULT_MIN_BLUE_FRACTION
 from Action_Detection_SOP.runner_mvp import run_mvp
-from Action_Detection_SOP.runtime_config import PROFILE_OPERATOR_MVP_A, PROFILE_ROLL_SOP_V1
+from Action_Detection_SOP.runtime_config import PROFILE_ROLL_SOP_V1
 from Action_Detection_SOP.safety_alerts import (
     DEFAULT_HELMET_ALERT_CONFIDENCE,
     DEFAULT_HELMET_REQUIRED_SECONDS,
@@ -32,7 +32,7 @@ def _add_bool_optional_flag(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="SOP runner (operator MVP-A by default, roll_sop_v1 optional).")
+    parser = argparse.ArgumentParser(description="Roll SOP runner with independent helmet safety alerts.")
     parser.add_argument("--config", default=None, help="Optional JSON config to reduce CLI args (CLI overrides config).")
     src = parser.add_mutually_exclusive_group(required=False)
     src.add_argument("--video", default=None, help="Path to input video file.")
@@ -118,10 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sop-profile",
         default=None,
-        help=(
-            f"SOP profile selector ({PROFILE_OPERATOR_MVP_A} or {PROFILE_ROLL_SOP_V1}). "
-            "For backward compatibility, a JSON path is treated as the MVP-A timing profile."
-        ),
+        help=f"Use {PROFILE_ROLL_SOP_V1} (default) or a JSON roll timing profile path.",
     )
     parser.add_argument("--model", default="Models/yolov9-s_v2.onnx", help="Path to detector (.onnx/.engine/.pt).")
     parser.add_argument("--metadata", default="configs/metadata.yaml", help="Class metadata yaml (names mapping).")
@@ -193,16 +190,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=["label"],
         help="Class name for attached paper label evidence (repeatable).",
     )
-    parser.add_argument(
-        "--skip-helmet",
-        action="store_true",
-        help="Disable helmet check (helmet status becomes UNKNOWN). Useful before you have a helmet-capable model.",
-    )
-    parser.add_argument(
-        "--require-helmet-class",
-        action="store_true",
-        help="Fail fast if --helmet-label cannot be resolved from --metadata (instead of auto-disabling helmet).",
-    )
 
     parser.add_argument("--analysis-fps", type=float, default=5.0, help="Target analysis FPS (used if source FPS is known).")
     parser.add_argument("--every", type=int, default=0, help="Process every Nth frame (overrides --analysis-fps if >0).")
@@ -210,7 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--start-s",
         type=float,
         default=None,
-        help="Session start after sustained person presence (seconds). Overrides --sop-profile if set.",
+        help="Session start after sustained roll presence (seconds). Overrides --sop-profile if set.",
     )
     parser.add_argument(
         "--end-s",
@@ -225,46 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Discard sessions shorter than this (seconds). Overrides --sop-profile if set. 0 = keep all.",
     )
     parser.add_argument(
-        "--roi-dwell-s",
-        type=float,
-        default=None,
-        help="ROI dwell DONE after sustained presence (seconds). Overrides --sop-profile if set.",
-    )
-    parser.add_argument(
-        "--roi-dwell-max-gap",
-        type=float,
-        default=0.4,
-        help="Allow up to N seconds missing inside ROI dwell track (>=0).",
-    )
-    parser.add_argument(
-        "--roi-dwell-iou",
-        type=float,
-        default=0.35,
-        help="IoU threshold for matching person tracklets inside ROI (0.05..0.95).",
-    )
-    parser.add_argument(
-        "--roi-dwell-miss",
-        type=float,
-        default=None,
-        help="Max missed seconds before an ROI track is dropped (>=0). Defaults to at least --roi-dwell-max-gap.",
-    )
-    parser.add_argument(
-        "--roi-min-person-height",
-        type=int,
-        default=0,
-        help="If >0, small ROI persons are ignored for dwell tracking.",
-    )
-    parser.add_argument("--helmet-s", type=float, default=2.0, help="Helmet DONE after sustained association (seconds).")
-    parser.add_argument(
-        "--helmet-max-gap", type=int, default=1, help="Allow up to N missing frames inside helmet evidence streak (>=0)."
-    )
-    parser.add_argument(
         "--head-top-frac",
         type=float,
         default=0.35,
         help="Head region height fraction of the person box used to associate helmets (0.05..0.8).",
     )
-    parser.add_argument("--min-person-height", type=int, default=0, help="If >0, short/small person sessions become UNKNOWN.")
     parser.add_argument(
         "--enable-helmet-alerts",
         action="store_true",

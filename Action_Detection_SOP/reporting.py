@@ -11,31 +11,22 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional
 
 from .roll_sop_engine import RollComplianceStatus, RollSessionResult
-from .sop_engine import SessionResult, StepStatus, iter_roi_status_counts, iter_status_counts
+from .sop_types import StepStatus
 from .shifts import assign_shift_for_interval, parse_iso_datetime
 
 
-SessionReportResult = Union[SessionResult, RollSessionResult]
+SessionReportResult = RollSessionResult
 
-def _is_roll_session(r: SessionReportResult) -> bool:
-    return isinstance(r, RollSessionResult)
 
 def session_result_to_dict(r: SessionReportResult) -> Dict[str, Any]:
     payload = asdict(r)
-    if _is_roll_session(r):
-        assert isinstance(r, RollSessionResult)
-        payload["cleaned"] = str(r.cleaned.value)
-        payload["labeled"] = str(r.labeled.value)
-        payload["overall_status"] = str(r.overall_status.value)
-        payload["duration_s"] = max(0.0, float(r.end_time_s) - float(r.start_time_s))
-    else:
-        assert isinstance(r, SessionResult)
-        payload["operator_present"] = str(r.operator_present.value)
-        payload["roi_dwell"] = str(r.roi_dwell.value)
-        payload["helmet"] = str(r.helmet.value)
+    payload["cleaned"] = str(r.cleaned.value)
+    payload["labeled"] = str(r.labeled.value)
+    payload["overall_status"] = str(r.overall_status.value)
+    payload["duration_s"] = max(0.0, float(r.end_time_s) - float(r.start_time_s))
     # Stable primary key used by the website/uploader for idempotency across retries and file moves.
     payload.setdefault("session_uid", uuid.uuid4().hex)
 
@@ -87,7 +78,7 @@ def write_daily_report(
     date: str,
     sessions: Iterable[SessionReportResult],
     append: bool = False,
-    sop_profile: Optional[str] = None,
+    sop_profile: str = "roll_sop_v1",
 ) -> Path:
     """
     Fungsi yang berguna untuk membuat daily repor, akan ditampilkan menerima input sebagai berikut:
@@ -97,105 +88,51 @@ def write_daily_report(
         session : sesi untuk setiap hari yang telah ditetnukan
     
     """
-    sessions_list = list(sessions)
-    if sop_profile == "roll_sop_v1" or any(_is_roll_session(s) for s in sessions_list):
-        roll_sessions = [s for s in sessions_list if isinstance(s, RollSessionResult)]
-        report_dir = out_dir / "reports" / date
-        report_dir.mkdir(parents=True, exist_ok=True)
-        path = report_dir / "daily_report.json"
-        payload = {
-            "date": date,
-            "sop_profile": "roll_sop_v1",
-            "total_sessions": 0,
-            "cleaned_done": 0,
-            "cleaned_not_done": 0,
-            "cleaned_unknown": 0,
-            "labeled_done": 0,
-            "labeled_not_done": 0,
-            "labeled_unknown": 0,
-            "overall_compliant": 0,
-            "overall_non_compliant": 0,
-            "overall_unknown": 0,
-        }
-        if append and path.exists():
-            try:
-                existing = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                existing = None
-            if (
-                isinstance(existing, dict)
-                and existing.get("date") == date
-                and existing.get("sop_profile") == "roll_sop_v1"
-            ):
-                for key in payload:
-                    if key in {"date", "sop_profile"}:
-                        continue
-                    payload[key] = int(existing.get(key, 0))
-
-        for session in roll_sessions:
-            payload["total_sessions"] += 1
-            payload["cleaned_done"] += int(session.cleaned == StepStatus.DONE)
-            payload["cleaned_not_done"] += int(session.cleaned == StepStatus.NOT_DONE)
-            payload["cleaned_unknown"] += int(session.cleaned == StepStatus.UNKNOWN)
-            payload["labeled_done"] += int(session.labeled == StepStatus.DONE)
-            payload["labeled_not_done"] += int(session.labeled == StepStatus.NOT_DONE)
-            payload["labeled_unknown"] += int(session.labeled == StepStatus.UNKNOWN)
-            payload["overall_compliant"] += int(session.overall_status == RollComplianceStatus.COMPLIANT)
-            payload["overall_non_compliant"] += int(session.overall_status == RollComplianceStatus.NON_COMPLIANT)
-            payload["overall_unknown"] += int(session.overall_status == RollComplianceStatus.UNKNOWN)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        return path
-
-    roi_done, roi_not_done, roi_unknown = iter_roi_status_counts(sessions_list)
-    done, not_done, unknown = iter_status_counts(sessions_list)
-
-    by_shift: Dict[Tuple[str, str, str], List[SessionResult]] = {}
-    for s in sessions_list:
-        start_dt = parse_iso_datetime(s.start_time_iso)
-        end_dt = parse_iso_datetime(s.end_time_iso)
-        if start_dt is None:
-            continue
-        if end_dt is None:
-            end_dt = start_dt
-        assignment = assign_shift_for_interval(start_dt=start_dt, end_dt=end_dt)
-        if assignment is None:
-            continue
-        key = (assignment.shift_date, assignment.shift_id, assignment.shift_name)
-        by_shift.setdefault(key, []).append(s)
-
-    shift_summaries: List[Dict[str, Any]] = []
-    for (shift_date, shift_id, shift_name), bucket in sorted(by_shift.items()):
-        s_roi_done, s_roi_not_done, s_roi_unknown = iter_roi_status_counts(bucket)
-        s_done, s_not_done, s_unknown = iter_status_counts(bucket)
-        shift_summaries.append(
-            {
-                "shift_id": shift_id,
-                "shift_name": shift_name,
-                "shift_date": shift_date,
-                "total_sessions": len(bucket),
-                "roi_done": s_roi_done,
-                "roi_not_done": s_roi_not_done,
-                "roi_unknown": s_roi_unknown,
-                "helmet_done": s_done,
-                "helmet_not_done": s_not_done,
-                "helmet_unknown": s_unknown,
-            }
-        )
-
-    payload = {
-        "date": date,
-        "total_sessions": len(sessions_list),
-        "roi_done": roi_done,
-        "roi_not_done": roi_not_done,
-        "roi_unknown": roi_unknown,
-        "helmet_done": done,
-        "helmet_not_done": not_done,
-        "helmet_unknown": unknown,
-        "shift_summaries": shift_summaries,
-    }
+    if sop_profile != "roll_sop_v1":
+        raise ValueError("Only the roll_sop_v1 SOP profile is supported")
     report_dir = out_dir / "reports" / date
     report_dir.mkdir(parents=True, exist_ok=True)
     path = report_dir / "daily_report.json"
+    payload = {
+        "date": date,
+        "sop_profile": "roll_sop_v1",
+        "total_sessions": 0,
+        "cleaned_done": 0,
+        "cleaned_not_done": 0,
+        "cleaned_unknown": 0,
+        "labeled_done": 0,
+        "labeled_not_done": 0,
+        "labeled_unknown": 0,
+        "overall_compliant": 0,
+        "overall_non_compliant": 0,
+        "overall_unknown": 0,
+    }
+    if append and path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = None
+        if (
+            isinstance(existing, dict)
+            and existing.get("date") == date
+            and existing.get("sop_profile") == "roll_sop_v1"
+        ):
+            for key in payload:
+                if key in {"date", "sop_profile"}:
+                    continue
+                payload[key] = int(existing.get(key, 0))
+
+    for session in sessions:
+        payload["total_sessions"] += 1
+        payload["cleaned_done"] += int(session.cleaned == StepStatus.DONE)
+        payload["cleaned_not_done"] += int(session.cleaned == StepStatus.NOT_DONE)
+        payload["cleaned_unknown"] += int(session.cleaned == StepStatus.UNKNOWN)
+        payload["labeled_done"] += int(session.labeled == StepStatus.DONE)
+        payload["labeled_not_done"] += int(session.labeled == StepStatus.NOT_DONE)
+        payload["labeled_unknown"] += int(session.labeled == StepStatus.UNKNOWN)
+        payload["overall_compliant"] += int(session.overall_status == RollComplianceStatus.COMPLIANT)
+        payload["overall_non_compliant"] += int(session.overall_status == RollComplianceStatus.NON_COMPLIANT)
+        payload["overall_unknown"] += int(session.overall_status == RollComplianceStatus.UNKNOWN)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return path
 
