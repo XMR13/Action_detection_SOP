@@ -15,9 +15,93 @@ business decision matters.
 
 For a roll session, the website shows `cleaned`, `labeled`, and an overall SOP
 result. The machine result, the result after any human overrides, and the
-review status (`PENDING`, `QUALIFIED`, `NOT_QUALIFIED`) are separate fields.
-`PENDING` and the dashboard's “Needs review” wording are workflow states,
+review status (`PENDING`, `QUALIFIED`, `NOT_QUALIFIED`, `OUT_OF_SCOPE`) are separate fields.
+`PENDING` and the dashboard's “Perlu ditinjau” wording are workflow states,
 not synonyms for machine `UNKNOWN`.
+
+## Operator-facing final verdict
+
+The website combines the effective review decision and final SOP result into
+one operator-facing verdict:
+
+| Effective review | Final SOP | Operator verdict |
+| --- | --- | --- |
+| `QUALIFIED` | `DONE` | Sesuai SOP |
+| `NOT_QUALIFIED` | `NOT_DONE` | Tidak sesuai SOP |
+| `OUT_OF_SCOPE` | Any result | Di luar cakupan SOP |
+| `PENDING` | Any result | Perlu ditinjau |
+| Any other combination | Any result | Perlu ditinjau |
+
+The final row catches older records whose review decision and SOP result do
+not agree. The website does not silently rewrite those records. New roll
+review saves reject a decision that conflicts with the final SOP result; the
+reviewer must correct the step or overall override before saving. Returning
+to the queue without saving leaves the current decision unchanged. Machine
+SOP values and the review record remain available in the API and export for
+diagnosis.
+
+## Resolving rolls outside checking scope
+
+A retained roll session can be outside the checking SOP even when it lasts
+30 seconds or longer. A reviewer can select **Di luar cakupan SOP** in the
+existing session-detail decision toolbar and save a required reason:
+
+| Stored reason | Operator label | Use |
+| --- | --- | --- |
+| `PASSING_THROUGH` | Hanya melintas | Roll passes through without requiring checking here |
+| `ALREADY_WRAPPED` | Sudah dibungkus | Roll was already wrapped before this checking area |
+| `OTHER` | Lainnya | Another exclusion, explained in the review note |
+
+This is a manual `roll_sop_v1` review outcome. Duration or uncertain AI evidence
+alone is not grounds for exclusion. If a required step was missed by the AI,
+the reviewer corrects the step/overall result and saves a scored decision.
+If evidence is insufficient, leave the session pending by returning to the queue
+without saving a decision.
+
+An exclusion takes precedence over automatic approval, resolves the pending
+review, and keeps the session, evidence, AI results, and any existing SOP
+overrides accessible. The queue and dashboard show a separate exclusion count;
+the existing queue filter can select excluded sessions. The session CSV includes
+`scope_reason` and `review_note`. A subsequent scored decision must still agree
+with the final SOP result and clears the exclusion reason.
+
+### Counts and percentages
+
+- Total detected sessions and raw machine-result counts include exclusions.
+- Pending verdict counts and final SOP counters exclude out-of-scope sessions.
+- Compliance is `verdict_done / (verdict_done + verdict_not_done) * 100`.
+  Pending, conflicting older reviews, and excluded sessions are outside this
+  denominator. With no eligible decisions, the API returns `null` and the UI
+  displays **—**.
+- Review completion counts matching compliant/noncompliant verdicts plus
+  exclusions, divided by all detected sessions. Conflicting old reviews remain
+  unresolved even if their raw review status contains an older decision.
+- The final SOP unknown percentage uses in-scope sessions as its denominator.
+
+### Deployment and rollback
+
+Before deploying, inspect the actual website unit and database path using
+`systemctl cat action-sop-web.service` and `/api/admin/storage`. Back up the
+review SQLite database using SQLite's online backup API and retain the previous
+source revision. For example, run this with the actual database and a new backup
+path (do not copy a live SQLite file without its transaction state):
+
+```bash
+python3 -c 'import sqlite3,sys; src=sqlite3.connect(sys.argv[1]); dst=sqlite3.connect(sys.argv[2]); src.backup(dst); dst.close(); src.close()' /actual/reviews.sqlite3 /actual/reviews-before-scope.sqlite3
+```
+
+Deploy the reviewed source revision, restart `action-sop-web.service`, and hard
+reload the UI. Startup adds a nullable `scope_reason` column to `reviews`; it
+preserves existing rows and is safe to run again. Verify a passing roll over
+30 seconds, the required reason, a failed save followed by a retry, persisted
+exclusion after reload, queue filtering, and the compliance denominator.
+
+Older source does not understand `OUT_OF_SCOPE`. A source-only rollback after
+new exclusions have been saved will misclassify those reviews. Pause review
+writes and retain a fresh backup before rollback; either deploy a version that
+understands exclusions or restore the pre-change database along with its source.
+Restoring that backup loses review decisions made afterward, so reconcile those
+records before resuming operations. Runner artifacts are separate from reviews.
 
 ## Roll step evidence thresholds
 
