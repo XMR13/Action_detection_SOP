@@ -64,11 +64,11 @@
           <div class="filters">
             <span class="hint" id="alert-length-hint">Alerts: --</span>
             <div class="field">
-              <label for="alert-date-from">Date from</label>
+              <label for="alert-date-from">Shift date from</label>
               <input id="alert-date-from" name="alert-date-from" type="date" />
             </div>
             <div class="field">
-              <label for="alert-date-to">Date to</label>
+              <label for="alert-date-to">Shift date to</label>
               <input id="alert-date-to" name="alert-date-to" type="date" />
             </div>
             <div class="field">
@@ -79,10 +79,11 @@
               <label>&nbsp;</label>
               <button class="btn" id="alert-date-clear" type="button">Clear</button>
             </div>
-            <span class="hint" id="alert-active-date-slice">Date: all</span>
+            <span class="hint" id="alert-active-date-slice">Shift date: all</span>
             <button class="pill ink" id="stale-pill-alerts" type="button" hidden>New data available</button>
           </div>
         </header>
+        <p class="caption">Tanggal mengikuti awal shift (WIB): Shift 1 07:30–15:29, Shift 2 15:30–23:29, Shift 3 23:30–07:29 hari berikutnya. Contoh: 4 Oktober pukul 03:00 masuk Shift 3 tanggal 3 Oktober.</p>
 
         <section class="queue-table-stage">
           <article class="panel queue-table-panel">
@@ -128,7 +129,7 @@
                 <thead>
                   <tr>
                     <th scope="col">Alert</th>
-                    <th scope="col">Date</th>
+                    <th scope="col">Shift date</th>
                     <th scope="col">Time</th>
                     <th scope="col">Reviewed <br>Time</th>
                     <th scope="col">Camera</th>

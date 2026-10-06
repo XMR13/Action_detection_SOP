@@ -43,10 +43,10 @@ from .sop_status import (
     validate_review_overrides,
     validate_roll_review_decision,
 )
-from ..shifts import assign_shift_for_interval, parse_iso_datetime
+from ..shifts import as_wib, assign_shift_for_interval, parse_iso_datetime
 from ..source_security import redact_source_credentials, redact_source_fields
 
-API_CONTRACT_VERSION = "2026-07-23.v1"
+API_CONTRACT_VERSION = "2026-10-06.v1"
 _MAX_REVIEW_NOTE_LEN = 4000
 
 
@@ -55,15 +55,8 @@ def _display_status(value: str) -> str:
     return value.replace("_", " ").upper() if value else "-"
 
 def _parse_iso_ts(value: Any) -> float:
-    if not isinstance(value, str) or not value:
-        return 0.0
-    v = value.strip()
-    if v.endswith("Z"):
-        v = v[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(v).timestamp()
-    except Exception:
-        return 0.0
+    dt = parse_iso_datetime(value)
+    return as_wib(dt).timestamp() if dt is not None else 0.0
 
 
 def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> Dict[str, Any]:
@@ -75,6 +68,30 @@ def _shift_fields_from_isos(*, start_iso: Any, end_iso: Any) -> Dict[str, Any]:
     if assignment is None:
         return {}
     return assignment.to_iso_fields()
+
+
+def _record_shift_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Prefer timestamps so older records with calendar-based dates read correctly.
+
+    Timestamp-free records retain valid saved shift metadata. Their folder date
+    is a final fallback, because no shift can be inferred from a date alone.
+    """
+    calculated = _shift_fields_from_isos(
+        start_iso=payload.get("start_time_iso"), end_iso=payload.get("end_time_iso"),
+    )
+    if calculated:
+        return calculated
+    shift_date = str(payload.get("shift_date") or "")
+    return {
+        "shift_id": str(payload.get("shift_id") or ""),
+        "shift_name": str(payload.get("shift_name") or ""),
+        "shift_date": shift_date if _parse_date_ymd(shift_date) is not None else "",
+    }
+
+
+def _reporting_date(payload: Dict[str, Any], *, storage_date: str) -> str:
+    """Website dates follow the assigned shift, independently of artifact paths."""
+    return str(_record_shift_fields(payload).get("shift_date") or storage_date)
 
 
 def _normalize_shift_filter(value: Any) -> str:
@@ -839,9 +856,9 @@ def _filter_sessions_by_date_window(
     if lower or upper:
         filtered: List[SessionArtifact] = []
         for session in sessions:
-            session_date = _parse_date_ymd(session.date)
+            session_date = _parse_date_ymd(_reporting_date(session.checklist, storage_date=session.date))
             if session_date is None:
-                # Ignore invalid folder date when explicit date filtering is requested.
+                # No usable shift or storage date for this legacy record.
                 continue
             if lower and session_date < lower:
                 continue
@@ -863,7 +880,7 @@ def _filter_alerts_by_date_window(
     if lower or upper:
         filtered: List[AlertArtifact] = []
         for alert in alerts:
-            alert_date = _parse_date_ymd(alert.date)
+            alert_date = _parse_date_ymd(_reporting_date(alert.payload, storage_date=alert.date))
             if alert_date is None:
                 continue
             if lower and alert_date < lower:
@@ -1409,7 +1426,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             out.append(
                 {
                     "alert_uid": alert.alert_uid,
-                    "date": alert.date,
+                    "date": _reporting_date(alert.payload, storage_date=alert.date),
+                    "storage_date": alert.date,
+                    **_record_shift_fields(alert.payload),
                     "alert_type": alert.alert_type,
                     "safety_profile": str(alert.payload.get("safety_profile") or ""),
                     "status": eff_status,
@@ -1517,6 +1536,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "review_updated_at_utc",
             "related_session_uid",
             "has_thumbnail",
+            "shift_date",
+            "storage_date",
         ]
 
         #buf is used for geting it to stream the data
@@ -1545,6 +1566,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "review_updated_at_utc": _csv_safe_cell(row.get("review_updated_at_utc")),
                     "related_session_uid": _csv_safe_cell(row.get("related_session_uid")),
                     "has_thumbnail": row.get("has_thumbnail"),
+                    "shift_date": _csv_safe_cell(row.get("shift_date")),
+                    "storage_date": _csv_safe_cell(row.get("storage_date")),
                 }
             )
 
@@ -1573,7 +1596,9 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         public_alert = redact_source_fields(alert.payload)
         return {
             "alert_uid": alert.alert_uid,
-            "date": alert.date,
+            "date": _reporting_date(alert.payload, storage_date=alert.date),
+            "storage_date": alert.date,
+            **_record_shift_fields(alert.payload),
             "alert_type": alert.alert_type,
             "alert": public_alert,
             "status": eff_status,
@@ -1707,15 +1732,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             end_s = float(s.checklist.get("end_time_s") or 0.0)
             duration_s = max(0.0, end_s - start_s)
             start_ts = _parse_iso_ts(start_iso) or _parse_iso_ts(end_iso)
-            shift_fields = {}
-            if (
-                not isinstance(s.checklist.get("shift_id"), str)
-                or not s.checklist.get("shift_id")
-                or not isinstance(s.checklist.get("shift_date"), str)
-                or not s.checklist.get("shift_date")
-            ):
-                shift_fields = _shift_fields_from_isos(start_iso=start_iso, end_iso=end_iso)
-            resolved_shift_id = str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or "").strip().upper()
+            shift_fields = _record_shift_fields(s.checklist)
+            resolved_shift_id = str(shift_fields.get("shift_id") or "").strip().upper()
             if shift_filter != "ALL" and resolved_shift_id != shift_filter:
                 continue
 
@@ -1729,13 +1747,14 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             out.append(
                 {
                     "session_uid": s.session_uid,
-                    "date": s.date,
+                    "date": str(shift_fields.get("shift_date") or s.date),
+                    "storage_date": s.date,
                     "session_id": s.session_id,
                     "start_time_iso": start_iso,
                     "end_time_iso": end_iso,
-                    "shift_id": str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or ""),
-                    "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
-                    "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
+                    "shift_id": str(shift_fields.get("shift_id") or ""),
+                    "shift_name": str(shift_fields.get("shift_name") or ""),
+                    "shift_date": str(shift_fields.get("shift_date") or ""),
                     "duration_s": duration_s,
                     "machine_helmet": sop_status.machine_helmet,
                     "machine_sop": sop_status.machine_sop,
@@ -1896,6 +1915,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "final_overall_status",
             "clip_count",
             "has_thumbnail",
+            "shift_date",
+            "storage_date",
         ]
 
         #create a temporary object files
@@ -1932,6 +1953,8 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
                     "final_overall_status": final.get("overall_status"),
                     "clip_count": row.get("clip_count"),
                     "has_thumbnail": row.get("has_thumbnail"),
+                    "shift_date": _csv_safe_cell(row.get("shift_date")),
+                    "storage_date": _csv_safe_cell(row.get("storage_date")),
                 }
             )
 
@@ -1952,16 +1975,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         eff = _effective_review_for_web(session=s, review=r, settings=settings)
         sop_status = evaluate_sop_status(session=s, review=r)
 
-        start_iso = s.checklist.get("start_time_iso")
-        end_iso = s.checklist.get("end_time_iso")
-        shift_fields = {}
-        if (
-            not isinstance(s.checklist.get("shift_id"), str)
-            or not s.checklist.get("shift_id")
-            or not isinstance(s.checklist.get("shift_date"), str)
-            or not s.checklist.get("shift_date")
-        ):
-            shift_fields = _shift_fields_from_isos(start_iso=start_iso, end_iso=end_iso)
+        shift_fields = _record_shift_fields(s.checklist)
 
         clips: List[Dict[str, Any]] = []
         if isinstance(s.evidence.get("clips"), list):
@@ -1994,12 +2008,13 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
         has_annotated = annotated_path.exists()
         return {
             "session_uid": s.session_uid,
-            "date": s.date,
+            "date": str(shift_fields.get("shift_date") or s.date),
+            "storage_date": s.date,
             "session_id": s.session_id,
             "checklist": s.checklist,
-            "shift_id": str(s.checklist.get("shift_id") or shift_fields.get("shift_id") or ""),
-            "shift_name": str(s.checklist.get("shift_name") or shift_fields.get("shift_name") or ""),
-            "shift_date": str(s.checklist.get("shift_date") or shift_fields.get("shift_date") or ""),
+            "shift_id": str(shift_fields.get("shift_id") or ""),
+            "shift_name": str(shift_fields.get("shift_name") or ""),
+            "shift_date": str(shift_fields.get("shift_date") or ""),
             "machine_helmet": sop_status.machine_helmet,
             "machine_sop": sop_status.machine_sop,
             "machine_roi_dwell": sop_status.machine_roi_dwell,

@@ -8,6 +8,7 @@ import json
 import socket
 import threading
 import time
+from datetime import datetime, timedelta
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.error import HTTPError
@@ -74,6 +75,109 @@ def _json(request: HttpRequest, path: str) -> dict:
     code, body = request("GET", path)
     assert code == 200
     return json.loads(body)
+
+
+def _put_roll_at(request: HttpRequest, uid: str, timestamp: str, **extra: object) -> None:
+    start = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    code, body = request("PUT", f"/api/sessions/{uid}", {
+        "session_uid": uid, "session_id": uid, "start_date": start.date().isoformat(),
+        "sop_profile": "roll_sop_v1", "start_time_s": 0, "end_time_s": 60,
+        "start_time_iso": timestamp, "end_time_iso": (start + timedelta(minutes=1)).isoformat(),
+        "cleaned": "UNKNOWN", "labeled": "UNKNOWN", "overall_status": "UNKNOWN", **extra,
+    })
+    assert code == 200, body.decode()
+
+
+def test_shift_date_consistent_across_queue_detail_stats_and_csv(request_api: HttpRequest) -> None:
+    # Simulate an old record whose saved shift date incorrectly used its calendar date.
+    _put_roll_at(request_api, "overnight", "2026-10-04T03:00:00",
+                 shift_id="S1", shift_date="2026-10-04", shift_name="Shift 1")
+    _put_roll_at(request_api, "daytime", "2026-10-04T08:00:00+07:00")
+    _put_roll_at(request_api, "late", "2026-10-03T23:30:00+07:00")
+    query = "/api/sessions?date=2026-10-03&shift=S3&sort=OLDEST&page_size=1"
+    first = _json(request_api, query)
+    assert first["total"] == 2
+    assert first["sessions"][0]["session_uid"] == "late"
+    row = _json(request_api, query + "&page=2")["sessions"][0]
+    assert (row["session_uid"], row["date"], row["shift_id"]) == ("overnight", "2026-10-03", "S3")
+    assert row["shift_date"] == "2026-10-03"
+    assert row["storage_date"] == "2026-10-04"
+    assert _json(request_api, "/api/stats?date=2026-10-03")["total_sessions"] == 2
+    assert _json(request_api, "/api/stats?date=2026-10-04")["total_sessions"] == 1
+    assert _json(request_api, "/api/sessions?date=2026-10-04&shift=S3")["total"] == 0
+    for query in ("date_from=2026-10-03&date_to=2026-10-03", "date_to=2026-10-03"):
+        assert _json(request_api, "/api/sessions?" + query)["total"] == 2
+    assert _json(request_api, "/api/sessions?date_from=2026-10-04")["total"] == 1
+    detail = _json(request_api, "/api/sessions/overnight")
+    assert (detail["date"], detail["shift_date"], detail["shift_id"]) == ("2026-10-03", "2026-10-03", "S3")
+    assert detail["checklist"]["start_time_iso"] == "2026-10-04T03:00:00"
+    assert detail["storage_date"] == "2026-10-04"
+    code, body = request_api("GET", "/api/sessions/export.csv?date=2026-10-03&shift=S3")
+    assert code == 200
+    rows = list(csv.DictReader(io.StringIO(body.decode())))
+    assert {row["session_uid"] for row in rows} == {"late", "overnight"}
+    row = next(row for row in rows if row["session_uid"] == "overnight")
+    assert (row["date"], row["shift"], row["start_time"]) == ("2026-10-03", "Shift 3", "2026-10-04T03:00:00")
+
+
+def test_website_shift_boundaries_and_utc_records(request_api: HttpRequest) -> None:
+    cases = [
+        ("morning_before", "2026-10-04T07:29:59+07:00", "S3", "2026-10-03"),
+        ("morning_at", "2026-10-04T07:30:00+07:00", "S1", "2026-10-04"),
+        ("afternoon_before", "2026-10-04T15:29:59+07:00", "S1", "2026-10-04"),
+        ("afternoon_at", "2026-10-04T15:30:00+07:00", "S2", "2026-10-04"),
+        ("night_before", "2026-10-04T23:29:59+07:00", "S2", "2026-10-04"),
+        ("night_at", "2026-10-04T23:30:00+07:00", "S3", "2026-10-04"),
+        ("utc", "2026-10-03T20:00:00Z", "S3", "2026-10-03"),
+    ]
+    for uid, stamp, shift_id, shift_date in cases:
+        # Point records verify the exact boundary without interval-overlap effects.
+        _put_roll_at(request_api, uid, stamp, end_time_iso=stamp)
+        rows = _json(request_api, f"/api/sessions?date={shift_date}&shift={shift_id}")["sessions"]
+        assert uid in {row["session_uid"] for row in rows}
+        detail = _json(request_api, f"/api/sessions/{uid}")
+        assert (detail["shift_id"], detail["date"]) == (shift_id, shift_date)
+
+
+def test_timestamp_free_records_keep_saved_shift_or_storage_date(request_api: HttpRequest) -> None:
+    _put_roll(request_api, "storage_fallback")
+    _put_roll_at(request_api, "saved_shift", "2026-10-04T03:00:00",
+                 start_time_iso=None, end_time_iso=None,
+                 shift_id="S3", shift_date="2026-10-03", shift_name="Shift 3")
+    _put_roll_at(request_api, "invalid_shift", "2026-10-04T03:00:00",
+                 start_time_iso=None, end_time_iso=None, shift_date="2026-02-30")
+    assert _json(request_api, "/api/sessions?date=2026-09-30")["total"] == 1
+    assert _json(request_api, "/api/sessions?date=2026-10-03&shift=S3")["total"] == 1
+    assert _json(request_api, "/api/sessions/invalid_shift")["date"] == "2026-10-04"
+
+
+def test_mixed_naive_and_utc_timestamps_sort_in_actual_wib_order(request_api: HttpRequest) -> None:
+    _put_roll_at(request_api, "earlier", "2026-10-04T03:00:00")
+    _put_roll_at(request_api, "later", "2026-10-03T20:05:00Z")  # 4 Oct 03:05 WIB
+    rows = _json(request_api, "/api/sessions?date=2026-10-03&sort=OLDEST")["sessions"]
+    assert [row["session_uid"] for row in rows] == ["earlier", "later"]
+
+
+def test_helmet_alerts_follow_same_shift_date_and_keep_media_paths(request_api: HttpRequest) -> None:
+    code, body = request_api("PUT", "/api/alerts/overnight_alert", {
+        "alert_uid": "overnight_alert", "alert_type": "NO_HELMET",
+        "start_date": "2026-10-04", "start_time_iso": "2026-10-04T03:00:00+07:00",
+        "end_time_iso": "2026-10-04T03:00:10+07:00",
+    })
+    assert code == 200, body.decode()
+    assert request_api("POST", "/api/alerts/overnight_alert/artifacts?rel_path=thumbnail.jpg", {})[0] == 200
+    rows = _json(request_api, "/api/alerts?date_from=2026-10-03&date_to=2026-10-03")["alerts"]
+    assert len(rows) == 1
+    assert (rows[0]["date"], rows[0]["shift_id"], rows[0]["storage_date"]) == ("2026-10-03", "S3", "2026-10-04")
+    assert _json(request_api, "/api/alerts?date=2026-10-04")["total"] == 0
+    detail = _json(request_api, "/api/alerts/overnight_alert")
+    assert detail["date"] == detail["shift_date"] == "2026-10-03"
+    assert detail["alert"]["start_time_iso"] == "2026-10-04T03:00:00+07:00"
+    assert request_api("GET", detail["thumbnail_url"])[0] == 200
+    code, body = request_api("GET", "/api/alerts/export.csv?date=2026-10-03")
+    assert code == 200
+    row = next(csv.DictReader(io.StringIO(body.decode())))
+    assert (row["date"], row["shift_date"], row["storage_date"]) == ("2026-10-03", "2026-10-03", "2026-10-04")
 
 
 def test_next_review_excludes_archives_before_pagination(

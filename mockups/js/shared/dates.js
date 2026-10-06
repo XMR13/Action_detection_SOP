@@ -1,10 +1,24 @@
 // Date filters and navigation shared by the review pages.
 // Importing this module does not bind events; site.js calls the functions below.
-// the important date filters for the changes here 
+// Every date filter selects a shift-start date, rather than a calendar day.
 
 const DATE_YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const isValidDateYmd = (raw) => DATE_YMD_RE.test(String(raw || ""));
+
+export const currentShiftDate = (now = new Date()) => {
+  // Read the clock in WIB, then move its day boundary from midnight to 07:30.
+  // UTC getters/formatting here deliberately avoid the browser's local timezone.
+  const wibOffsetMs = 7 * 60 * 60 * 1000;
+  const shiftDayStartMs = (7 * 60 + 30) * 60 * 1000;
+  return new Date(now.getTime() + wibOffsetMs - shiftDayStartMs).toISOString().slice(0, 10);
+};
+
+export const shiftDateDaysAgo = (days, now = new Date()) => {
+  const day = new Date(`${currentShiftDate(now)}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
+};
 
 export const toYmdLocal = (d) => {
     //just return the from number to string
@@ -50,12 +64,12 @@ const writeDateSliceToUrl = (slice, onChange) => {
 export const dateSliceLabel = () => {
   const slice = readDateSliceFromUrl();
   if (slice.from && slice.to) {
-    if (slice.from === slice.to) return `Date: ${slice.from}`;
-    return `Date: ${slice.from} -> ${slice.to}`;
+    if (slice.from === slice.to) return `Shift date: ${slice.from}`;
+    return `Shift date: ${slice.from} -> ${slice.to}`;
   }
-  if (slice.from) return `Date: from ${slice.from}`;
-  if (slice.to) return `Date: until ${slice.to}`;
-  return "Date: all";
+  if (slice.from) return `Shift date: from ${slice.from}`;
+  if (slice.to) return `Shift date: until ${slice.to}`;
+  return "Shift date: all";
 };
 
 const buildDateApiQuery = () => {
@@ -158,13 +172,10 @@ export const bindDateControls = ({
     if (toInput instanceof HTMLInputElement) toInput.value = slice.to || "";
     if (label) label.textContent = dateSliceLabel();
     if (rangeSel instanceof HTMLSelectElement) {
-      const today = toYmdLocal(new Date());
-      const day7 = new Date();
-      day7.setDate(day7.getDate() - 6);
-      const last7 = toYmdLocal(day7);
-      const day30 = new Date();
-      day30.setDate(day30.getDate() - 29);
-      const last30 = toYmdLocal(day30);
+      const now = new Date();
+      const today = currentShiftDate(now);
+      const last7 = shiftDateDaysAgo(6, now);
+      const last30 = shiftDateDaysAgo(29, now);
       let val = "CUSTOM";
       if (slice.from === today && slice.to === today) val = "TODAY";
       else if (slice.from === last7 && slice.to === today) val = "LAST_7_DAYS";
@@ -201,7 +212,8 @@ export const bindDateControls = ({
   }
   if (rangeSel instanceof HTMLSelectElement) {
     rangeSel.addEventListener("change", () => {
-      const today = toYmdLocal(new Date());
+      const now = new Date();
+      const today = currentShiftDate(now);
       let from = "";
       let to = "";
       const choice = String(rangeSel.value || "CUSTOM");
@@ -209,14 +221,10 @@ export const bindDateControls = ({
         from = today;
         to = today;
       } else if (choice === "LAST_7_DAYS") {
-        const d = new Date();
-        d.setDate(d.getDate() - 6);
-        from = toYmdLocal(d);
+        from = shiftDateDaysAgo(6, now);
         to = today;
       } else if (choice === "LAST_30_DAYS") {
-        const d = new Date();
-        d.setDate(d.getDate() - 29);
-        from = toYmdLocal(d);
+        from = shiftDateDaysAgo(29, now);
         to = today;
       }
       if (fromInput instanceof HTMLInputElement) fromInput.value = from;

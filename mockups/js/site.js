@@ -4,6 +4,7 @@ import {
   formatDuration,
   normalizeShiftId,
   shiftLabel,
+  shiftDayHourIndex,
   escapeHtml,
  } from "./shared/format.js";
 
@@ -957,7 +958,7 @@ import {
     if (nameNode) nameNode.textContent = alertName;
     if (uidNode) uidNode.textContent = displayAlertReference(alertUid);
     if (idNode) idNode.textContent = alertName;
-    if (dateHint) dateHint.textContent = `Alert time: ${formatDateTimeFromIso(alert.start_time_iso || alert.end_time_iso)}`;
+    if (dateHint) dateHint.textContent = `Shift date: ${payload.date || "-"} · ${shiftLabel(payload.shift_id, payload.shift_name)} · Actual time: ${formatDateTimeFromIso(alert.start_time_iso || alert.end_time_iso)} WIB`;
     if (cameraNode) cameraNode.textContent = displayCamera(alert);
     if (areaNode) areaNode.textContent = String(alert.safety_area_id || "-");
     const related = alert.related_session_uid ? String(alert.related_session_uid) : "-";
@@ -1089,8 +1090,8 @@ import {
     const sidNode = document.getElementById("detail-session-id");
     if (sidNode) sidNode.textContent = sessionId;
     if (dateHint) {
-      const dateHintValue = startIso ? formatDateTimeFromIso(startIso) : sessionDate;
-      dateHint.textContent = `Session time: ${dateHintValue}`;
+      const actualTime = startIso ? `${formatDateTimeFromIso(startIso)} WIB` : "unavailable";
+      dateHint.textContent = `Shift date: ${sessionDate} · Actual time: ${actualTime}`;
     }
     if (selectedSessionIdInput instanceof HTMLInputElement) {
       selectedSessionIdInput.value = sessionId;
@@ -1103,7 +1104,9 @@ import {
     const overviewAi = document.getElementById("detail-overview-ai");
     const overviewStatusCard = document.getElementById("detail-overview-status-card");
     if (overviewSession) overviewSession.textContent = sessionId;
-    if (overviewDate) overviewDate.textContent = startIso ? formatDateTimeFromIso(startIso) : sessionDate;
+    if (overviewDate) overviewDate.textContent = sessionDate;
+    const overviewActualTime = document.getElementById("detail-overview-actual-time");
+    if (overviewActualTime) overviewActualTime.textContent = startIso ? `Mulai: ${formatDateTimeFromIso(startIso)} WIB` : "Waktu mulai tidak tersedia";
     if (overviewShift) overviewShift.textContent = resolvedShift || "-";
     const startS =
       payload.checklist && payload.checklist.start_time_s != null ? Number(payload.checklist.start_time_s) : Number.NaN;
@@ -1664,7 +1667,7 @@ import {
           (!slice.from && !slice.to && typeof listUrl === "string" && listUrl.includes("date="));
 
         if (trendXTitle instanceof HTMLElement) {
-          trendXTitle.textContent = useHourly ? "Time (local)" : "Date";
+          trendXTitle.textContent = useHourly ? "Time (WIB, 07:30–07:30)" : "Shift date";
         }
 
         if (trendSlice instanceof HTMLElement) {
@@ -1683,7 +1686,7 @@ import {
             if (!activeDate && sessions.length > 0 && sessions[0] && sessions[0].date) {
               activeDate = String(sessions[0].date || "");
             }
-            trendSlice.textContent = activeDate ? `Date: ${activeDate}` : "Date: (auto)";
+            trendSlice.textContent = activeDate ? `Shift date: ${activeDate}` : "Shift date: (auto)";
           } else {
             // Keep this aligned with the rest of the dashboard date filter.
             trendSlice.textContent = dateSliceLabel();
@@ -1696,7 +1699,8 @@ import {
         let notDone = [];
 
         if (useHourly) {
-          labels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+          // Hourly windows run from 07:30 today through 07:30 the next day.
+          labels = Array.from({ length: 24 }, (_, h) => `${String((h + 7) % 24).padStart(2, "0")}:30`);
           done = Array(24).fill(0);
           unknown = Array(24).fill(0);
           notDone = Array(24).fill(0);
@@ -1704,9 +1708,7 @@ import {
             const iso =
               row && row.start_time_iso ? String(row.start_time_iso) : row && row.end_time_iso ? String(row.end_time_iso) : "";
             if (!iso) return;
-            const dt = new Date(iso);
-            if (Number.isNaN(dt.getTime())) return;
-            const idx = dt.getHours();
+            const idx = shiftDayHourIndex(iso, String(row.shift_date || row.date || ""));
             if (idx < 0 || idx >= 24) return;
             const status = dashboardTrendStatus(row);
             if (status === "DONE") done[idx] += 1;

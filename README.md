@@ -193,6 +193,19 @@ Each session `checklist.json` includes `session_uid`, used by the web API and up
 
 ## Web Review
 
+Website dates follow the **date the shift starts**, in **WIB (UTC+7)**:
+Shift 1 runs 07:30–15:29, Shift 2 runs 15:30–23:29, and Shift 3 runs
+23:30–07:29 the next day. For example, a session at **03:00 on 4 October**
+appears under **3 October, Shift 3**. Date filters, dashboard totals, session
+and helmet-alert details, and website CSV exports all follow this rule.
+Actual timestamps remain visible in WIB; original artifact paths stay intact.
+Sessions crossing a shift boundary use the shift with the largest time overlap
+(ties go to the earlier shift). The current shift day changes at 07:30 WIB.
+See [the API date rules](docs/web_mvp_api_contract.md#shift-dates-and-actual-timestamps)
+for historical-record fallbacks and storage-date fields. Runner filesystem
+daily reports retain their calendar-date grouping; use website exports for
+shift-date reporting.
+
 Run the review website:
 
 ```bash

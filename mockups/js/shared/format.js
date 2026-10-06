@@ -1,15 +1,36 @@
-//shared format.js
+// Historical timestamps without an offset were recorded in WIB.
+// Explicit offsets (including UTC Z) are converted to WIB for display.
+export const parseWibDateTime = (iso) => {
+    const raw = String(iso || "").trim();
+    const withOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+    return new Date(raw && !withOffset ? `${raw}+07:00` : raw);
+  };
+
+export const shiftDayHourIndex = (iso, shiftDate) => {
+    const d = parseWibDateTime(iso);
+    if (Number.isNaN(d.getTime()) || !/^\d{4}-\d{2}-\d{2}$/.test(String(shiftDate || ""))) return -1;
+    const dayStart = new Date(`${shiftDate}T07:30:00+07:00`);
+    if (Number.isNaN(dayStart.getTime()) || dayStart.toISOString().slice(0, 10) !== shiftDate) return -1;
+    // Measure from the assigned day's 07:30 WIB boundary, not just the clock hour.
+    const elapsedHours = (d.getTime() - dayStart.getTime()) / (60 * 60 * 1000);
+    // A session can start before its assigned day under the largest-overlap rule.
+    // Show it at the start of that day instead of wrapping it to the final hour.
+    if (elapsedHours < 0) return 0;
+    if (elapsedHours >= 24) return -1;
+    return Math.floor(elapsedHours);
+  };
+
 export const formatHmsFromIso = (iso) => {
     if (!iso) return "-";
-    const d = new Date(iso);
+    const d = parseWibDateTime(iso);
     if (Number.isNaN(d.getTime())) return String(iso);
-    return d.toLocaleTimeString("en-GB", { hour12: false });
+    return d.toLocaleTimeString("en-GB", { hour12: false, timeZone: "Asia/Jakarta" });
   };
 
 
     export const formatDateTimeFromIso = (iso) => {
     if (!iso) return "-";
-    const d = new Date(iso);
+    const d = parseWibDateTime(iso);
     if (Number.isNaN(d.getTime())) return String(iso);
     return d.toLocaleString("en-GB", {
       year: "numeric",
@@ -19,6 +40,7 @@ export const formatHmsFromIso = (iso) => {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
+      timeZone: "Asia/Jakarta",
     });
   };
 

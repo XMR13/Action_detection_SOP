@@ -87,20 +87,20 @@
 
           <div class="filters" aria-label="Filters">
             <div class="field">
-              <label for="range">Date range</label>
+              <label for="range">Shift date range</label>
               <select id="range" name="range">
                 <option value="CUSTOM">Custom</option>
-                <option value="TODAY">Today</option>
+                <option value="TODAY">Current shift day</option>
                 <option value="LAST_7_DAYS">Last 7 days</option>
                 <option value="LAST_30_DAYS">Last 30 days</option>
               </select>
             </div>
             <div class="field">
-              <label for="date-from">Date from</label>
+              <label for="date-from">Shift date from</label>
               <input id="date-from" name="date-from" type="date" />
             </div>
             <div class="field">
-              <label for="date-to">Date to</label>
+              <label for="date-to">Shift date to</label>
               <input id="date-to" name="date-to" type="date" />
             </div>
             <div class="field">
@@ -114,6 +114,7 @@
             <button class="pill ink" id="stale-pill-dashboard" type="button" hidden>New data available</button>
           </div>
         </header>
+        <p class="caption">Tanggal mengikuti awal shift (WIB): Shift 1 07:30–15:29, Shift 2 15:30–23:29, Shift 3 23:30–07:29 hari berikutnya. Contoh: 4 Oktober pukul 03:00 masuk Shift 3 tanggal 3 Oktober.</p>
 
         <section class="mode-banner">
           <div class="mode-copy">
@@ -125,7 +126,7 @@
           </div>
           <div class="mode-tags">
             <span class="pill" id="banner-pending-pill">perlu ditinjau --</span>
-            <span class="pill" id="dashboard-active-date-slice">date: all</span>
+            <span class="pill" id="dashboard-active-date-slice">Shift date: all</span>
           </div>
         </section>
 
@@ -186,7 +187,7 @@
                 <p class="trend-meaning">
                   <b>Hasil SOP final</b> pada rentang tanggal yang dipilih
                 </p>
-                <p class="caption" id="trend-active-slice">Date: all</p>
+                <p class="caption" id="trend-active-slice">Shift date: all</p>
                 <div class="trend-meta-pills">
                   <span class="trend-key"><span class="trend-key-line dir-a"></span>Sesuai SOP</span>
                   <span class="trend-key"><span class="trend-key-line dir-b"></span>Perlu ditinjau</span>
@@ -213,7 +214,7 @@
                   <text class="trend-axis-label" x="520" y="176">15:00</text>
                   <text class="trend-axis-label" x="660" y="176">18:00</text>
                 </svg>
-                <div class="trend-x-title" id="trend-x-title">Time (local)</div>
+                <div class="trend-x-title" id="trend-x-title">Time (WIB, 07:30–07:30)</div>
               </div>
               <div class="trend-value-strip">
                 <span class="pill" id="trend-strip-done">sesuai --</span>

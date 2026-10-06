@@ -1,12 +1,27 @@
+"""
+Memberikan data shift berdasarkan waktu WIB
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Dict, Iterable, Optional, Tuple
 
-"""Scirpt for getting the shift data into the reports"""
+# WIB adalah object timezone dengan besar offset UTC + 7, bukan label
 
-#mke the shift date immutable
+WIB = timezone(timedelta(hours=7), name="WIB")
+
+
+def as_wib(dt: datetime) -> datetime:
+    """Convert an aware timestamp to WIB; historical naive timestamps mean WIB."""
+    if dt.tzinfo is None:
+        # No timezone was saved: interpret the existing clock reading as WIB.
+        return dt.replace(tzinfo=WIB)
+    # A timezone was saved: convert the same instant to the WIB clock.
+    return dt.astimezone(WIB)
+
+
 @dataclass(frozen=True)
 class ShiftDef:
     shift_id: str
@@ -38,14 +53,21 @@ class ShiftAssignment:
         }
 
 
-def default_times_shitft() -> Tuple[ShiftDef, ShiftDef, ShiftDef]: #return back kthe asthe dataclass
-    #jadwal untuk shift akan ditentukan sebagai berikut
-    # Shift 1 : 07:30 - 15:30
-    # Shift 2 : 15:30 - 23:30
-    # Shift 3 : 23:30 - 07:30 (next day) make sure the time date is gone
+def default_times_shitft() -> Tuple[ShiftDef, ShiftDef, ShiftDef]:
+    """
+    WIB yang termasuk mulai dan tidka mengikuti next shift start
+
+    shift 3 mulai pada saat 23:30 dan selesai pada 07:30, jadi rulesnya aada seperti ini
+    - SHIFT 1 (07:30 - 15:29)
+    - SHIFT 2 (15:30 - 23:29)
+    - SHIFT 3 (23:30 - 07:29)
+
+    Shift 3 starts at 23:30 and ends at 07:30 the following calendar day.
+    Its reporting date remains the day it started, including after midnight.
+    """
     return (
-        ShiftDef("S1", "Shift 1", start=time(7,30), end=time(15,30)),
-        ShiftDef("S2", "Shift 2", start=time(15,30), end=time(23,30)),
+        ShiftDef("S1", "Shift 1", start=time(7, 30), end=time(15, 30)),
+        ShiftDef("S2", "Shift 2", start=time(15, 30), end=time(23, 30)),
         ShiftDef("S3", "Shift 3", start=time(23, 30), end=time(7, 30)),
     )
 
@@ -67,9 +89,9 @@ def parse_iso_datetime(value: object) -> Optional[datetime]:
 
 
 def _coerce_shift_clock(value: object) -> time:
-    """Normalize shift clock values to datetime.time.
-
-    Accepts:
+    """
+    Normalisasi waktu shift untuk menjadi sama dengan datetime.time
+    Menerima 
     - datetime.time
     - (hour, minute) tuple/list
     """
@@ -114,21 +136,21 @@ def assign_shift_for_interval(
     *,
     start_dt: datetime,
     end_dt: datetime,
-    shifts: Optional[Iterable[ShiftDef]] = None, #optional shifts record
+    shifts: Optional[Iterable[ShiftDef]] = None,
 ) -> Optional[ShiftAssignment]:
     """
-    Assign a shift for a session interval.
+    Assign a whole session to a shift in WIB.
 
     - If the interval crosses a boundary, we pick the shift with the largest time overlap.
     - For overnight shift (23:30-07:30), `shift_date` is the date when the shift starts
       (so 01:00 belongs to the previous day's Shift 3).
+    - Equal overlaps go to the earlier shift. Naive timestamps are assumed WIB.
     """
-    #cases when start date change interchangebly
+    start_dt = as_wib(start_dt)
+    end_dt = as_wib(end_dt)
     if end_dt < start_dt:
         start_dt, end_dt = end_dt, start_dt
 
-
-    #load shift definitions based on previous shifts definition
     shift_defs = tuple(shifts) if shifts is not None else default_times_shitft()
     if not shift_defs:
         return None
@@ -156,7 +178,7 @@ def assign_shift_for_interval(
 
     if best is None:
         # If the interval doesn't overlap any window (shouldn't happen), fall back to time-of-day rules.
-        t = start_dt.timetz() if start_dt.tzinfo else start_dt.time()
+        t = start_dt.time()
         for sh in shift_defs:
             if not sh.crosses_midnight:
                 if sh.start <= t < sh.end:
