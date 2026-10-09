@@ -2,6 +2,8 @@
 // Importing this module does not bind events; site.js calls the functions below.
 // Every date filter selects a shift-start date, rather than a calendar day.
 
+import { copyReviewContext } from "./review-navigation.js";
+
 const DATE_YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const isValidDateYmd = (raw) => DATE_YMD_RE.test(String(raw || ""));
@@ -91,6 +93,8 @@ export const buildUiHrefWithDate = (page, hashRaw) => {
   const params = new URLSearchParams();
   if (slice.from) params.set("date_from", slice.from);
   if (slice.to) params.set("date_to", slice.to);
+  if (["review-queue.html", "session-detail.html"].includes(page)) copyReviewContext(params, "session");
+  if (["helmet-alerts.html", "helmet-alert-detail.html"].includes(page)) copyReviewContext(params, "alert");
   const query = params.toString();
   const hash = hashRaw ? `#${hashRaw}` : "";
   return `${page}${query ? `?${query}` : ""}${hash}`;
@@ -101,6 +105,7 @@ export const buildSessionDetailHref = (sessionUid) => {
   const params = new URLSearchParams();
   if (slice.from) params.set("date_from", slice.from);
   if (slice.to) params.set("date_to", slice.to);
+  copyReviewContext(params, "session");
   if (sessionUid) params.set("session_uid", String(sessionUid));
   const query = params.toString();
   const hash = sessionUid ? `#${encodeURIComponent(String(sessionUid))}` : "";
@@ -112,6 +117,7 @@ export const buildAlertDetailHref = (alertUid) => {
   const params = new URLSearchParams();
   if (slice.from) params.set("date_from", slice.from);
   if (slice.to) params.set("date_to", slice.to);
+  copyReviewContext(params, "alert");
   if (alertUid) params.set("alert_uid", String(alertUid));
   const query = params.toString();
   const hash = alertUid ? `#${encodeURIComponent(String(alertUid))}` : "";

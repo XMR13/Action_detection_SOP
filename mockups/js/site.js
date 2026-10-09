@@ -24,6 +24,13 @@ import {
 
 import { apiFetchJson } from "./shared/api.js";
 
+import {
+  readReviewContext,
+  writeReviewContext,
+  withReviewFilters,
+  createPendingReviewNavigation,
+} from "./shared/review-navigation.js";
+
 import { initAuthUi } from "./shared/auth.js";
 
 import { initSetupPage } from "./pages/setup.js";
@@ -289,6 +296,7 @@ import {
     const status = statusSel instanceof HTMLSelectElement ? String(statusSel.value || "PENDING") : "PENDING";
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
     alertPageSize = pageSizeSel instanceof HTMLSelectElement ? readAlertPageSize() : alertPageSize;
+    if (includePagination) writeReviewContext("alert", { page: alertPage, page_size: alertPageSize, status, sort });
     const params = new URLSearchParams();
     if (includePagination) {
       params.set("page", String(alertPage));
@@ -352,6 +360,10 @@ import {
     const shiftFilter = shiftSel instanceof HTMLSelectElement ? String(shiftSel.value || "ALL") : "ALL";
     const sort = sortSel instanceof HTMLSelectElement ? String(sortSel.value || "NEWEST") : "NEWEST";
     queuePageSize = pageSizeSel instanceof HTMLSelectElement ? readQueuePageSize() : queuePageSize;
+    if (includePagination) writeReviewContext("session", {
+      page: queuePage, page_size: queuePageSize, verdict: selectedVerdict,
+      evidence: evidenceFilter, shift: shiftFilter, sort,
+    });
 
     const params = new URLSearchParams();
     if (includePagination) {
@@ -986,26 +998,24 @@ import {
       }
     }
 
-    const resolveNextPendingAlert = async () => {
+    const alertNavigation = createPendingReviewNavigation({
+      currentUid: alertUid, itemsKey: "alerts", uidKey: "alert_uid",
+      fetchPage: (page) => apiFetchJson(withDateApiQuery(withReviewFilters(
+        `/api/alerts?status=PENDING&page=${page}&page_size=200&sort=NEWEST`, "alert"
+      ))),
+    });
+    const resolveNextPendingAlert = async (refresh = false) => {
       try {
-        const list = await apiFetchJson(withDateApiQuery("/api/alerts?status=PENDING&page=1&page_size=200&sort=NEWEST"));
-        const alerts = Array.isArray(list.alerts) ? list.alerts : [];
-        if (alerts.length === 0) return null;
-        const idx = alerts.findIndex((item) => String(item.alert_uid || "") === String(alertUid));
-        if (idx >= 0) {
-          const next = alerts[(idx + 1) % alerts.length];
-          return next && next.alert_uid ? String(next.alert_uid) : null;
-        }
-        const first = alerts[0];
-        return first && first.alert_uid ? String(first.alert_uid) : null;
+        return await alertNavigation.next({ refresh });
       } catch (err) {
         return null;
       }
     };
 
+    const nextAlertUid = await resolveNextPendingAlert();
     const nextLink = document.getElementById("alert-next-link");
     if (nextLink instanceof HTMLAnchorElement) {
-      const nextUid = await resolveNextPendingAlert();
+      const nextUid = nextAlertUid;
       if (nextUid && nextUid !== alertUid) {
         nextLink.href = buildAlertDetailHref(nextUid);
         nextLink.textContent = "Next Pending";
@@ -1034,7 +1044,7 @@ import {
             body: JSON.stringify({ status: nextStatus, review_note: note }),
           });
           if (String(nextStatus).toUpperCase() !== "PENDING") {
-            const nextUid = await resolveNextPendingAlert();
+            const nextUid = await resolveNextPendingAlert(true);
             if (nextUid && nextUid !== alertUid) {
               window.location.assign(buildAlertDetailHref(nextUid));
               return;
@@ -1128,26 +1138,24 @@ import {
       backLink.href = buildUiHrefWithDate("review-queue.html", encodeURIComponent(String(sessionUid)));
     }
 
-    const resolveNextPending = async () => {
+    const sessionNavigation = createPendingReviewNavigation({
+      currentUid: sessionUid, itemsKey: "sessions", uidKey: "session_uid",
+      fetchPage: (page) => apiFetchJson(withDateApiQuery(withReviewFilters(
+        `/api/sessions?operator_verdict=NEEDS_REVIEW&reviewable_only=true&sort=NEWEST&page=${page}&page_size=200`, "session"
+      ))),
+    });
+    const resolveNextPending = async (refresh = false) => {
       try {
-        const list = await apiFetchJson(withDateApiQuery("/api/sessions?operator_verdict=NEEDS_REVIEW&reviewable_only=true&sort=NEWEST&limit=200"));
-        const sessions = Array.isArray(list.sessions) ? list.sessions : [];
-        if (sessions.length === 0) return null;
-        const idx = sessions.findIndex((s) => String(s.session_uid || "") === String(sessionUid));
-        if (idx >= 0) {
-          const next = sessions[(idx + 1) % sessions.length];
-          return next && next.session_uid ? String(next.session_uid) : null;
-        }
-        const first = sessions[0];
-        return first && first.session_uid ? String(first.session_uid) : null;
+        return await sessionNavigation.next({ refresh });
       } catch (err) {
         return null;
       }
     };
 
+    const nextSessionUid = await resolveNextPending();
     const nextLink = document.getElementById("detail-next-link");
     if (nextLink instanceof HTMLAnchorElement) {
-      const nextUid = await resolveNextPending();
+      const nextUid = nextSessionUid;
       if (nextUid && nextUid !== sessionUid) {
         nextLink.href = buildSessionDetailHref(nextUid);
         nextLink.textContent = "Sesi berikutnya";
@@ -1431,7 +1439,7 @@ import {
             reviewPill.textContent = "Ditinjau petugas";
           }
           if (String(reviewStatus || "").toUpperCase() !== "PENDING") {
-            const nextUid = await resolveNextPending();
+            const nextUid = await resolveNextPending(true);
             if (nextUid && nextUid !== sessionUid) {
               window.location.assign(buildSessionDetailHref(nextUid));
               return;
@@ -1897,6 +1905,18 @@ import {
     }
   };
 
+  const restoreQueueContext = (kind, controls) => {
+    const context = readReviewContext(kind);
+    for (const [key, id] of Object.entries(controls)) {
+      const node = document.getElementById(id);
+      if (node instanceof HTMLSelectElement && Array.from(node.options).some((option) => option.value === context[key])) {
+        node.value = context[key];
+      }
+    }
+    const page = Number(context.page);
+    return Number.isSafeInteger(page) && page > 0 ? page : 1;
+  };
+
   const body = document.body;
   applyDateSliceToStaticNav();
   if (body && body.classList.contains("page-review-queue")) {
@@ -1911,6 +1931,10 @@ import {
         resetQueuePage();
         populateQueue();
       },
+    });
+    queuePage = restoreQueueContext("session", {
+      verdict: "queue-status", evidence: "queue-evidence", shift: "queue-shift",
+      sort: "queue-sort", page_size: "queue-page-size",
     });
     const statusSel = document.getElementById("queue-status");
     const requestedVerdict = new URLSearchParams(window.location.search).get("verdict");
@@ -1961,6 +1985,9 @@ import {
         resetAlertPage();
         populateAlerts();
       },
+    });
+    alertPage = restoreQueueContext("alert", {
+      status: "alert-status", sort: "alert-sort", page_size: "alert-page-size",
     });
     const alertStatusSel = document.getElementById("alert-status");
     const alertSortSel = document.getElementById("alert-sort");
