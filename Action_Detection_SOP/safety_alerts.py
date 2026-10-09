@@ -31,6 +31,9 @@ ALERT_STATUS_PENDING = "PENDING"
 MACHINE_STATUS_NO_HELMET = "NO_HELMET"
 DEFAULT_HELMET_REQUIRED_SECONDS = 10
 DEFAULT_HELMET_ALERT_CONFIDENCE = 0.15
+HELMET_PERSON_IOU_THRESHOLD = 0.25
+HELMET_PERSON_MAX_TRACKS = 32
+HELMET_PERSON_MAX_RECENT_FRAMES = 150
 HELMET_DIAGNOSTIC_MAX_SCORE_HISTORY = 32
 HELMET_DIAGNOSTIC_MAX_ASSOCIATIONS = 8
 HELMET_DIAGNOSTIC_IOU_THRESHOLD = 0.25
@@ -612,7 +615,7 @@ class HelmetDiagnosticTracker:
                     person_height_px=max(0.0, y2 - y1),
                     normalized_position=(center_x, center_y),
                     at_frame_edge=touches_edge,
-                    head_visible=not (y1 <= 0.0),
+                    head_visible=_head_region_observable(person, frame_size, head_top_fraction),
                     helmet_score_history=tuple(track.score_history),
                     helmet_hit_count=track.hit_count,
                     helmet_observation_count=track.observation_count,
@@ -785,7 +788,26 @@ class HelmetAlert:
         }
 
 
+@dataclass
+class _HelmetPersonState:
+    track_id: int
+    person: Detection
+    missed_frames: int = 0
+    recent_helmet: deque[bool] = field(default_factory=deque)
+    active: bool = False
+    alert_emitted: bool = False
+    start_time_s: float = 0.0
+    start_frame_idx: int = 0
+    start_datetime: Optional[datetime] = None
+    no_helmet_frames: int = 0
+    recovery_frames: int = 0
+    cooldown_until_s: float = 0.0
+    best_helmet_score: Optional[float] = None
+
+
 class HelmetAlertEngine:
+    """Keep independent person evidence; clipped heads cannot establish absence."""
+
     def __init__(
         self,
         cfg: HelmetAlertConfig,
@@ -811,17 +833,12 @@ class HelmetAlertEngine:
         self._diagnostic_dropped_observation_count = 0
         self._diagnostic_dropped_event_count = 0
         self._last_frame_idx = 0
-        self._active = False
-        self._alert_emitted = False
-        self._episode_start_time_s = 0.0
-        self._episode_start_frame_idx = 0
-        self._episode_start_datetime: Optional[datetime] = None
-        self._no_helmet_frames = 0
-        self._no_helmet_gap_frames = 0
-        self._recovery_frames = 0
-        self._absence_frames = 0
-        self._cooldown_until_s = 0.0
-        self._episode_best_helmet_score: Optional[float] = None
+        # Production state is independent of the optional diagnostic tracker.
+        self._people: List[_HelmetPersonState] = []
+        self._next_person_id = 1
+        self._last_time_s: Optional[float] = None
+        self._last_wall_dt: Optional[datetime] = None
+        self._frame_size: Optional[Tuple[int, int]] = None
 
     @property
     def diagnostics_enabled(self) -> bool:
@@ -883,112 +900,144 @@ class HelmetAlertEngine:
             time_s=time_s,
             safety_roi=safety_roi,
         )
-        associated_scores = {
-            id(person): _associated_helmet_scores(
-                person,
-                helmets,
-                head_top_fraction=self.cfg.head_top_fraction,
+        if not qualifying and not self._people:
+            return ()
+        frame_idx = int(frame_idx)
+        time_s = float(time_s)
+        discontinuity = (
+            self._last_time_s is not None
+            and (time_s < self._last_time_s or time_s - self._last_time_s > self.cfg.absence_seconds)
+        ) or (
+            wall_dt is not None and self._last_wall_dt is not None
+            and (wall_dt - self._last_wall_dt).total_seconds() > self.cfg.absence_seconds
+        ) or (self._frame_size is not None and safety_roi.frame_size != self._frame_size)
+        if discontinuity:
+            self.flush(time_s=time_s, frame_idx=frame_idx, reason="source_discontinuity")
+            self._people.clear()
+        self._last_time_s = time_s
+        self._last_wall_dt = wall_dt
+        self._frame_size = safety_roi.frame_size
+        self._last_frame_idx = frame_idx
+        if qualifying and safety_roi.frame_size is None:
+            raise ValueError("safety_roi.frame_size is required to evaluate cropped heads")
+        visible = _diagnostic_ordered_persons(qualifying)[:HELMET_PERSON_MAX_TRACKS]
+        matches: List[Tuple[float, int, int]] = []
+        for track_index, track in enumerate(self._people):
+            for person_index, person in enumerate(visible):
+                iou = _detection_iou(track.person, person)
+                if iou >= HELMET_PERSON_IOU_THRESHOLD:
+                    matches.append((iou, track_index, person_index))
+        matches.sort(key=lambda item: (-item[0], self._people[item[1]].track_id, item[2]))
+        assigned: Dict[int, _HelmetPersonState] = {}
+        used_tracks: set[int] = set()
+        for _, track_index, person_index in matches:
+            if track_index in used_tracks or person_index in assigned:
+                continue
+            assigned[person_index] = self._people[track_index]
+            used_tracks.add(track_index)
+        for track_index, track in enumerate(self._people):
+            if track_index in used_tracks:
+                continue
+            track.missed_frames += 1
+            track.recovery_frames = 0
+            if track.missed_frames > self.cfg.max_gap_frames:
+                track.recent_helmet.clear()
+            # Keep the matched person's count through brief detector misses,
+            # but never count an absent frame toward the required duration.
+            if track.missed_frames >= self.cfg.absence_frames:
+                self._close_episode(track, time_s=time_s, frame_idx=frame_idx, reason="person_absent")
+        self._people = [track for track in self._people if track.missed_frames < self.cfg.absence_frames]
+        ready: List[_HelmetPersonState] = []
+        window_frames = max(2, min(self.cfg.required_frames, HELMET_PERSON_MAX_RECENT_FRAMES))
+        freshness_frames = max(2, self.cfg.recovery_frames)
+        for person_index, person in enumerate(visible):
+            track = assigned.get(person_index)
+            if track is None:
+                if len(self._people) >= HELMET_PERSON_MAX_TRACKS:
+                    continue
+                track = _HelmetPersonState(self._next_person_id, person)
+                self._next_person_id += 1
+                self._people.append(track)
+            track.person = person
+            track.missed_frames = 0
+            if not _head_region_observable(person, safety_roi.frame_size, self.cfg.head_top_fraction):
+                # Body detections still serve roll/SOP processing and diagnostics.
+                # Cropping is uncertainty; it is not evidence of helmet absence.
+                self._close_episode(
+                    track,
+                    time_s=time_s,
+                    frame_idx=frame_idx,
+                    event="episode_closed" if track.alert_emitted else "episode_cancelled",
+                    reason="head_region_cropped",
+                )
+                track.recent_helmet.clear()
+                continue
+            scores = _associated_helmet_scores(person, helmets, head_top_fraction=self.cfg.head_top_fraction)
+            best_score = max(scores) if scores else None
+            verified = any(score >= self.cfg.verification_confidence for score in scores)
+            track.recent_helmet.append(verified)
+            while len(track.recent_helmet) > window_frames:
+                track.recent_helmet.popleft()
+            strong = any(score >= self.cfg.strong_helmet_confidence for score in scores)
+            recent = tuple(track.recent_helmet)
+            # Require repeated recent evidence in at least half of this person's
+            # window. The freshness tail expires evidence after helmet removal.
+            supported = (
+                sum(recent) >= max(2, math.ceil(len(recent) * 0.5))
+                and sum(recent[-freshness_frames:]) >= 2
             )
-            for person in qualifying
-        }
-        strong_helmeted_present = any(
-            any(score >= self.cfg.strong_helmet_confidence for score in associated_scores[id(person)])
-            for person in qualifying
-        )
-        candidate_persons = tuple(
-            person
-            for person in qualifying
-            if not any(score >= self.cfg.strong_helmet_confidence for score in associated_scores[id(person)])
-        )
-        frame_helmet_scores = tuple(
-            score for person in candidate_persons for score in associated_scores[id(person)]
-        )
-        frame_best_helmet_score = max(frame_helmet_scores) if frame_helmet_scores else None
-        candidates = tuple(HelmetAlertCandidate.from_detection(person) for person in candidate_persons)
-        # With whole-frame coverage, do not let a weak helmet on one person
-        # suppress an alert for another person in the same frame.
-        verification_helmet_present = bool(candidate_persons) and all(
-            any(score >= self.cfg.verification_confidence for score in associated_scores[id(person)])
-            for person in candidate_persons
-        )
-
-        if candidates:
-            if not self._active:
-                self._start_episode(time_s=float(time_s), frame_idx=int(frame_idx), wall_dt=wall_dt)
-            if frame_best_helmet_score is not None:
-                if self._episode_best_helmet_score is None:
-                    self._episode_best_helmet_score = frame_best_helmet_score
-                else:
-                    self._episode_best_helmet_score = max(self._episode_best_helmet_score, frame_best_helmet_score)
-            self._no_helmet_frames += 1
-            self._no_helmet_gap_frames = 0
-            self._recovery_frames = 0
-            self._absence_frames = 0
-            if (
-                not self._alert_emitted
-                and float(time_s) >= self._cooldown_until_s
-                and self._no_helmet_frames >= self.cfg.required_frames
+            track.recovery_frames = track.recovery_frames + 1 if verified else 0
+            if track.recovery_frames >= self.cfg.recovery_frames or (
+                supported and verified and not track.alert_emitted
             ):
-                # Weak helmet detections are deliberately ignored while the
-                # episode is accumulating. At the alert boundary they get a
-                # final verification chance before NO_HELMET is emitted.
-                if verification_helmet_present:
-                    self._close_episode(
-                        time_s=float(time_s),
-                        frame_idx=int(frame_idx),
-                        event="episode_cancelled",
-                        reason="weak_helmet_verified",
-                    )
-                    return ()
-                alert = self._build_alert(
-                    time_s=float(time_s),
-                    frame_idx=int(frame_idx),
-                    candidates=candidates,
-                    related_session_uid=related_session_uid,
-                    wall_dt=wall_dt,
+                self._close_episode(
+                    track, time_s=time_s, frame_idx=frame_idx,
+                    event="episode_closed" if track.alert_emitted else "episode_cancelled",
+                    reason="helmet_recovered" if track.alert_emitted else "recent_helmet_verified",
                 )
-                self._alert_emitted = True
-                self._record_diagnostic_event(
-                    event="alert_emitted",
-                    reason="sustained_no_helmet",
-                    frame_idx=int(frame_idx),
-                    time_s=float(time_s),
-                    alert_uid=alert.alert_uid,
-                    candidate_persons=candidate_persons,
-                )
-                return (alert,)
+                continue
+            if strong:
+                # An isolated strong detection pauses accumulation, but does
+                # not discard an existing violation timer.
+                if track.active and best_score is not None:
+                    track.best_helmet_score = max(track.best_helmet_score or 0.0, best_score)
+                continue
+            if not track.active:
+                self._start_episode(track, time_s=time_s, frame_idx=frame_idx, wall_dt=wall_dt)
+            if best_score is not None:
+                track.best_helmet_score = max(track.best_helmet_score or 0.0, best_score)
+            track.no_helmet_frames += 1
+            if (
+                not track.alert_emitted
+                and time_s >= track.cooldown_until_s
+                and track.no_helmet_frames >= self.cfg.required_frames
+                and not supported
+            ):
+                ready.append(track)
+        if not ready:
             return ()
-
-        if not self._active:
-            return ()
-
-        if strong_helmeted_present:
-            self._recovery_frames += 1
-            self._absence_frames = 0
-            self._no_helmet_gap_frames = 0
-        else:
-            self._absence_frames += 1
-            self._recovery_frames = 0
-            self._no_helmet_gap_frames += 1
-            if not self._alert_emitted and self._no_helmet_gap_frames > self.cfg.max_gap_frames:
-                self._no_helmet_frames = 0
-
-        if self._recovery_frames >= self.cfg.recovery_frames:
-            self._close_episode(
-                time_s=float(time_s),
-                frame_idx=int(frame_idx),
-                event="episode_closed",
-                reason="helmet_recovered",
-            )
-        elif self._absence_frames >= self.cfg.absence_frames:
-            self._close_episode(
-                time_s=float(time_s),
-                frame_idx=int(frame_idx),
-                event="episode_closed",
-                reason="person_absent",
-            )
-
-        return ()
+        # People maturing in the same frame share one artifact; later arrivals
+        # need their own evidence and cannot inherit another person's timer.
+        primary_track = max(
+            ready, key=lambda track: (track.person.y2 - track.person.y1, track.person.score)
+        )
+        candidates = tuple(HelmetAlertCandidate.from_detection(track.person) for track in ready)
+        alert = self._build_alert(
+            primary_track,
+            time_s=time_s,
+            frame_idx=frame_idx,
+            candidates=candidates,
+            related_session_uid=related_session_uid,
+            wall_dt=wall_dt,
+        )
+        for track in ready:
+            track.alert_emitted = True
+        self._record_diagnostic_event(
+            state=primary_track, event="alert_emitted", reason="sustained_no_helmet",
+            frame_idx=frame_idx, time_s=time_s, alert_uid=alert.alert_uid,
+            candidate_persons=tuple(track.person for track in ready),
+        )
+        return (alert,)
 
     def _collect_diagnostic_observations(
         self,
@@ -1027,6 +1076,7 @@ class HelmetAlertEngine:
     def _record_diagnostic_event(
         self,
         *,
+        state: _HelmetPersonState,
         event: str,
         reason: str,
         frame_idx: int,
@@ -1051,8 +1101,8 @@ class HelmetAlertEngine:
                 reason=reason,
                 frame_idx=frame_idx,
                 time_s=time_s,
-                episode_start_frame_idx=self._episode_start_frame_idx,
-                episode_start_time_s=self._episode_start_time_s,
+                episode_start_frame_idx=state.start_frame_idx,
+                episode_start_time_s=state.start_time_s,
                 alert_uid=alert_uid,
                 candidate_track_ids=candidate_track_ids,
             )
@@ -1065,60 +1115,72 @@ class HelmetAlertEngine:
             del self._diagnostic_events[:overflow]
             self._diagnostic_dropped_event_count += overflow
 
-    def flush(self, *, time_s: float, frame_idx: Optional[int] = None) -> None:
-        if self._active:
+    def flush(
+        self, *, time_s: float, frame_idx: Optional[int] = None, reason: str = "runner_flush"
+    ) -> None:
+        for track in self._people:
             self._close_episode(
+                track,
                 time_s=float(time_s),
                 frame_idx=self._last_frame_idx if frame_idx is None else int(frame_idx),
-                event="episode_closed",
-                reason="runner_flush",
+                reason=reason,
             )
 
-    def _start_episode(self, *, time_s: float, frame_idx: int, wall_dt: Optional[datetime]) -> None:
-        self._active = True
-        self._alert_emitted = False
-        self._episode_start_time_s = float(time_s)
-        self._episode_start_frame_idx = int(frame_idx)
-        self._episode_start_datetime = wall_dt
-        self._no_helmet_frames = 0
-        self._no_helmet_gap_frames = 0
-        self._recovery_frames = 0
-        self._absence_frames = 0
-        self._episode_best_helmet_score = None
+    def _start_episode(
+        self,
+        state: _HelmetPersonState,
+        *,
+        time_s: float,
+        frame_idx: int,
+        wall_dt: Optional[datetime],
+    ) -> None:
+        state.active = True
+        state.alert_emitted = False
+        state.start_time_s = time_s
+        state.start_frame_idx = frame_idx
+        state.start_datetime = wall_dt
+        state.no_helmet_frames = 0
+        state.best_helmet_score = None
         self._record_diagnostic_event(
+            state=state,
             event="episode_started",
             reason="no_helmet_candidate",
             frame_idx=frame_idx,
             time_s=time_s,
+            candidate_persons=(state.person,),
         )
 
     def _close_episode(
         self,
+        state: _HelmetPersonState,
         *,
         time_s: float,
-        frame_idx: Optional[int] = None,
+        frame_idx: int,
         event: str = "episode_closed",
         reason: str = "episode_ended",
     ) -> None:
+        if not state.active:
+            return
         self._record_diagnostic_event(
+            state=state,
             event=event,
             reason=reason,
-            frame_idx=self._last_frame_idx if frame_idx is None else frame_idx,
+            frame_idx=frame_idx,
             time_s=time_s,
+            candidate_persons=(state.person,),
         )
-        if self._alert_emitted:
-            self._cooldown_until_s = float(time_s) + float(self.cfg.cooldown_seconds)
-        self._active = False
-        self._alert_emitted = False
-        self._no_helmet_frames = 0
-        self._no_helmet_gap_frames = 0
-        self._recovery_frames = 0
-        self._absence_frames = 0
-        self._episode_start_datetime = None
-        self._episode_best_helmet_score = None
+        if state.alert_emitted:
+            state.cooldown_until_s = time_s + self.cfg.cooldown_seconds
+        state.active = False
+        state.alert_emitted = False
+        state.no_helmet_frames = 0
+        state.recovery_frames = 0
+        state.start_datetime = None
+        state.best_helmet_score = None
 
     def _build_alert(
         self,
+        state: _HelmetPersonState,
         *,
         time_s: float,
         frame_idx: int,
@@ -1127,38 +1189,46 @@ class HelmetAlertEngine:
         wall_dt: Optional[datetime],
     ) -> HelmetAlert:
         sorted_candidates = tuple(sorted(candidates, key=lambda c: (c.height_px, c.score), reverse=True))
-        primary = sorted_candidates[0]
-        uid = make_alert_uid(
-            alert_type=ALERT_TYPE_NO_HELMET,
-            source=self.source,
-            start_time_s=self._episode_start_time_s,
-            start_frame_idx=self._episode_start_frame_idx,
-        )
         return HelmetAlert(
-            alert_uid=uid,
+            alert_uid=make_alert_uid(
+                alert_type=ALERT_TYPE_NO_HELMET,
+                source=self.source,
+                start_time_s=state.start_time_s,
+                start_frame_idx=state.start_frame_idx,
+                person_track_id=state.track_id,
+            ),
             alert_type=ALERT_TYPE_NO_HELMET,
             safety_profile=SAFETY_PROFILE_HELMET_ALERT_V1,
-            start_time_s=self._episode_start_time_s,
-            end_time_s=float(time_s),
-            trigger_frame_idx=int(frame_idx),
+            start_time_s=state.start_time_s,
+            end_time_s=time_s,
+            trigger_frame_idx=frame_idx,
             source=self.source,
             camera_id=self.camera_id,
             safety_area_id=self.cfg.safety_area_id,
-            primary=primary,
+            primary=sorted_candidates[0],
             candidates=sorted_candidates,
-            best_helmet_score=self._episode_best_helmet_score,
+            best_helmet_score=state.best_helmet_score,
             helmet_confidence_floor=self.cfg.verification_confidence,
             helmet_strong_confidence=self.cfg.strong_helmet_confidence,
             related_session_uid=related_session_uid,
-            notes=("sustained_no_helmet",),
-            start_datetime=self._episode_start_datetime,
+            notes=("sustained_no_helmet", "per_person_recent_helmet_verification"),
+            start_datetime=state.start_datetime,
             end_datetime=wall_dt,
         )
 
 
-def make_alert_uid(*, alert_type: str, source: str, start_time_s: float, start_frame_idx: int) -> str:
+def make_alert_uid(
+    *,
+    alert_type: str,
+    source: str,
+    start_time_s: float,
+    start_frame_idx: int,
+    person_track_id: Optional[int] = None,
+) -> str:
     safe_source = redact_source_credentials(str(source)) or "source"
     raw = f"{alert_type}|{safe_source}|{float(start_time_s):.3f}|{int(start_frame_idx)}"
+    if person_track_id is not None:
+        raw += f"|person={person_track_id}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
     return f"alert_{str(alert_type).lower()}_{int(start_frame_idx):06d}_{digest}"
 
@@ -1222,6 +1292,30 @@ def write_helmet_alert_artifacts(
         encoding="utf-8",
     )
     return alert_dir
+
+
+def _head_region_observable(
+    person: Detection,
+    frame_size: Optional[Tuple[int, int]],
+    head_top_fraction: float,
+) -> bool:
+    """Reject clipped head regions; a visible body alone cannot prove helmet absence.
+
+    This is a geometry proxy, not an occlusion/head detector. Bottom-clipped
+    legs remain eligible when the estimated head band fits inside the image.
+    """
+    if frame_size is None:
+        return False
+    width, height = frame_size
+    margin_x = max(2.0, width * 0.002)
+    margin_y = max(2.0, height * 0.002)
+    head_bottom = person.y1 + (person.y2 - person.y1) * head_top_fraction
+    return (
+        person.x1 > margin_x
+        and person.x2 < width - margin_x
+        and person.y1 > margin_y
+        and head_bottom < height - margin_y
+    )
 
 
 def _qualifying_persons(

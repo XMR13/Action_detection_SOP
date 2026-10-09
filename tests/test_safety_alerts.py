@@ -409,8 +409,8 @@ def test_shadow_recent_history_is_bounded_but_streak_keeps_required_duration() -
     assert observation.shadow.sustained_unverified is True
 
 
-def test_diagnostic_events_explain_weak_helmet_cancel_and_recovery() -> None:
-    cancelled = _engine(required_s=2.0, diagnostics=True)
+def test_diagnostic_events_explain_recent_helmet_cancel_and_recovery() -> None:
+    cancelled = _engine(required_s=3.0, diagnostics=True)
     cancelled.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[], safety_roi=_roi())
     cancelled.update(
         time_s=2.0,
@@ -419,10 +419,14 @@ def test_diagnostic_events_explain_weak_helmet_cancel_and_recovery() -> None:
         helmets=[_helmet(score=0.2)],
         safety_roi=_roi(),
     )
+    cancelled.update(time_s=3.0, frame_idx=3, persons=[_person()],
+                     helmets=[_helmet(score=0.2)], safety_roi=_roi())
+    cancelled.update(time_s=4.0, frame_idx=4, persons=[_person()],
+                     helmets=[_helmet(score=0.2)], safety_roi=_roi())
     cancellation_events = cancelled.pop_diagnostic_events()
     assert [(event.event, event.reason) for event in cancellation_events] == [
         ("episode_started", "no_helmet_candidate"),
-        ("episode_cancelled", "weak_helmet_verified"),
+        ("episode_cancelled", "recent_helmet_verified"),
     ]
 
     recovered = _engine(required_s=1.0, diagnostics=True)
@@ -652,6 +656,164 @@ def test_multiple_people_create_one_scene_alert_with_primary_largest() -> None:
     payload = alerts[0].to_payload(run_start_dt=None, fallback_date="2026-06-29")
     assert payload["person_count"] == 2
     assert payload["person_height_px"] == 240.0
+
+
+@pytest.mark.parametrize("person", [
+    _person(y1=0, y2=220),
+    _person(x1=0, x2=100),
+    _person(x1=300, x2=400),
+    _person(x1=1, x2=101),
+])
+def test_cropped_head_never_accumulates_no_helmet_evidence(person: Detection) -> None:
+    engine = _engine(required_s=3, diagnostics=True)
+    alerts = []
+    for frame_idx in range(1, 20):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[person], helmets=[], safety_roi=_roi()))
+    assert alerts == []
+    observations = engine.pop_diagnostic_observations()
+    assert observations and all(not item.head_visible for item in observations)
+
+
+def test_bottom_cropped_legs_do_not_exclude_a_head_inside_the_image() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx in range(1, 4):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[_person(y2=400)], helmets=[], safety_roi=_roi()))
+    assert len(alerts) == 1
+
+
+def test_crop_clears_pending_evidence_before_the_head_returns() -> None:
+    engine = _engine(required_s=3, diagnostics=True)
+    visible = _person(x1=5, x2=105)
+    clipped = _person(x1=0, x2=100)
+    alerts = []
+    for frame_idx, person in enumerate([visible, visible, clipped, visible, visible, visible], start=1):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[person], helmets=[], safety_roi=_roi()))
+    assert [alert.trigger_frame_idx for alert in alerts] == [6]
+    assert any(event.reason == "head_region_cropped" for event in engine.pop_diagnostic_events())
+
+
+def test_later_worker_cannot_inherit_another_workers_timer() -> None:
+    engine = _engine(required_s=3)
+    first = _person()
+    later = _person(x1=220, x2=320)
+    alerts = []
+    for frame_idx, people in enumerate([[first], [first], [first, later], [first, later], [first, later]], start=1):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=people, helmets=[], safety_roi=_roi()))
+    assert [alert.trigger_frame_idx for alert in alerts] == [3, 5]
+    assert alerts[0].primary.box[0] == 50
+    assert alerts[1].primary.box[0] == 220
+
+
+def test_replacing_one_worker_does_not_transfer_the_timer() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx, person in enumerate([_person(), _person(), _person(x1=220, x2=320),
+                                       _person(x1=220, x2=320), _person(x1=220, x2=320)], start=1):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[person], helmets=[], safety_roi=_roi()))
+    assert [alert.trigger_frame_idx for alert in alerts] == [5]
+
+
+def test_recent_weak_helmets_survive_a_trigger_frame_miss() -> None:
+    engine = _engine(required_s=10)
+    alerts = []
+    for frame_idx in range(1, 21):
+        helmets = [] if frame_idx % 10 == 0 else [_helmet(score=.2)]
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[_person()], helmets=helmets, safety_roi=_roi()))
+    assert alerts == []
+
+
+@pytest.mark.parametrize("score", [.2, .9])
+def test_one_spurious_helmet_at_the_trigger_cannot_cancel_a_violation(score: float) -> None:
+    engine = _engine(required_s=10)
+    alerts = []
+    for frame_idx in range(1, 12):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[_person()], helmets=[_helmet(score=score)] if frame_idx == 10 else [],
+                                    safety_roi=_roi()))
+    assert len(alerts) == 1
+    assert alerts[0].trigger_frame_idx in (10, 11)
+    assert alerts[0].best_helmet_score == score
+
+
+def test_old_helmet_evidence_expires_after_removal() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx in range(1, 10):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[_person()], helmets=[_helmet()] if frame_idx <= 4 else [],
+                                    safety_roi=_roi()))
+    assert len(alerts) == 1
+    assert 7 <= alerts[0].trigger_frame_idx <= 8
+
+
+def test_cropped_worker_does_not_hide_another_workers_violation() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx in range(1, 4):
+        alerts.extend(engine.update(time_s=float(frame_idx), frame_idx=frame_idx,
+                                    persons=[_person(x1=0, x2=100), _person(x1=220, x2=320)],
+                                    helmets=[], safety_roi=_roi()))
+    assert len(alerts) == 1
+    assert len(alerts[0].candidates) == 1
+    assert alerts[0].primary.box[0] == 220
+
+
+def test_stream_gap_restarts_evidence_instead_of_finishing_a_stale_timer() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx, time_s in enumerate([1, 2, 30, 31, 32], start=1):
+        alerts.extend(engine.update(time_s=float(time_s), frame_idx=frame_idx,
+                                    persons=[_person()], helmets=[], safety_roi=_roi()))
+    assert [alert.trigger_frame_idx for alert in alerts] == [5]
+    assert alerts[0].start_time_s == 30
+
+
+def test_brief_person_miss_pauses_the_count_without_borrowing_evidence() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx in range(1, 5):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=[] if frame_idx == 2 else [_person()],
+            helmets=[], safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [4]
+    assert alerts[0].start_time_s == 1
+
+
+def test_detection_order_does_not_change_independent_person_timers() -> None:
+    engine = _engine(required_s=3)
+    first, second = _person(), _person(x1=220, x2=320)
+    alerts = []
+    for frame_idx in range(1, 4):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=[first, second] if frame_idx % 2 else [second, first],
+            helmets=[_helmet()], safety_roi=_roi(),
+        ))
+    assert len(alerts) == 1
+    assert len(alerts[0].candidates) == 1
+    assert alerts[0].primary.box[0] == 220
+
+
+def test_wall_clock_reconnect_gap_restarts_pending_evidence() -> None:
+    engine = _engine(required_s=3)
+    alerts = []
+    for frame_idx, second in enumerate([1, 2, 30, 31, 32], start=1):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=[_person()], helmets=[], safety_roi=_roi(),
+            wall_dt=datetime(2026, 10, 9, 9, 0, second),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [5]
+    assert alerts[0].start_time_s == 3
 
 
 def test_write_helmet_alert_artifacts(tmp_path: Path) -> None:
