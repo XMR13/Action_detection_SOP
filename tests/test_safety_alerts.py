@@ -816,6 +816,85 @@ def test_wall_clock_reconnect_gap_restarts_pending_evidence() -> None:
     assert alerts[0].start_time_s == 3
 
 
+def test_cropping_after_an_alert_does_not_rearm_the_same_violation() -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(), source="camera-1")
+    visible = _person(x1=5, x2=105)
+    clipped = _person(x1=0, x2=100)
+    alerts = []
+    for frame_idx in range(1, 115):
+        alerts.extend(engine.update(
+            time_s=frame_idx / 5, frame_idx=frame_idx,
+            persons=[clipped if frame_idx == 51 else visible],
+            helmets=[], safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [50]
+
+
+def test_returning_person_keeps_cooldown_until_it_expires() -> None:
+    engine = _engine(required_s=3, cooldown_s=60)
+    alerts = []
+    for frame_idx in range(1, 67):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=[] if frame_idx in (4, 5) else [_person()],
+            helmets=[], safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [3, 65]
+
+
+def test_absent_persons_cooldown_does_not_block_a_different_person() -> None:
+    engine = _engine(required_s=3, cooldown_s=60)
+    alerts = []
+    for frame_idx in range(1, 9):
+        people = ([_person()] if frame_idx <= 3 else
+                  [] if frame_idx <= 5 else [_person(x1=220, x2=320)])
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=people, helmets=[], safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [3, 8]
+
+
+def test_low_analysis_cadence_is_not_a_stream_discontinuity() -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
+    alerts = []
+    for frame_idx in range(1, 10):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx * 5), frame_idx=frame_idx,
+            persons=[_person()], helmets=[], safety_roi=_roi(),
+            wall_dt=datetime(2026, 10, 9, 9, 0, frame_idx * 5),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [2]
+
+
+def test_a_real_gap_at_low_analysis_fps_still_restarts_pending_evidence() -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
+    alerts = []
+    for frame_idx, time_s in enumerate([5.0, 20.0, 25.0], start=1):
+        alerts.extend(engine.update(
+            time_s=time_s, frame_idx=frame_idx,
+            persons=[_person()], helmets=[], safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [3]
+    assert alerts[0].start_time_s == 20
+
+
+def test_returning_persons_cooldown_survives_resolution_change() -> None:
+    engine = _engine(required_s=3, cooldown_s=60)
+    larger_roi = RoiPolygon(
+        points=((0, 0), (800, 0), (800, 800), (0, 800)), frame_size=(800, 800)
+    )
+    alerts = []
+    for frame_idx in range(1, 9):
+        people = ([_person()] if frame_idx <= 3 else [] if frame_idx <= 5 else
+                  [_person(x1=100, y1=40, x2=300, y2=440)])
+        alerts.extend(engine.update(
+            time_s=float(frame_idx), frame_idx=frame_idx,
+            persons=people, helmets=[], safety_roi=_roi() if frame_idx <= 5 else larger_roi,
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [3]
+
+
 def test_write_helmet_alert_artifacts(tmp_path: Path) -> None:
     engine = _engine(required_s=1.0)
     alerts = engine.update(time_s=1.0, frame_idx=1, persons=[_person()], helmets=[], safety_roi=_roi())

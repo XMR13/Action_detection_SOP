@@ -195,13 +195,18 @@ thresholds of 0.15 and 0.35. Repeated helmet evidence in at least half of the
 bounded recent window, including two hits in the recovery tail, suppresses a
 pending alert; one isolated detection cannot cancel its timer. Brief person
 detection gaps pause the count and expire helmet history after `max_gap_frames`;
-absence for `absence_seconds` drops the track. A source-time/wall-clock gap or
-resolution change resets pending evidence.
+absence for `absence_seconds` drops the evidence track. Up to 32 cooldowns are
+retained by normalized bounding-box position for returning matched people;
+another person elsewhere can start their own timer. A source-time/wall-clock
+gap longer than the greater of `absence_seconds` or 1.5 analysis intervals,
+or a resolution change, resets pending evidence. Normal low-FPS sampling
+therefore does not reset the timer.
 
 A person box touching the top or sides within the larger of 2 pixels or 0.2%
 of the image dimension is treated
 as having an unobservable head region: it contributes no no-helmet evidence and
-clears its pending timer. Bottom-clipped legs remain eligible when the estimated
+clears its pending timer. Cropping alone does not rearm an already-emitted alert.
+Bottom-clipped legs remain eligible when the estimated
 head band is inside the image. This geometry guard cannot detect every occluded
 head or torso-only box away from an edge. Person detections still serve the roll
 pipeline, and existing diagnostic flags expose `head_visible` and

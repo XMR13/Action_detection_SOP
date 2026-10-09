@@ -835,6 +835,8 @@ class HelmetAlertEngine:
         self._last_frame_idx = 0
         # Production state is independent of the optional diagnostic tracker.
         self._people: List[_HelmetPersonState] = []
+        # Normalized boxes retain only cooldowns, never retired episode evidence.
+        self._cooldowns: deque[Tuple[Detection, float]] = deque(maxlen=HELMET_PERSON_MAX_TRACKS)
         self._next_person_id = 1
         self._last_time_s: Optional[float] = None
         self._last_wall_dt: Optional[datetime] = None
@@ -904,15 +906,20 @@ class HelmetAlertEngine:
             return ()
         frame_idx = int(frame_idx)
         time_s = float(time_s)
+        # A normal sample interval at low FPS must not look like a reconnect.
+        # Allow half an interval of jitter; retain the existing limit at 5 FPS.
+        gap_seconds = max(self.cfg.absence_seconds, 1.5 / self.cfg.analysis_fps)
         discontinuity = (
             self._last_time_s is not None
-            and (time_s < self._last_time_s or time_s - self._last_time_s > self.cfg.absence_seconds)
+            and (time_s < self._last_time_s or time_s - self._last_time_s > gap_seconds)
         ) or (
             wall_dt is not None and self._last_wall_dt is not None
-            and (wall_dt - self._last_wall_dt).total_seconds() > self.cfg.absence_seconds
+            and (wall_dt - self._last_wall_dt).total_seconds() > gap_seconds
         ) or (self._frame_size is not None and safety_roi.frame_size != self._frame_size)
         if discontinuity:
             self.flush(time_s=time_s, frame_idx=frame_idx, reason="source_discontinuity")
+            for track in self._people:
+                self._retain_cooldown(track, time_s=time_s)
             self._people.clear()
         self._last_time_s = time_s
         self._last_wall_dt = wall_dt
@@ -946,6 +953,7 @@ class HelmetAlertEngine:
             # but never count an absent frame toward the required duration.
             if track.missed_frames >= self.cfg.absence_frames:
                 self._close_episode(track, time_s=time_s, frame_idx=frame_idx, reason="person_absent")
+                self._retain_cooldown(track, time_s=time_s)
         self._people = [track for track in self._people if track.missed_frames < self.cfg.absence_frames]
         ready: List[_HelmetPersonState] = []
         window_frames = max(2, min(self.cfg.required_frames, HELMET_PERSON_MAX_RECENT_FRAMES))
@@ -956,6 +964,10 @@ class HelmetAlertEngine:
                 if len(self._people) >= HELMET_PERSON_MAX_TRACKS:
                     continue
                 track = _HelmetPersonState(self._next_person_id, person)
+                assert safety_roi.frame_size is not None
+                track.cooldown_until_s = self._take_cooldown(
+                    person, frame_size=safety_roi.frame_size, time_s=time_s
+                )
                 self._next_person_id += 1
                 self._people.append(track)
             track.person = person
@@ -963,13 +975,17 @@ class HelmetAlertEngine:
             if not _head_region_observable(person, safety_roi.frame_size, self.cfg.head_top_fraction):
                 # Body detections still serve roll/SOP processing and diagnostics.
                 # Cropping is uncertainty; it is not evidence of helmet absence.
-                self._close_episode(
-                    track,
-                    time_s=time_s,
-                    frame_idx=frame_idx,
-                    event="episode_closed" if track.alert_emitted else "episode_cancelled",
-                    reason="head_region_cropped",
-                )
+                # Unknown head visibility cancels pending evidence, but cannot
+                # prove that an already-alerted no-helmet episode has ended.
+                if not track.alert_emitted:
+                    self._close_episode(
+                        track,
+                        time_s=time_s,
+                        frame_idx=frame_idx,
+                        event="episode_cancelled",
+                        reason="head_region_cropped",
+                    )
+                track.recovery_frames = 0
                 track.recent_helmet.clear()
                 continue
             scores = _associated_helmet_scores(person, helmets, head_top_fraction=self.cfg.head_top_fraction)
@@ -1038,6 +1054,27 @@ class HelmetAlertEngine:
             candidate_persons=tuple(track.person for track in ready),
         )
         return (alert,)
+
+    def _retain_cooldown(self, state: _HelmetPersonState, *, time_s: float) -> None:
+        if state.cooldown_until_s > time_s and self._frame_size is not None:
+            self._cooldowns.append((
+                _normalized_person(state.person, self._frame_size), state.cooldown_until_s
+            ))
+
+    def _take_cooldown(
+        self, person: Detection, *, frame_size: Tuple[int, int], time_s: float
+    ) -> float:
+        normalized = _normalized_person(person, frame_size)
+        matches = (
+            (_detection_iou(normalized, previous), index, until_s)
+            for index, (previous, until_s) in enumerate(self._cooldowns)
+            if until_s > time_s
+        )
+        iou, index, until_s = max(matches, default=(0.0, -1, 0.0))
+        if iou < HELMET_PERSON_IOU_THRESHOLD:
+            return 0.0
+        del self._cooldowns[index]
+        return until_s
 
     def _collect_diagnostic_observations(
         self,
@@ -1292,6 +1329,19 @@ def write_helmet_alert_artifacts(
         encoding="utf-8",
     )
     return alert_dir
+
+
+def _normalized_person(person: Detection, frame_size: Tuple[int, int]) -> Detection:
+    """Express a cooldown's position independently of decoded image size."""
+    width, height = frame_size
+    return Detection(
+        x1=person.x1 / width,
+        y1=person.y1 / height,
+        x2=person.x2 / width,
+        y2=person.y2 / height,
+        score=person.score,
+        class_id=person.class_id,
+    )
 
 
 def _head_region_observable(
