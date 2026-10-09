@@ -599,6 +599,7 @@ def run_mvp(
     report_dates: Set[str] = set()
     roi_for_frame: Optional[RoiPolygon] = None
     helmet_alert_roi_for_frame: Optional[RoiPolygon] = None
+    roi_stream_size: Optional[Tuple[int, int]] = None
     helmet_alert_dirs: List[Path] = []
     save_thumb = not bool(args.no_thumb)
 
@@ -866,6 +867,22 @@ def run_mvp(
             if run_start_dt is not None and "run_start_iso" not in run_config:
                 run_config["run_start_iso"] = run_start_dt.isoformat(timespec="seconds")
 
+            stream_size = (int(frame.shape[1]), int(frame.shape[0]))
+            if roi_stream_size is not None and stream_size != roi_stream_size:
+                msg = (
+                    f"Stream resolution changed from {roi_stream_size} to {stream_size}; "
+                    "re-resolving SOP and helmet alert ROIs."
+                )
+                print(f"WARNING: {msg}")
+                warnings.append(msg)
+                roi_for_frame = None
+                helmet_alert_roi_for_frame = None
+                last_dets_global = []
+                last_dets_roi = []
+                last_cleaning_roi = []
+                last_labels_roi = []
+            roi_stream_size = stream_size
+
             if roi_for_frame is None:
                 roi_for_frame = resolve_roi_for_frame(
                     roi_base,
@@ -874,7 +891,6 @@ def run_mvp(
                 )
                 if roi_base.frame_size is not None:
                     base_w, base_h = roi_base.frame_size
-                    stream_size = (int(frame.shape[1]), int(frame.shape[0]))
                     if (base_w, base_h) != stream_size:
                         msg = (
                             "ROI frame_size differs from stream resolution; ROI was auto-rescaled. "
@@ -905,7 +921,6 @@ def run_mvp(
                     )
                     if helmet_alert_roi_base.frame_size is not None:
                         base_w, base_h = helmet_alert_roi_base.frame_size
-                        stream_size = (int(frame.shape[1]), int(frame.shape[0]))
                         if (base_w, base_h) != stream_size:
                             msg = (
                                 "Helmet alert ROI frame_size differs from stream resolution; ROI was auto-rescaled. "

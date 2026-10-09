@@ -17,16 +17,26 @@ from yolo_kit.types import Detection
 
 
 class _Capture:
-    def __init__(self, frame_count: int) -> None:
+    def __init__(
+        self, frame_count: int, *, frame_sizes: list[tuple[int, int]] | None = None,
+        reconnect_after: int | None = None,
+    ) -> None:
         self.frame_count = frame_count
+        self.frame_sizes = frame_sizes or [(160, 160)] * frame_count
+        self.reconnect_after = reconnect_after
+        self.disconnected = False
         self.frames_read = 0
         self.released = False
 
     def read(self) -> tuple[bool, np.ndarray | None]:
+        if self.frames_read == self.reconnect_after and not self.disconnected:
+            self.disconnected = True
+            return False, None
         if self.frames_read == self.frame_count:
             return False, None
+        width, height = self.frame_sizes[self.frames_read]
         self.frames_read += 1
-        return True, np.zeros((160, 160, 3), dtype=np.uint8)
+        return True, np.zeros((height, width, 3), dtype=np.uint8)
 
     def release(self) -> None:
         self.released = True
@@ -47,6 +57,9 @@ def _run(
     tmp_path: Path,
     detections: list[list[Detection]],
     *extra_args: str,
+    frame_sizes: list[tuple[int, int]] | None = None,
+    reconnect_after: int | None = None,
+    roi_points: list[list[int]] | None = None,
 ) -> _Run:
     metadata = tmp_path / "metadata.yaml"
     metadata.write_text(
@@ -56,7 +69,7 @@ def _run(
     roi = tmp_path / "roi.json"
     roi.write_text(
         json.dumps({
-            "polygon": [[0, 0], [159, 0], [159, 159], [0, 159]],
+            "polygon": roi_points or [[0, 0], [159, 0], [159, 159], [0, 159]],
             "frame_size": {"width": 160, "height": 160},
         }),
         encoding="utf-8",
@@ -68,7 +81,16 @@ def _run(
         "--analysis-fps", "1", "--no-evidence", "--no-thumb", "--no-progress",
         *extra_args,
     ])
-    capture = _Capture(len(detections))
+    if reconnect_after is not None:
+        # Stop on an extra terminal frame so --reconnect does not loop at EOF.
+        args.reconnect = True
+        args.max_frames = len(detections) + 1
+        if frame_sizes is not None:
+            frame_sizes = [*frame_sizes, frame_sizes[-1]]
+    capture = _Capture(
+        len(detections) + int(reconnect_after is not None),
+        frame_sizes=frame_sizes, reconnect_after=reconnect_after,
+    )
     monkeypatch.setattr(runner_mvp, "open_capture", lambda **kwargs: capture)
     monkeypatch.setattr(
         runner_mvp, "get_capture_info",
@@ -173,3 +195,61 @@ def test_person_without_roll_emits_independent_helmet_alert_and_no_session(
     report = _json(next(run.out_dir.glob("reports/*/daily_report.json")))
     assert report["sop_profile"] == "roll_sop_v1"
     assert report["total_sessions"] == 0
+
+
+@pytest.mark.parametrize("reconnect_after", [None, 1])
+@pytest.mark.parametrize("stream_sizes", [
+    ((160, 160), (80, 80)),
+    ((160, 160), (320, 320)),
+    ((1920, 1080), (640, 360)),
+])
+@pytest.mark.parametrize("helmet_roi", [False, True])
+def test_resolution_change_keeps_roll_and_helmet_detection_in_current_rois(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str], reconnect_after: int | None,
+    stream_sizes: tuple[tuple[int, int], tuple[int, int]], helmet_roi: bool,
+) -> None:
+    old_size, new_size = stream_sizes
+    old_scale_x, old_scale_y = old_size[0] / 160, old_size[1] / 160
+    scale_x, scale_y = new_size[0] / 160, new_size[1] / 160
+    roll = Detection(
+        x1=100 * old_scale_x, y1=100 * old_scale_y,
+        x2=140 * old_scale_x, y2=140 * old_scale_y, score=0.9, class_id=2,
+    )
+    resized_roll = Detection(
+        x1=100 * scale_x, y1=100 * scale_y, x2=140 * scale_x, y2=140 * scale_y,
+        score=0.9, class_id=2,
+    )
+    person = Detection(
+        x1=90 * scale_x, y1=85 * scale_y, x2=145 * scale_x, y2=149 * scale_y,
+        score=0.9, class_id=0,
+    )
+    helmet_args = [
+        "--enable-helmet-alerts", "--helmet-alert-s", "1",
+        "--helmet-alert-min-person-height", "1",
+    ]
+    if helmet_roi:
+        helmet_args.extend(["--helmet-alert-roi", str(tmp_path / "roi.json")])
+    run = _run(
+        monkeypatch, tmp_path, [[roll]] + [[resized_roll, person]] * 3,
+        *helmet_args,
+        frame_sizes=[old_size] + [new_size] * 3,
+        reconnect_after=reconnect_after,
+        roi_points=[[80, 80], [150, 80], [150, 150], [80, 150]],
+    )
+
+    checklists = list(run.out_dir.glob("sessions/*/session_*/checklist.json"))
+    assert len(checklists) == 1
+    assert _json(checklists[0])["start_time_s"] == 3.0
+    assert len(list(run.out_dir.glob("alerts/*/*/alert.json"))) == 1
+    config = _json(next(run.out_dir.glob("reports/*/run_config.json")))
+    assert config["roi_resolved"]["frame_size"] == list(new_size)
+    assert config["roi_resolved"]["points"][0] == [80 * scale_x, 80 * scale_y]
+    assert config["helmet_alerts"]["roi_resolved"]["frame_size"] == list(new_size)
+    if helmet_roi:
+        assert config["helmet_alerts"]["roi_resolved"] == config["roi_resolved"]
+    else:
+        assert config["helmet_alerts"]["roi_resolved"]["points"][-2] == [new_size[0] - 1, new_size[1] - 1]
+    assert config["reconnect_events"] == int(reconnect_after is not None)
+    output = capsys.readouterr().out
+    assert output.count("Stream resolution changed") == 1

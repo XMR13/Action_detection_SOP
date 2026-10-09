@@ -107,6 +107,18 @@ The RTSP worker has two recovery layers:
 1. `run_sop_mvp` retries capture failures forever with bounded backoff.
 2. systemd restarts the Python process after an unhandled failure or clean exit.
 
+`active (running)` confirms the process exists, including while it retries an
+unavailable RTSP source. Check the journal and new artifacts to verify useful
+processing. `SOP_IMAGE_SIZE` controls model input, not camera stream resolution;
+the incoming frame dimensions are set by the camera/NVR. The worker checks
+each decoded frame for resolution changes, logs the old/new dimensions, and
+resolves both SOP and helmet alert ROIs again from their calibration coordinates.
+This also applies after reconnects. Rescaling preserves coordinates but cannot
+recover small-object detail lost in a lower-resolution stream. If the source
+unexpectedly drops from 1920x1080 to 640x360, verify the selected channel and
+main-stream encoding settings on the camera/NVR. With older worker code,
+restart the service after restoring the source resolution to discard cached ROIs.
+
 Initial live settings are deliberately conservative:
 
 - TensorRT, batch size 1
