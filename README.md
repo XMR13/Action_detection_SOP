@@ -189,6 +189,29 @@ configs/metadata_roll_sop_v1.yaml
 - Optional helmet diagnostics: `data/diagnostics/helmet/YYYY-MM-DD/run_*.jsonl` (enable with `--helmet-alert-diagnostics`; total storage defaults to 128 MiB).
 - Summarize diagnostic runs read-only with `python -m Scripts.analyze_helmet_diagnostics data/diagnostics/helmet/` (use `--max-tracks 0` to print every aggregated track).
 
+Helmet alerts keep a separate timer for each person matched by bounding-box IoU.
+The default remains 10 seconds of qualifying observations, with helmet confidence
+thresholds of 0.15 and 0.35. Repeated helmet evidence in at least half of the
+bounded recent window, including two hits in the recovery tail, suppresses a
+pending alert; one isolated detection cannot cancel its timer. Brief person
+detection gaps pause the count and expire helmet history after `max_gap_frames`;
+absence for `absence_seconds` drops the evidence track. Up to 32 cooldowns are
+retained by normalized bounding-box position for returning matched people;
+another person elsewhere can start their own timer. A source-time/wall-clock
+gap longer than the greater of `absence_seconds` or 1.5 analysis intervals,
+or a resolution change, resets pending evidence. Normal low-FPS sampling
+therefore does not reset the timer.
+
+A person box touching the top or sides within the larger of 2 pixels or 0.2%
+of the image dimension is treated
+as having an unobservable head region: it contributes no no-helmet evidence and
+clears its pending timer. Cropping alone does not rearm an already-emitted alert.
+Bottom-clipped legs remain eligible when the estimated
+head band is inside the image. This geometry guard cannot detect every occluded
+head or torso-only box away from an edge. Person detections still serve the roll
+pipeline, and existing diagnostic flags expose `head_visible` and
+`head_region_cropped` decisions for review.
+
 Each session `checklist.json` includes `session_uid`, used by the web API and uploader for idempotent sync.
 
 ## Web Review
