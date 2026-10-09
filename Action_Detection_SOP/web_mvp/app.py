@@ -443,10 +443,10 @@ def _disk_health(
     status = "ok"
     if used_pct >= critical:
         status = "critical"
-        issues.append("penggunaan disk mencapai kritikal")
+        issues.append("disk_used_pct_critical")
     elif used_pct >= warning:
         status = "warning"
-        issues.append("WARNING: Penggunaan disk mencapai sudah banyak")
+        issues.append("disk_used_pct_warning")
 
     return {
         "status": status,

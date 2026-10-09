@@ -26,7 +26,7 @@ export const writeReviewContext = (kind, values) => {
   // === resembles strict equalities
   if (kind === "session") url.searchParams.delete("verdict");
   for (const key of keys) {
-    if (values[key]) url.searchParams.set(`'${prefix}_${key}'`, String(values[key]));
+    if (values[key]) url.searchParams.set(`${prefix}_${key}`, String(values[key]));
     else url.searchParams.delete(`${prefix}_${key}`);
   }
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
