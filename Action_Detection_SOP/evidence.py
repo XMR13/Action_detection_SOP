@@ -57,6 +57,7 @@ class EvidenceClip:
 class EvidenceClipData:
     clip: EvidenceClip
     frames: List[Any]
+    frame_times_s: Tuple[float, ...] = ()
 
 
 @dataclass
@@ -152,4 +153,6 @@ class EvidenceClipper:
             fps=float(self.cfg.analysis_fps),
             frame_count=len(clip.frames),
         )
-        return EvidenceClipData(clip=payload, frames=list(clip.frames))
+        return EvidenceClipData(
+            clip=payload, frames=list(clip.frames), frame_times_s=tuple(clip.times),
+        )

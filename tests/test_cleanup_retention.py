@@ -31,6 +31,7 @@ def test_retention_targets_only_generated_artifacts(tmp_path: Path) -> None:
     now_ts = time.time()
     data_dir = tmp_path / "data"
     _touch_old(data_dir / "_web_cache" / "transcoded" / "uid1" / "cache.mp4", age_days=10, now_ts=now_ts)
+    _touch_old(data_dir / "sessions" / "2026-03-01" / "session_001" / "evidence" / "session.webm", age_days=40, now_ts=now_ts)
     _touch_old(data_dir / "sessions" / "2026-03-01" / "session_001" / "annotated.mp4", age_days=20, now_ts=now_ts)
     _touch_old(
         data_dir / "sessions" / "2026-03-01" / "session_001" / "evidence" / "clip01.mp4",
@@ -45,6 +46,7 @@ def test_retention_targets_only_generated_artifacts(tmp_path: Path) -> None:
     actions = _eligible_files(data_dir=data_dir, policy=_test_policy(), now_ts=now_ts)
     categories = {(item.category, item.path.name) for item in actions}
     assert ("transcoded_cache", "cache.mp4") in categories
+    assert ("evidence_clip", "session.webm") in categories
     assert ("annotated_video", "annotated.mp4") in categories
     assert ("evidence_clip", "clip01.mp4") in categories
     assert ("uploader_done", "task1.json") in categories

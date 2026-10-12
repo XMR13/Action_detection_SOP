@@ -60,6 +60,7 @@ def _run(
     frame_sizes: list[tuple[int, int]] | None = None,
     reconnect_after: int | None = None,
     roi_points: list[list[int]] | None = None,
+    evidence_enabled: bool = False,
 ) -> _Run:
     metadata = tmp_path / "metadata.yaml"
     metadata.write_text(
@@ -81,6 +82,7 @@ def _run(
         "--analysis-fps", "1", "--no-evidence", "--no-thumb", "--no-progress",
         *extra_args,
     ])
+    args.no_evidence = not evidence_enabled
     if reconnect_after is not None:
         # Stop on an extra terminal frame so --reconnect does not loop at EOF.
         args.reconnect = True
@@ -307,3 +309,25 @@ def test_resolution_change_keeps_roll_and_helmet_detection_in_current_rois(
     assert config["reconnect_events"] == int(reconnect_after is not None)
     output = capsys.readouterr().out
     assert output.count("Stream resolution changed") == 1
+
+
+def test_completed_roll_evidence_includes_departure_and_exact_sample_times(monkeypatch, tmp_path: Path) -> None:
+    run = _run(monkeypatch, tmp_path, [_roll_and_tools()] * 4 + [[]] * 5,
+               evidence_enabled=True)
+    manifest_path = next(run.out_dir.glob('sessions/*/session_*/evidence.json'))
+    manifest = _json(manifest_path)
+    video = manifest['video']
+    assert {e['name'] for e in video['events']} == {'roll_entered', 'cleaned_done', 'labeled_done', 'roll_left'}
+    assert len(video['frame_times_s']) == video['frame_count']
+    assert len(set(video['frame_times_s'])) == video['frame_count']
+    assert len(list((manifest_path.parent / 'evidence').iterdir())) == 1
+    assert not list(manifest_path.parent.rglob('*.mp4'))
+    assert video['events'][-1]['label'] == 'Roll keluar'
+
+
+def test_eof_evidence_does_not_claim_observed_departure(monkeypatch, tmp_path: Path) -> None:
+    run = _run(monkeypatch, tmp_path, [_roll_and_tools()] * 5, evidence_enabled=True)
+    manifest = _json(next(run.out_dir.glob('sessions/*/session_*/evidence.json')))
+    names = {e['name'] for e in manifest['video']['events']}
+    assert 'recording_ended' in names
+    assert 'roll_left' not in names

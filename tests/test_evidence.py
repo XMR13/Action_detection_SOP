@@ -17,6 +17,7 @@ class TestEvidenceClipper(unittest.TestCase):
         clip = completed[0]
         self.assertEqual(clip.frames, [3, 4, 5, 6, 7])
         self.assertEqual(clip.clip.frame_count, 5)
+        self.assertEqual(clip.frame_times_s, (3, 4, 5, 6, 7))
 
     def test_flush_without_post_frames(self) -> None:
         cfg = EvidenceClipConfig(pre_seconds=2.0, post_seconds=2.0, max_seconds=10.0, analysis_fps=1.0)

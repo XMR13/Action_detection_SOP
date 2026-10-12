@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import csv
 import io
 import shutil
@@ -483,7 +484,9 @@ def _session_storage_breakdown(sessions: List[SessionArtifact]) -> Dict[str, Any
         evidence_dir = session.paths.session_dir / "evidence"
         if evidence_dir.exists() and evidence_dir.is_dir():
             try:
-                for clip in evidence_dir.glob("*.mp4"):
+                for clip in evidence_dir.iterdir():
+                    if clip.suffix.lower() not in {".mp4", ".webm"} or not clip.is_file():
+                        continue
                     clip_size = _safe_file_size(clip)
                     if clip_size <= 0:
                         continue
@@ -509,7 +512,46 @@ def _session_storage_breakdown(sessions: List[SessionArtifact]) -> Dict[str, Any
     }
 
 
+def _single_evidence_video(session: SessionArtifact) -> Optional[Dict[str, Any]]:
+    video = session.evidence.get("video")
+    if not isinstance(video, dict) or not isinstance(video.get("file"), str):
+        return None
+    try:
+        relative = video["file"].replace("\\", "/")
+        path = _safe_session_dir(session.paths.session_dir, session, relative)
+        if path.suffix.lower() != ".webm" or not path.is_file() or path.stat().st_size <= 0:
+            return None
+        duration = float(video["duration_s"])
+        fps = float(video["fps"])
+        count = float(video["frame_count"])
+        if (not all(math.isfinite(v) for v in (duration, fps, count))
+                or not 0 < fps <= 240 or not 0 < count <= 10_000 or not count.is_integer()
+                or not math.isclose(duration, count / fps, abs_tol=1e-6)):
+            return None
+        events = video.get("events", [])
+        if not isinstance(events, list):
+            return None
+        for event in events:
+            if not isinstance(event, dict) or not isinstance(event.get("name"), str):
+                return None
+            position = float(event["playback_time_s"])
+            source_time = float(event["source_time_s"])
+            if not math.isfinite(source_time) or not math.isfinite(position) or not 0 <= position < duration:
+                return None
+        stat = path.stat()
+        url = f"/media/{session.session_uid}/{relative}?v={stat.st_size}-{stat.st_mtime_ns}"
+        return {"file": relative, "url": url, "playback_url": url,
+                "fps": fps, "frame_count": int(count), "duration_s": duration,
+                "events": [{"name": e["name"], "label": str(e.get("label", e["name"])),
+                            "playback_time_s": float(e["playback_time_s"]),
+                            "source_time_s": float(e["source_time_s"])} for e in events]}
+    except (HTTPException, KeyError, TypeError, ValueError, OSError):
+        return None
+
+
 def _clip_count(session: SessionArtifact) -> int:
+    if _single_evidence_video(session) is not None:
+        return 1
     clips = session.evidence.get("clips")
     if isinstance(clips, list):
         return len(clips)
@@ -517,6 +559,9 @@ def _clip_count(session: SessionArtifact) -> int:
 
 
 def _first_clip_rel_file(session: SessionArtifact) -> Optional[str]:
+    video = _single_evidence_video(session)
+    if video is not None:
+        return video["file"]
     clips = session.evidence.get("clips")
     if not isinstance(clips, list) or not clips:
         return None
@@ -2000,12 +2045,15 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             if p.exists():
                 artifacts.append({"name": rel, "url": f"/media/{s.session_uid}/{rel}"})
         if (s.paths.session_dir / "evidence").exists():
-            for mp4 in sorted((s.paths.session_dir / "evidence").glob("*.mp4")):
+            for mp4 in sorted((s.paths.session_dir / "evidence").iterdir()):
+                if mp4.suffix.lower() not in {".mp4", ".webm"} or not mp4.is_file():
+                    continue
                 rel = str(mp4.relative_to(s.paths.session_dir))
                 artifacts.append({"name": rel, "url": f"/media/{s.session_uid}/{rel}"})
 
         annotated_path = s.paths.session_dir / "annotated.mp4"
         has_annotated = annotated_path.exists()
+        combined_video = _single_evidence_video(s)
         return {
             "session_uid": s.session_uid,
             "date": str(shift_fields.get("shift_date") or s.date),
@@ -2028,6 +2076,7 @@ def create_app(settings: WebMvpSettings) -> FastAPI:
             "auto_review_reason": eff.auto_reason,
             "review": None if r is None else r.__dict__,
             "clips": clips,
+            "combined_video": combined_video,
             "has_thumbnail": s.paths.thumbnail_jpg.exists(),
             "thumbnail_url": f"/media/{s.session_uid}/thumbnail.jpg" if s.paths.thumbnail_jpg.exists() else None,
             "has_annotated": has_annotated,

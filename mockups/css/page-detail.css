@@ -125,6 +125,7 @@
 }
 
 .detail-player {
+  position: relative;
   height: clamp(320px, 46vw, 460px);
   border-radius: 18px;
   border: 1px solid rgba(45, 55, 72, 0.14);
@@ -133,6 +134,24 @@
     linear-gradient(135deg, rgba(232, 24, 32, 0.06), rgba(64, 64, 64, 0.06));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
+
+.detail-video-caption {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(20, 25, 32, 0.9);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.detail-video-caption[hidden] { display: none; }
 
 .detail-evidence-strip {
   display: flex;

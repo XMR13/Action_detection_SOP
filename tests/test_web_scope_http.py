@@ -44,8 +44,8 @@ def request_api(tmp_path: Path) -> Iterator[HttpRequest]:
             root = f"http://127.0.0.1:{sock.getsockname()[1]}"
             auth = base64.b64encode(b"admin:secret").decode("ascii")
 
-            def request(method: str, path: str, payload: dict | None = None) -> tuple[int, bytes]:
-                body = None if payload is None else json.dumps(payload).encode()
+            def request(method: str, path: str, payload: dict | bytes | None = None) -> tuple[int, bytes]:
+                body = payload if isinstance(payload, bytes) else None if payload is None else json.dumps(payload).encode()
                 req = Request(root + path, data=body, method=method,
                               headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"})
                 try:
@@ -393,3 +393,40 @@ def test_exclusion_preserves_prior_corrections_when_omitted(request_api: HttpReq
     assert detail["machine_sop"] == "UNKNOWN"
     assert detail["final_sop"] == "DONE"
     assert detail["operator_verdict"] == "OUT_OF_SCOPE"
+
+
+def test_single_video_through_upload_detail_and_direct_playback(request_api: HttpRequest, tmp_path: Path) -> None:
+    from test_evidence_video import _final
+    _put_roll(request_api, 'single', cleaned='DONE', labeled='DONE')
+    video = _final(tmp_path)
+    manifest = (tmp_path / 'evidence.json').read_bytes()
+    assert request_api('POST', '/api/sessions/single/artifacts?rel_path=evidence.json', manifest)[0] == 200
+    assert _json(request_api, '/api/sessions/single')['combined_video'] is None
+    body = (tmp_path / video['file']).read_bytes()
+    assert request_api('POST', '/api/sessions/single/artifacts?rel_path=' + video['file'], body)[0] == 200
+    detail = _json(request_api, '/api/sessions/single')
+    assert detail['clips'] == []
+    assert detail['combined_video']['duration_s'] == 2
+    assert [e['playback_time_s'] for e in detail['combined_video']['events']] == [0.5, 1]
+    assert detail['combined_video']['playback_url'].startswith('/media/single/evidence/session.webm')
+    assert request_api('GET', detail['combined_video']['playback_url']) == (200, body)
+    assert request_api('GET', detail['combined_video']['playback_url']) == (200, body)
+    assert not list((tmp_path / 'data').rglob('combined-*'))
+    # The source video counts as evidence in queue filters and storage accounting.
+    assert _json(request_api, '/api/sessions?evidence=CLIP_ONLY')['total'] == 1
+    assert _json(request_api, '/api/admin/ops')['managed_storage']['sessions']['categories']['evidence_clips']['files'] == 1
+
+
+def test_legacy_clips_remain_readable_without_building_an_extra_cache(request_api: HttpRequest, tmp_path: Path) -> None:
+    from test_evidence_video import _clip
+    _put_roll(request_api, 'legacy')
+    clip = _clip(tmp_path, 'cleaned_done', [1, 1.5], 1)
+    for name, body in [('evidence.json', json.dumps({'clips': [clip]}).encode()),
+                       (clip['file'], (tmp_path / clip['file']).read_bytes())]:
+        assert request_api('POST', '/api/sessions/legacy/artifacts?rel_path=' + name, body)[0] == 200
+    detail = _json(request_api, '/api/sessions/legacy')
+    assert detail['combined_video'] is None
+    assert len(detail['clips']) == 1
+    assert request_api('GET', detail['clips'][0]['url'])[0] == 200
+    assert not list((tmp_path / 'data').rglob('combined-*'))
+    assert _json(request_api, '/api/sessions/legacy')['review_status'] == 'PENDING'

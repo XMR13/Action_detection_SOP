@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import copy
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,7 @@ except ModuleNotFoundError:
     tqdm = None  # type: ignore[assignment]
 
 from Action_Detection_SOP.evidence import EvidenceClipConfig, EvidenceClipper
-from Action_Detection_SOP.evidence_io import write_evidence_clip, write_evidence_manifest
+from Action_Detection_SOP.session_evidence import SessionEvidenceWriter, EvidenceEncoder
 from Action_Detection_SOP.helmet_diagnostics_capture import HelmetDiagnosticCapture
 from Action_Detection_SOP.ingest import CaptureInfo, get_capture_info, open_capture
 from Action_Detection_SOP.reconnect_policy import reconnect_wait_seconds
@@ -679,8 +680,8 @@ def run_mvp(
     loop_count = 0
     thumb_written: Set[str] = set()
     evidence_session_id: Optional[str] = None
-    evidence_clip_counts: Dict[str, int] = {}
-    evidence_clips: List[Dict[str, object]] = []
+    evidence_writer: Optional[SessionEvidenceWriter] = None
+    evidence_encoder = EvidenceEncoder() if evidence_enabled else None
 
     writer: Optional[cv2.VideoWriter] = None
     run_writer: Optional[cv2.VideoWriter] = None
@@ -1069,8 +1070,7 @@ def run_mvp(
                 if evidence_session_id is None and session_id is not None:
                     evidence_session_id = session_id
                     evidence_clipper.reset()
-                    evidence_clip_counts = {}
-                    evidence_clips = []
+                    evidence_writer = SessionEvidenceWriter(session_dir=active_session_dir, fps=float(analysis_fps))
 
             if args.save_video and session_id and active_session_dir is not None and writer is None:
                 active_video_path = active_session_dir / "annotated.mp4"
@@ -1152,15 +1152,9 @@ def run_mvp(
                         raise RuntimeError("Evidence clip completed without a reserved session directory")
                     session_dir = active_session_dir
                     for clip_data in completed:
-                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
-                        evidence_clip_counts[clip_data.clip.name] = idx
-                        meta = write_evidence_clip(
-                            clip_data=clip_data,
-                            session_dir=session_dir,
-                            index=idx,
-                        )
-                        if meta is not None:
-                            evidence_clips.append(meta)
+                        if evidence_writer is None:
+                            raise RuntimeError("Evidence writer missing for active session")
+                        evidence_encoder.append(evidence_writer, clip_data)
                 for ev in events:
                     if ev.session_id != evidence_session_id:
                         continue
@@ -1199,6 +1193,9 @@ def run_mvp(
                         writer.release()
                         writer = None
                     active_video_path = None
+                    if evidence_writer is not None:
+                        evidence_encoder.abort(evidence_writer, discard=True)
+                        evidence_writer = None
                     discard_dir = active_session_dir
                     if discard_dir is not None and discard_dir.exists():
                         shutil.rmtree(discard_dir, ignore_errors=True)
@@ -1209,39 +1206,40 @@ def run_mvp(
                     if evidence_enabled and evidence_clipper is not None:
                         evidence_clipper.reset()
                         evidence_session_id = None
-                        evidence_clip_counts = {}
-                        evidence_clips = []
+
                     continue
                 sessions.append(result)
                 session_date = result.start_date or active_session_date or date
                 if active_session_dir is None:
                     raise RuntimeError("Finalized session has no reserved session directory")
-                session_dir = write_session_artifacts(
-                    out_dir=out_dir,
-                    date=session_date,
-                    session=result,
-                    session_dir=active_session_dir,
-                )
-                run_config["loop_count"] = int(loop_count)
-                run_config["reconnect_events"] = int(reconnect_events)
-                write_session_run_config(session_dir=session_dir, run_config=run_config)
+                session_dir = active_session_dir
                 if evidence_enabled and evidence_clipper is not None and evidence_session_id == result.session_id:
                     pending = evidence_clipper.flush()
                     for clip_data in pending:
-                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
-                        evidence_clip_counts[clip_data.clip.name] = idx
-                        meta = write_evidence_clip(
-                            clip_data=clip_data,
-                            session_dir=session_dir,
-                            index=idx,
-                        )
-                        if meta is not None:
-                            evidence_clips.append(meta)
-                    write_evidence_manifest(session_dir=session_dir, clips=evidence_clips)
+                        if evidence_writer is None:
+                            raise RuntimeError("Evidence writer missing for active session")
+                        evidence_encoder.append(evidence_writer, clip_data)
+                    if evidence_writer is not None:
+                        pending_writer = evidence_writer
+                        evidence_writer = None
                     evidence_clipper.reset()
                     evidence_session_id = None
-                    evidence_clip_counts = {}
-                    evidence_clips = []
+
+                config_snapshot = copy.deepcopy(run_config)
+                config_snapshot["loop_count"] = int(loop_count)
+                config_snapshot["reconnect_events"] = int(reconnect_events)
+
+                def publish_session(
+                    directory=session_dir, date_value=session_date, value=result,
+                    config=config_snapshot,
+                ) -> None:
+                    write_session_run_config(session_dir=directory, run_config=config)
+                    write_session_artifacts(out_dir=out_dir, date=date_value, session=value, session_dir=directory)
+
+                if evidence_enabled and evidence_encoder is not None:
+                    evidence_encoder.finish(pending_writer, publish_session)
+                else:
+                    publish_session()
                 session_dirs.append(session_dir)
                 write_daily_report(
                     out_dir=out_dir,
@@ -1293,6 +1291,9 @@ def run_mvp(
                     writer.release()
                     writer = None
                 active_video_path = None
+                if evidence_writer is not None:
+                    evidence_encoder.abort(evidence_writer, discard=True)
+                    evidence_writer = None
                 discard_dir = active_session_dir
                 if discard_dir is not None and discard_dir.exists():
                     shutil.rmtree(discard_dir, ignore_errors=True)
@@ -1302,47 +1303,48 @@ def run_mvp(
                 if evidence_enabled and evidence_clipper is not None:
                     evidence_clipper.reset()
                     evidence_session_id = None
-                    evidence_clip_counts = {}
-                    evidence_clips = []
+
             else:
                 sessions.append(tail)
                 session_date = tail.start_date or active_session_date or date
                 if active_session_dir is None:
                     raise RuntimeError("Flushed session has no reserved session directory")
-                session_dir = write_session_artifacts(
-                    out_dir=out_dir,
-                    date=session_date,
-                    session=tail,
-                    session_dir=active_session_dir,
-                )
-                run_config["loop_count"] = int(loop_count)
-                run_config["reconnect_events"] = int(reconnect_events)
-                write_session_run_config(session_dir=session_dir, run_config=run_config)
+                session_dir = active_session_dir
                 if evidence_enabled and evidence_clipper is not None and evidence_session_id == tail.session_id:
                     for ev in tail_events:
                         if ev.session_id != evidence_session_id:
                             continue
                         evidence_clipper.trigger(
-                            name=ev.name,
+                            name="recording_ended" if ev.name == "roll_left" else ev.name,
                             time_s=float(ev.time_s),
                             frame_idx=int(ev.frame_idx),
                         )
                     pending = evidence_clipper.flush()
                     for clip_data in pending:
-                        idx = evidence_clip_counts.get(clip_data.clip.name, 0) + 1
-                        evidence_clip_counts[clip_data.clip.name] = idx
-                        meta = write_evidence_clip(
-                            clip_data=clip_data,
-                            session_dir=session_dir,
-                            index=idx,
-                        )
-                        if meta is not None:
-                            evidence_clips.append(meta)
-                    write_evidence_manifest(session_dir=session_dir, clips=evidence_clips)
+                        if evidence_writer is None:
+                            raise RuntimeError("Evidence writer missing for active session")
+                        evidence_encoder.append(evidence_writer, clip_data)
+                    if evidence_writer is not None:
+                        pending_writer = evidence_writer
+                        evidence_writer = None
                     evidence_clipper.reset()
                     evidence_session_id = None
-                    evidence_clip_counts = {}
-                    evidence_clips = []
+
+                config_snapshot = copy.deepcopy(run_config)
+                config_snapshot["loop_count"] = int(loop_count)
+                config_snapshot["reconnect_events"] = int(reconnect_events)
+
+                def publish_session(
+                    directory=session_dir, date_value=session_date, value=tail,
+                    config=config_snapshot,
+                ) -> None:
+                    write_session_run_config(session_dir=directory, run_config=config)
+                    write_session_artifacts(out_dir=out_dir, date=date_value, session=value, session_dir=directory)
+
+                if evidence_enabled and evidence_encoder is not None:
+                    evidence_encoder.finish(pending_writer, publish_session)
+                else:
+                    publish_session()
                 session_dirs.append(session_dir)
                 write_daily_report(
                     out_dir=out_dir,
@@ -1366,6 +1368,8 @@ def run_mvp(
             if diagnostic_capture is not None:
                 diagnostic_capture.close(frame_idx=int(processed), time_s=float(end_time_s))
         cap.release()
+        if evidence_writer is not None and evidence_encoder is not None:
+            evidence_encoder.abort(evidence_writer)
         if writer is not None:
             writer.release()
             if bool(args.compress_out) and active_video_path is not None:
@@ -1393,6 +1397,8 @@ def run_mvp(
             sys.stdout.flush()
         if pbar is not None:
             pbar.close()
+        if evidence_encoder is not None:
+            evidence_encoder.close()
 
     # Write final daily reports and the complete run configuration.
     if report_dates:

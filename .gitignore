@@ -13,6 +13,9 @@ Media/
 datasets/
 docs/*
 !docs/sop_status_decisions.md
+!docs/session_evidence_benchmark.md
+!docs/session_evidence_benchmark.json
+!docs/session_video_deployment.md
 data/
 configs/*
 !configs/retention.yaml

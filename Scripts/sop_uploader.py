@@ -287,7 +287,7 @@ def _artifact_paths(session_dir: Path) -> Iterable[Path]:
     evidence_dir = session_dir / "evidence"
     if evidence_dir.exists() and evidence_dir.is_dir():
         for p in sorted(evidence_dir.glob("*")):
-            if p.is_file():
+            if p.is_file() and not p.name.startswith(".") and p.suffix != ".tmp":
                 yield p
 
 

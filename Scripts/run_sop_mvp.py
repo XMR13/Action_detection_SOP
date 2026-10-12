@@ -344,7 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-crf", type=int, default=30, help="ffmpeg CRF for --compress-out (higher = smaller/lower quality).")
     parser.add_argument("--out-preset", default="veryfast", help="ffmpeg x264 preset for --compress-out.")
     parser.add_argument("--no-thumb", action="store_true", help="Disable per-session thumbnail image.")
-    parser.add_argument("--no-evidence", action="store_true", help="Disable evidence clips around DONE events.")
+    parser.add_argument("--no-evidence", action="store_true", help="Disable the combined session evidence video around SOP events.")
     parser.add_argument("--evidence-pre-s", type=float, default=2.0, help="Seconds of evidence before DONE events.")
     parser.add_argument("--evidence-post-s", type=float, default=2.0, help="Seconds of evidence after DONE events.")
     parser.add_argument("--evidence-max-s", type=float, default=6.0, help="Max total length for each evidence clip.")

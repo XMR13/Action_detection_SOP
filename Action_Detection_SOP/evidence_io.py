@@ -43,6 +43,7 @@ def write_evidence_clip(
         "actual_end_time_s": float(clip_data.clip.actual_end_time_s),
         "frame_count": int(clip_data.clip.frame_count),
         "fps": float(clip_data.clip.fps),
+        "frame_times_s": list(clip_data.frame_times_s),
     }
 
 

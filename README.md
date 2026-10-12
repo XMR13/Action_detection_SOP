@@ -184,10 +184,52 @@ configs/metadata_roll_sop_v1.yaml
 - Session artifacts: `data/sessions/YYYY-MM-DD/session_<id>/`
 - Daily reports: `data/reports/YYYY-MM-DD/`
 - Evidence clips: `data/sessions/YYYY-MM-DD/session_<id>/evidence/*.mp4`
+- Final session evidence video: `data/sessions/YYYY-MM-DD/session_<id>/evidence/session.webm`
 - Uploader spool: `data/uploader_spool/{pending,done,dead}/`
 - Helmet alerts: `data/alerts/YYYY-MM-DD/<alert_uid>/`
 - Optional helmet diagnostics: `data/diagnostics/helmet/YYYY-MM-DD/run_*.jsonl` (enable with `--helmet-alert-diagnostics`; total storage defaults to 128 MiB).
 - Summarize diagnostic runs read-only with `python -m Scripts.analyze_helmet_diagnostics data/diagnostics/helmet/` (use `--max-tracks 0` to print every aggregated track).
+
+## One video for session review
+
+AI-box installation and acceptance: [session_video_deployment.md](docs/session_video_deployment.md).
+
+New sessions save and upload **one final evidence video**,
+`evidence/session.webm`, instead of separate event clips. It contains the same
+short event windows, in chronological order, with overlapping frames included
+once. Unsaved time between events is skipped; this is not a continuous recording
+of the entire roll session. `--no-evidence` disables this video.
+
+The player shows brief Indonesian step captions: `Roll masuk`,
+`Pembersihan selesai`, `Label terpasang`, and `Roll keluar`. Event buttons seek
+inside the same video. Forced end-of-stream uses `Perekaman selesai`. Captions
+follow the existing engine findings and do not change SOP scoring or impose a
+cleaning/labeling order. Their positions are saved in `evidence.json`.
+
+A single CPU worker encodes directly from the buffered event frames using
+OpenCV VP8/WebM, avoiding a four-video decode/merge pass. The queue is bounded to
+128 pending frames; it fails explicitly if encoding cannot keep up. The video
+and manifest are verified and finalized before the session checklist is
+published for upload. Capture does not wait for encoding at each event or
+session boundary; shutdown drains the worker. Encoding still uses CPU/RAM and
+requires target performance validation. A stream-size change fits subsequent
+frames into the initial evidence canvas while preserving aspect ratio.
+
+The capture host needs OpenCV VP8/WebM encoder support. The web host serves the
+uploaded video directly: no combined-video generation or additional playback
+cache is needed. Older multi-clip sessions remain readable using their existing
+controls; no historical evidence is automatically converted or deleted. Optional
+full-session recording remains a separate explicitly enabled output.
+
+One file does not guarantee a smaller payload: codec and quality settings matter.
+The [simulated benchmark](docs/session_evidence_benchmark.md) compares previous
+MP4 output, an equal-codec four-WebM control, and the final single-WebM pipeline.
+It includes preparation, capture submission, decoding, size, and upload metrics.
+Run a bounded target pilot with `python -m Scripts.benchmark_session_evidence
+--out-dir /tmp/session-evidence-benchmark --repeats 1`, then verify a real completed
+roll and readable cloth/label detail in the deployed browser. The retention
+script recognizes the final WebM as source evidence using the existing evidence
+age; no cleanup schedule or day counts are changed.
 
 Helmet alerts keep a separate timer for each person matched by bounding-box IoU.
 The default remains 10 seconds of qualifying observations, with helmet confidence

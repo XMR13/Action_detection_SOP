@@ -145,6 +145,7 @@ def _eligible_files(*, data_dir: Path, policy: RetentionPolicy, now_ts: Optional
         ("transcoded_cache", _iter_files(data_dir / "_web_cache" / "transcoded", "*.mp4"), float(policy.transcoded_cache_days)),
         ("annotated_video", _iter_files(data_dir / "sessions", "annotated.mp4"), float(policy.annotated_video_days)),
         ("evidence_clip", _iter_files(data_dir / "sessions", "*.mp4"), float(policy.evidence_clip_days)),
+        ("evidence_clip", _iter_files(data_dir / "sessions", "*.webm"), float(policy.evidence_clip_days)),
         ("uploader_done", _iter_files(data_dir / "uploader_spool" / "done", "*.json"), float(policy.uploader_done_days)),
         ("uploader_dead", _iter_files(data_dir / "uploader_spool" / "dead", "*.json"), float(policy.uploader_dead_days)),
     ]
