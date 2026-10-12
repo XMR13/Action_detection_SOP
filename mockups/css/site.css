@@ -1,7 +1,7 @@
 @import url("./foundation.css");
 @import url("./portal-core.css");
 @import url("./portal-pages.css");
-@import url("./page-queue.css");
+@import url("./page-queue.css?v=20261012-status-colors");
 @import url("./page-detail.css?v=20260930-scope-review");
 @import url("./portal-states.css");
 

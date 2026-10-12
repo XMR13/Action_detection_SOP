@@ -6,7 +6,7 @@
     <title>Roll Wrap SOP | Review Queue Mockup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css?v=20260930-scope-review" />
+    <link rel="stylesheet" href="css/site.css?v=20261012-status-colors" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-review-queue is-hydrating">
@@ -57,7 +57,7 @@
 	            <div class="tl-item">
 	              <span class="t">Table-first triage</span>
 	              <span class="d">
-                  User bisa mereview dan memfilter sesi SOP secara sepat sebelum menganalisa detail.
+                  Pilih dan filter sesi SOP sebelum memeriksa bukti di halaman detail.
                 </span>
 	            </div>
 	            <div class="tl-item">
@@ -77,7 +77,6 @@
 	            <p>Periksa hasil akhir setiap sesi. Buka detail jika perlu melihat bukti atau memperbaiki hasil.</p>
           </div>
 	          <div class="filters">
-	            <span class="hint" id="queue-length-hint">Queue length: --</span>
 	            <div class="field">
 	              <label for="queue-date-from">Shift date from</label>
 	              <input id="queue-date-from" name="queue-date-from" type="date" />
@@ -103,30 +102,11 @@
         <section class="mode-banner queue">
           <div class="mode-copy">
 	            <span class="mode-eyebrow">MODE REVIEW </span>
-            <span class="mode-title">Page ini untuk melihat overview secara kesuluruhan, fullnya lihat di Session Details.</span>
+            <span class="mode-title">Pilih sesi yang perlu diperiksa.</span>
             <span class="mode-desc">
-              Gunakan tabel ini untuk mempriotaskan hasil review, buka panel detail untuk mengecek bukti cuplikan sebelumn menentukan keptutusan.
+              Gunakan tabel untuk memilih sesi, lalu periksa bukti di halaman detail sebelum menetapkan hasil akhir.
 	            </span>
 	          </div>
-	          <div class="mode-tags">
-	            <span class="pill" id="queue-pending-pill">perlu ditinjau --</span>
-	          </div>
-	        </section>
-
-	        <p class="caption">Ringkasan ini mengikuti rentang tanggal di atas. Filter tabel di bawah tidak mengubah angka ringkasan.</p>
-	        <section class="queue-status-grid">
-	          <article class="queue-status-card">
-            <div class="label">Perlu ditinjau</div>
-            <div class="value" id="queue-stat-pending">--</div>
-          </article>
-          <article class="queue-status-card yes">
-            <div class="label">Sesuai SOP</div>
-            <div class="value" id="queue-stat-approved">--</div>
-          </article>
-          <article class="queue-status-card no">
-            <div class="label">Tidak sesuai SOP</div>
-            <div class="value" id="queue-stat-rejected">--</div>
-          </article>
 	        </section>
 
         <section class="queue-table-stage">
@@ -137,9 +117,9 @@
 		                <p class="caption">Hasil akhir menggabungkan pemeriksaan SOP dan keputusan review. Ketidaksesuaian data lama perlu ditinjau.</p>
 	              </div>
 	              <div class="queue-table-actions">
-                  <span class="pill" id="queue-out-of-scope">Di luar cakupan: --</span>
+                  <span class="pill ink" id="queue-length-hint" aria-live="polite">Memuat sesi…</span>
 	                <a class="pill" id="queue-export-csv" href="/api/sessions/export.csv" download>Download CSV</a>
-	                <a class="pill" id="queue-open-selected" href="session-detail.html">Open Selected Detail</a>
+	                <a class="pill" id="queue-open-selected" href="session-detail.html">Buka sesi terpilih</a>
 	              </div>
 	            </div>
 
@@ -188,6 +168,10 @@
 	              </div>
 	            </form>
 
+            <div class="queue-load-status">
+              <p class="caption" id="queue-load-feedback" aria-live="polite" role="status"></p>
+              <button class="btn btn-compact" id="queue-load-retry" type="button" hidden>Coba lagi</button>
+            </div>
             <div class="table-scroll">
 	              <table class="table queue-table" aria-label="Review queue sessions">
                 <colgroup>
@@ -245,7 +229,7 @@
             <div class="queue-review-context">
               <div class="queue-next-strip">
 	                <div class="queue-next-copy">
-	                  <span class="head">Seleksi sekarnag</span>
+	                  <span class="head">Sesi yang dipilih</span>
 	                  <span class="body" id="selected-session-label">Loading selection…</span>
 	                </div>
               </div>
@@ -290,6 +274,6 @@
         </section>
       </main>
     </div>
-    <script type="module" src="js/site.js?v=20261009-review-navigation"></script>
+    <script type="module" src="js/site.js?v=20261012-session-summary"></script>
   </body>
 </html>

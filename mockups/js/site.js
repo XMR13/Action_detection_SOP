@@ -54,6 +54,52 @@ import {
 } from "./shared/status.js";
 
 (function () {
+  const countFormat = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+  const percentFormat = new Intl.NumberFormat("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const renderDashboardSummary = (stats, state = "ready") => {
+    const ready = state === "ready" && stats != null;
+    const count = (key) => {
+      const value = ready ? stats[key] : null;
+      return value != null && Number.isFinite(Number(value)) ? countFormat.format(Number(value)) : "—";
+    };
+    const text = (id, value) => {
+      const node = document.getElementById(id);
+      if (node) node.textContent = value;
+    };
+    document.querySelectorAll("[data-session-stat]").forEach((node) => {
+      node.textContent = count(node.dataset.sessionStat);
+    });
+    document.querySelectorAll("[data-session-summary]").forEach((node) => {
+      node.setAttribute("aria-busy", state === "loading" ? "true" : "false");
+      node.dataset.state = state;
+    });
+    document.querySelectorAll(".session-summary-feedback").forEach((node) => {
+      node.textContent = state === "error" ? "Ringkasan gagal dimuat. Pilih Coba lagi untuk memuat ulang." :
+        state === "loading" ? "Memuat ringkasan…" : "";
+    });
+    const retry = document.getElementById("dashboard-summary-retry");
+    if (retry) retry.hidden = state !== "error";
+    const slice = readDateSliceFromUrl();
+    document.querySelectorAll("a[data-summary-verdict]").forEach((node) => {
+      // These totals cover every shift/evidence type in the selected date range.
+      // Do not carry narrower table filters or its page into summary links.
+      const params = new URLSearchParams();
+      if (slice.from) params.set("date_from", slice.from);
+      if (slice.to) params.set("date_to", slice.to);
+      params.set("verdict", node.dataset.summaryVerdict);
+      node.href = `review-queue.html?${params}`;
+    });
+    const pending = count("verdict_needs_review");
+    text("banner-pending-pill", `perlu ditinjau ${pending}`);
+    const equation = ready ?
+      `${pending} perlu ditinjau + ${count("verdict_done")} sesuai + ${count("verdict_not_done")} tidak sesuai + ${count("out_of_scope")} di luar cakupan = ${count("total_sessions")} sesi` :
+      state === "loading" ? "Memuat ringkasan…" : "Ringkasan belum tersedia";
+    text("kpi-total-hint", equation);
+    text("kpi-pending-hint", ready && stats.total_sessions === 0 ? "Belum ada sesi" : "Menunggu hasil akhir");
+    const compliance = ready ? stats.compliance_pct : null;
+    text("kpi-compliance", `Kepatuhan: ${compliance != null && Number.isFinite(Number(compliance)) ? percentFormat.format(Number(compliance)) + "% dari sesi yang dinilai" : "—"}`);
+  };
+
   const dashboardSopPills = (session) => {
     const verdict = operatorVerdict(session);
     return `<span class="pill ${verdictClass(verdict)}">${verdictLabel(verdict)}</span>`;
@@ -171,23 +217,31 @@ import {
     return `${hh}:${mm}`;
   };
 
-  const buildSmoothPath = (points) => {
-    if (!Array.isArray(points) || points.length < 2) return "";
-    const p = points.map((pt) => ({ x: Number(pt.x), y: Number(pt.y) }));
-    if (p.some((pt) => Number.isNaN(pt.x) || Number.isNaN(pt.y))) return "";
-    let d = `M${p[0].x.toFixed(1)} ${p[0].y.toFixed(1)}`;
-    for (let i = 0; i < p.length - 1; i++) {
-      const p0 = i > 0 ? p[i - 1] : p[i];
-      const p1 = p[i];
-      const p2 = p[i + 1];
-      const p3 = i + 2 < p.length ? p[i + 2] : p2;
-      const c1x = p1.x + (p2.x - p0.x) / 6;
-      const c1y = p1.y + (p2.y - p0.y) / 6;
-      const c2x = p2.x - (p3.x - p1.x) / 6;
-      const c2y = p2.y - (p3.y - p1.y) / 6;
-      d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)},${c2x.toFixed(1)} ${c2y.toFixed(1)},${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  const buildCountPath = (points) => points.map((point, index) =>
+    `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`
+  ).join(" ");
+
+  const shiftDateFormat = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const shortShiftDateFormat = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", timeZone: "UTC" });
+  const displayShiftDate = (raw, short = false) => {
+    const date = new Date(`${raw}T00:00:00Z`);
+    return Number.isNaN(date.getTime()) ? String(raw) : (short ? shortShiftDateFormat : shiftDateFormat).format(date);
+  };
+  const dashboardDateRange = () => {
+    const { from, to } = readDateSliceFromUrl();
+    if (from && to) return from === to ? `${displayShiftDate(from)} · WIB` : `${displayShiftDate(from)} – ${displayShiftDate(to)} · WIB`;
+    if (from) return `Mulai ${displayShiftDate(from)} · WIB`;
+    if (to) return `Sampai ${displayShiftDate(to)} · WIB`;
+    return "Semua tanggal · WIB";
+  };
+  const setDashboardChartState = (state, message) => {
+    const chart = document.querySelector(".dashboard-trend");
+    if (chart) {
+      chart.dataset.state = state;
+      chart.setAttribute("aria-busy", state === "loading" ? "true" : "false");
     }
-    return d;
+    const status = document.getElementById("trend-data-status");
+    if (status) status.textContent = message;
   };
 
   const displayAlertName = (alert) => {
@@ -458,10 +512,12 @@ import {
       selectedEvidence.textContent = resolvedEvidence;
     }
     if (selectedDetailLink instanceof HTMLAnchorElement) {
+      selectedDetailLink.hidden = false;
       const targetUid = resolvedSessionUid && resolvedSessionUid !== "-" ? resolvedSessionUid : resolvedSessionId;
       selectedDetailLink.href = buildSessionDetailHref(String(targetUid));
     }
     if (queueOpenSelected instanceof HTMLAnchorElement) {
+      queueOpenSelected.hidden = false;
       const targetUid = resolvedSessionUid && resolvedSessionUid !== "-" ? resolvedSessionUid : resolvedSessionId;
       queueOpenSelected.href = buildSessionDetailHref(String(targetUid));
     }
@@ -637,7 +693,31 @@ import {
 
   });
 
+  let queueLoadVersion = 0;
+  const clearQueueSelection = () => {
+    queueLinks = [];
+    for (const node of [selectedSessionUid, selectedSessionDate, selectedSessionShift,
+      selectedMachineStatus, selectedHumanStatus, selectedFinalStatus, selectedEvidence]) {
+      if (node) node.textContent = "—";
+    }
+    if (selectedSessionLabel) selectedSessionLabel.textContent = "Pilih sesi dari tabel untuk melihat konteksnya.";
+    for (const link of [selectedDetailLink, queueOpenSelected]) {
+      if (link) link.hidden = true;
+    }
+  };
+  const setQueueLoadState = (state, total = null) => {
+    const count = document.getElementById("queue-length-hint");
+    if (count) count.textContent = state === "ready" ? `Hasil filter: ${countFormat.format(total)} sesi` :
+      state === "loading" ? "Memuat sesi…" : "Data belum tersedia";
+    const feedback = document.getElementById("queue-load-feedback");
+    if (feedback) feedback.textContent = state === "error" ? "Sesi gagal dimuat. Pilih Coba lagi untuk memuat ulang." : "";
+    const retry = document.getElementById("queue-load-retry");
+    if (retry) retry.hidden = state !== "error";
+    const panel = document.querySelector(".queue-table-panel");
+    if (panel) panel.setAttribute("aria-busy", state === "loading" ? "true" : "false");
+  };
   const populateQueue = async () => {
+    const loadVersion = ++queueLoadVersion;
     const tbody = document.querySelector(".queue-table tbody");
     const queueBody = document.body;
     if (!(tbody instanceof HTMLTableSectionElement)) {
@@ -648,39 +728,9 @@ import {
     }
     const queueDateLabel = document.getElementById("queue-active-date-slice");
     if (queueDateLabel) queueDateLabel.textContent = dateSliceLabel();
-
-    // Sync summary counters on the queue page (topbar + cards).
-    try {
-      const stats = await apiFetchJson(withDateApiQuery("/api/stats"));
-      const pending = stats && stats.verdict_needs_review != null ? Number(stats.verdict_needs_review) : null;
-      const approved = stats && stats.verdict_done != null ? Number(stats.verdict_done) : null;
-      const rejected = stats && stats.verdict_not_done != null ? Number(stats.verdict_not_done) : null;
-
-      const excludedNode = document.getElementById("queue-out-of-scope");
-      if (excludedNode) excludedNode.textContent = `Di luar cakupan: ${Number(stats.out_of_scope || 0)}`;
-      const queueLengthHint = document.getElementById("queue-length-hint");
-      if (queueLengthHint && pending != null && !Number.isNaN(pending)) {
-        queueLengthHint.textContent = `Perlu ditinjau: ${pending}`;
-      }
-      const pendingPill = document.getElementById("queue-pending-pill");
-      if (pendingPill && pending != null && !Number.isNaN(pending)) {
-        pendingPill.textContent = `perlu ditinjau ${pending}`;
-      }
-      const pendingNode = document.getElementById("queue-stat-pending");
-      if (pendingNode && pending != null && !Number.isNaN(pending)) {
-        pendingNode.textContent = String(pending);
-      }
-      const approvedNode = document.getElementById("queue-stat-approved");
-      if (approvedNode && approved != null && !Number.isNaN(approved)) {
-        approvedNode.textContent = String(approved);
-      }
-      const rejectedNode = document.getElementById("queue-stat-rejected");
-      if (rejectedNode && rejected != null && !Number.isNaN(rejected)) {
-        rejectedNode.textContent = String(rejected);
-      }
-    } catch (err) {
-      // ignore stats failures; queue list still loads
-    }
+    setQueueLoadState("loading");
+    clearQueueSelection();
+    tbody.innerHTML = `<tr><td colspan="9"><span class="pill pending">Memuat sesi…</span></td></tr>`;
 
     syncQueueExportHref();
     const url = buildQueueDataUrl("/api/sessions", { includePagination: true });
@@ -688,9 +738,12 @@ import {
     let payload;
     try {
       payload = await apiFetchJson(url);
+      if (loadVersion !== queueLoadVersion) return;
     } catch (err) {
+      if (loadVersion !== queueLoadVersion) return;
+      setQueueLoadState("error");
       syncQueuePaginationUi({ total: 0, page: 1, pageSize: queuePageSize, totalPages: 0, hasPrev: false, hasNext: false });
-      tbody.innerHTML = `<tr><td colspan="9"><span class="pill no">Failed to load sessions</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill no">Sesi gagal dimuat</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -704,6 +757,7 @@ import {
       await populateQueue();
       return;
     }
+    setQueueLoadState("ready", Number(payload.total ?? sessions.length));
     syncQueuePaginationUi({
       total: Number(payload.total || sessions.length),
       page: Number(payload.page || queuePage),
@@ -714,7 +768,7 @@ import {
     });
 
     if (sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9"><span class="pill">No sessions found</span></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><span class="pill">Tidak ada sesi yang cocok dengan filter</span></td></tr>`;
       if (queueBody && queueBody.classList.contains("page-review-queue")) {
         queueBody.classList.remove("is-hydrating");
       }
@@ -1553,7 +1607,9 @@ import {
     })();
   };
 
+  let dashboardLoadVersion = 0;
   const populateDashboard = async () => {
+    const loadVersion = ++dashboardLoadVersion;
     const totalNode = document.getElementById("kpi-total-sessions");
     const pendingNode = document.getElementById("kpi-pending");
     const dashboardBody = document.body;
@@ -1564,58 +1620,19 @@ import {
       dashboardBody.classList.add("is-hydrating");
     }
     const dashboardDateLabel = document.getElementById("dashboard-active-date-slice");
-    if (dashboardDateLabel) dashboardDateLabel.textContent = dateSliceLabel();
+    if (dashboardDateLabel) dashboardDateLabel.textContent = dashboardDateRange();
+    renderDashboardSummary(null, "loading");
+    setDashboardChartState("loading", "Memuat grafik…");
+    const chartTable = document.getElementById("trend-data-body");
+    if (chartTable) chartTable.innerHTML = "";
+    const latestTable = document.getElementById("dashboard-latest-sessions-body");
+    if (latestTable) latestTable.innerHTML = '<tr><td colspan="6">Memuat sesi…</td></tr>';
+    let statsLoaded = false;
     try {
       const s = await apiFetchJson(withDateApiQuery("/api/stats"));
-      if (totalNode) totalNode.textContent = String(s.total_sessions ?? "-");
-      if (pendingNode) pendingNode.textContent = String(s.verdict_needs_review ?? "-");
-
-      const totalHint = document.getElementById("kpi-total-hint");
-      if (totalHint) {
-        totalHint.textContent = `${String(s.verdict_done ?? 0)} sesuai | ${String(s.verdict_not_done ?? 0)} tidak sesuai`;
-      }
-
-      const excluded = document.getElementById("kpi-out-of-scope");
-      if (excluded instanceof HTMLAnchorElement) {
-        excluded.textContent = `Di luar cakupan: ${Number(s.out_of_scope || 0)}`;
-        excluded.href = `${buildUiHrefWithDate("review-queue.html")}${buildUiHrefWithDate("review-queue.html").includes("?") ? "&" : "?"}verdict=OUT_OF_SCOPE`;
-      }
-      const compliance = document.getElementById("kpi-compliance");
-      if (compliance) compliance.textContent = `Kepatuhan: ${s.compliance_pct == null ? "—" : Number(s.compliance_pct).toFixed(1) + "%"}`;
-      const pendingHint = document.getElementById("kpi-pending-hint");
-      if (pendingHint) {
-        const reviewed = Number(s.verdict_done ?? 0) + Number(s.verdict_not_done ?? 0) + Number(s.out_of_scope ?? 0);
-        const total = Number(s.total_sessions ?? 0);
-        const completionPct = total > 0 ? (100 * reviewed) / total : 0;
-        pendingHint.textContent =
-          total > 0
-            ? `${reviewed}/${total} sudah memiliki hasil akhir (${completionPct.toFixed(1)}%)`
-            : "Belum ada sesi";
-      }
-
-      const bannerPending = document.getElementById("banner-pending-pill");
-      if (bannerPending) bannerPending.textContent = `perlu ditinjau ${String(s.verdict_needs_review ?? "-")}`;
-
-      const helmetCheckedNode = document.getElementById("kpi-helmet-checked");
-      if (helmetCheckedNode) helmetCheckedNode.textContent = String(s.verdict_done ?? "-");
-      const helmetCheckedHint = document.getElementById("kpi-helmet-checked-hint");
-      if (helmetCheckedHint) {
-        helmetCheckedHint.textContent = "Hasil akhir sesuai SOP";
-      }
-
-      const manualReviewNode = document.getElementById("kpi-manual-review");
-      if (manualReviewNode) manualReviewNode.textContent = String(s.verdict_not_done ?? "-");
-      const manualReviewHint = document.getElementById("kpi-manual-review-hint");
-      if (manualReviewHint) {
-        manualReviewHint.textContent = "Hasil akhir tidak sesuai SOP";
-      }
-
-      const compactApproved = document.getElementById("dashboard-compact-approved");
-      if (compactApproved) compactApproved.textContent = String(s.verdict_done ?? "-");
-      const compactRejected = document.getElementById("dashboard-compact-rejected");
-      if (compactRejected) compactRejected.textContent = String(s.verdict_not_done ?? "-");
-      const compactPending = document.getElementById("dashboard-compact-pending");
-      if (compactPending) compactPending.textContent = String(s.verdict_needs_review ?? "-");
+      if (loadVersion !== dashboardLoadVersion) return;
+      renderDashboardSummary(s);
+      statsLoaded = true;
 
       const renderDashboardTrend = async () => {
         const svg = document.querySelector(".trend-svg");
@@ -1624,19 +1641,23 @@ import {
         const trendSlice = document.getElementById("trend-active-slice");
         const trendXTitle = document.getElementById("trend-x-title");
 
-        const donePath = svg.querySelector("path.trend-line.dir-a");
-        const unknownPath = svg.querySelector("path.trend-line.dir-b");
+        const donePath = svg.querySelector("path.trend-line.yes");
+        const unknownPath = svg.querySelector("path.trend-line.pending");
         const notDonePath = svg.querySelector("path.trend-line.no");
-        const doneDot = svg.querySelector("circle.trend-focus-dot.dir-a");
-        const unknownDot = svg.querySelector("circle.trend-focus-dot.dir-b");
+        const excludedPath = svg.querySelector("path.trend-line.excluded");
+        const doneDot = svg.querySelector("circle.trend-focus-dot.yes");
+        const unknownDot = svg.querySelector("circle.trend-focus-dot.pending");
         const notDoneDot = svg.querySelector("circle.trend-focus-dot.no");
+        const excludedDot = svg.querySelector("circle.trend-focus-dot.excluded");
         const gridValues = Array.from(svg.querySelectorAll("text.trend-grid-value"));
+        const gridLines = Array.from(svg.querySelectorAll("line.trend-grid-line"));
         const axisLabels = Array.from(svg.querySelectorAll("text.trend-axis-label"));
 
         if (
           !(donePath instanceof SVGPathElement) ||
           !(unknownPath instanceof SVGPathElement) ||
-          !(notDonePath instanceof SVGPathElement)
+          !(notDonePath instanceof SVGPathElement) ||
+          !(excludedPath instanceof SVGPathElement)
         ) {
           return;
         }
@@ -1665,8 +1686,10 @@ import {
           }
           listPayload = await apiFetchJson(listUrl);
         } catch (err) {
+          if (loadVersion === dashboardLoadVersion) setDashboardChartState("error", "Grafik gagal dimuat. Terapkan kembali tanggal untuk mencoba lagi.");
           return;
         }
+        if (loadVersion !== dashboardLoadVersion) return;
 
         const sessions = Array.isArray(listPayload.sessions) ? listPayload.sessions : [];
 
@@ -1675,7 +1698,7 @@ import {
           (!slice.from && !slice.to && typeof listUrl === "string" && listUrl.includes("date="));
 
         if (trendXTitle instanceof HTMLElement) {
-          trendXTitle.textContent = useHourly ? "Time (WIB, 07:30–07:30)" : "Shift date";
+          trendXTitle.textContent = useHourly ? "Jam (WIB), mulai 07:30" : "Tanggal shift (WIB)";
         }
 
         if (trendSlice instanceof HTMLElement) {
@@ -1694,10 +1717,10 @@ import {
             if (!activeDate && sessions.length > 0 && sessions[0] && sessions[0].date) {
               activeDate = String(sessions[0].date || "");
             }
-            trendSlice.textContent = activeDate ? `Shift date: ${activeDate}` : "Shift date: (auto)";
+            trendSlice.textContent = activeDate ? `${slice.from && slice.to ? "Jumlah sesi per jam" : "Hari terbaru, per jam"} · ${displayShiftDate(activeDate)}` : "Jumlah sesi per jam · tanggal terbaru";
           } else {
             // Keep this aligned with the rest of the dashboard date filter.
-            trendSlice.textContent = dateSliceLabel();
+            trendSlice.textContent = `Jumlah sesi per hari · ${dashboardDateRange()}`;
           }
         }
 
@@ -1705,6 +1728,7 @@ import {
         let done = [];
         let unknown = [];
         let notDone = [];
+        let excluded = [];
 
         if (useHourly) {
           // Hourly windows run from 07:30 today through 07:30 the next day.
@@ -1712,6 +1736,7 @@ import {
           done = Array(24).fill(0);
           unknown = Array(24).fill(0);
           notDone = Array(24).fill(0);
+          excluded = Array(24).fill(0);
           sessions.forEach((row) => {
             const iso =
               row && row.start_time_iso ? String(row.start_time_iso) : row && row.end_time_iso ? String(row.end_time_iso) : "";
@@ -1722,6 +1747,7 @@ import {
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else if (status === "NEEDS_REVIEW") unknown[idx] += 1;
+            else if (status === "OUT_OF_SCOPE") excluded[idx] += 1;
           });
         } else {
           // Daily buckets across the filtered sessions window.
@@ -1753,6 +1779,7 @@ import {
           done = Array(labels.length).fill(0);
           unknown = Array(labels.length).fill(0);
           notDone = Array(labels.length).fill(0);
+          excluded = Array(labels.length).fill(0);
           const idxByDate = new Map(labels.map((d, i) => [d, i]));
 
           sessions.forEach((row) => {
@@ -1763,106 +1790,73 @@ import {
             if (status === "DONE") done[idx] += 1;
             else if (status === "NOT_DONE") notDone[idx] += 1;
             else if (status === "NEEDS_REVIEW") unknown[idx] += 1;
+            else if (status === "OUT_OF_SCOPE") excluded[idx] += 1;
           });
         }
 
-        const maxVal = Math.max(1, ...done, ...unknown, ...notDone);
-        const view = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : { x: 0, y: 0, width: 760, height: 190 };
-        const xMin = 60;
-        const xMax = 720;
-        const yTop = 26;
-        const yBottom = 152;
+        // Integer ticks and their grid lines use the same scale as the data.
+        const maxVal = Math.max(3, Math.ceil(Math.max(0, ...done, ...unknown, ...notDone, ...excluded) / 3) * 3);
+        const xMin = 64;
+        const xMax = 888;
+        const yTop = 32;
+        const yBottom = 232;
         const binCount = labels.length;
         const xStep = binCount > 1 ? (xMax - xMin) / (binCount - 1) : 0;
-        const yScale = (v) => yBottom - (Math.max(0, Number(v || 0)) / maxVal) * (yBottom - yTop);
-
-        const ptsDone = done.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
-        const ptsUnknown = unknown.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
-        const ptsNotDone = notDone.map((v, i) => ({ x: xMin + i * xStep, y: yScale(v) }));
-
-        const doneD = buildSmoothPath(ptsDone);
-        const unknownD = buildSmoothPath(ptsUnknown);
-        const notDoneD = buildSmoothPath(ptsNotDone);
-        donePath.setAttribute("d", doneD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
-        unknownPath.setAttribute("d", unknownD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
-        notDonePath.setAttribute("d", notDoneD || `M${xMin} ${yBottom} L${xMax} ${yBottom}`);
-
-        const lastDone = ptsDone[ptsDone.length - 1];
-        const lastUnknown = ptsUnknown[ptsUnknown.length - 1];
-        const lastNotDone = ptsNotDone[ptsNotDone.length - 1];
-        if (doneDot instanceof SVGCircleElement) {
-          doneDot.setAttribute("cx", String(lastDone.x.toFixed(1)));
-          doneDot.setAttribute("cy", String(lastDone.y.toFixed(1)));
-        }
-        if (unknownDot instanceof SVGCircleElement) {
-          unknownDot.setAttribute("cx", String(lastUnknown.x.toFixed(1)));
-          unknownDot.setAttribute("cy", String(lastUnknown.y.toFixed(1)));
-        }
-        if (notDoneDot instanceof SVGCircleElement) {
-          notDoneDot.setAttribute("cx", String(lastNotDone.x.toFixed(1)));
-          notDoneDot.setAttribute("cy", String(lastNotDone.y.toFixed(1)));
-        }
-
-        // Update y-axis grid labels to match current scale.
-        if (gridValues.length >= 3) {
-          const top = maxVal;
-          const mid = Math.max(1, Math.round((maxVal * 2) / 3));
-          const low = Math.max(1, Math.round(maxVal / 3));
-          gridValues[0].textContent = String(top);
-          gridValues[1].textContent = String(mid);
-          gridValues[2].textContent = String(low);
-        }
-
-        const peak = (arr) => {
-          let bestVal = -1;
-          let bestIdx = 0;
-          arr.forEach((v, i) => {
-            if (v > bestVal) {
-              bestVal = v;
-              bestIdx = i;
-            }
-          });
-          return { val: bestVal, idx: bestIdx };
-        };
-
-        const donePeak = peak(done);
-        const unknownPeak = peak(unknown);
-        const notDonePeak = peak(notDone);
-
-        const trendDone = document.getElementById("trend-strip-done");
-        if (trendDone) trendDone.textContent = `puncak sesuai ${Math.max(0, donePeak.val)} @ ${labels[donePeak.idx] || "-"}`;
-        const trendUnknown = document.getElementById("trend-strip-unknown");
-        if (trendUnknown) trendUnknown.textContent = `puncak perlu ditinjau ${Math.max(0, unknownPeak.val)} @ ${labels[unknownPeak.idx] || "-"}`;
-        const trendNotDone = document.getElementById("trend-strip-not-done");
-        if (trendNotDone) trendNotDone.textContent = `puncak tidak sesuai ${Math.max(0, notDonePeak.val)} @ ${labels[notDonePeak.idx] || "-"}`;
-
-        if (axisLabels.length >= 5 && labels.length >= 2) {
-          if (useHourly) {
-            const idxs = [0, 6, 12, 18, 23];
-            idxs.forEach((idx, i) => {
-              const node = axisLabels[i];
-              if (node) node.textContent = labels[Math.min(labels.length - 1, Math.max(0, idx))] || "";
-            });
-          } else {
-            const n = labels.length;
-            const idxs = [0, Math.floor((n - 1) * 0.25), Math.floor((n - 1) * 0.5), Math.floor((n - 1) * 0.75), n - 1];
-            idxs.forEach((idx, i) => {
-              const node = axisLabels[i];
-              if (!node) return;
-              const raw = labels[idx] || "";
-              // Shorten YYYY-MM-DD to MM-DD for readability.
-              node.textContent = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(5) : raw;
-            });
+        const xAt = (index) => binCount === 1 ? (xMin + xMax) / 2 : xMin + index * xStep;
+        const yScale = (value) => yBottom - (Math.max(0, Number(value || 0)) / maxVal) * (yBottom - yTop);
+        for (const [values, line, dot] of [
+          [done, donePath, doneDot], [unknown, unknownPath, unknownDot],
+          [notDone, notDonePath, notDoneDot], [excluded, excludedPath, excludedDot],
+        ]) {
+          const points = values.map((value, index) => ({ x: xAt(index), y: yScale(value) }));
+          // Straight segments cannot invent negative counts between samples.
+          line.setAttribute("d", buildCountPath(points));
+          if (dot instanceof SVGCircleElement && points.length) {
+            const last = points[points.length - 1];
+            dot.setAttribute("cx", String(last.x.toFixed(1)));
+            dot.setAttribute("cy", String(last.y.toFixed(1)));
           }
         }
+        [maxVal, maxVal * 2 / 3, maxVal / 3, 0].forEach((value, index) => {
+          const y = yScale(value);
+          if (gridValues[index]) {
+            gridValues[index].textContent = countFormat.format(value);
+            gridValues[index].setAttribute("y", String(y + 4));
+          }
+          if (gridLines[index]) {
+            gridLines[index].setAttribute("y1", String(y));
+            gridLines[index].setAttribute("y2", String(y));
+          }
+        });
+        const tickIndices = useHourly ? [0, 6, 12, 18, 23] : [...new Set([
+          0, Math.floor((binCount - 1) * .25), Math.floor((binCount - 1) * .5),
+          Math.floor((binCount - 1) * .75), binCount - 1,
+        ])];
+        axisLabels.forEach((node, index) => {
+          const tick = tickIndices[index];
+          node.textContent = tick == null ? "" : useHourly ? labels[tick] : displayShiftDate(labels[tick], true);
+          if (tick != null) node.setAttribute("x", String(xAt(tick)));
+        });
+        if (chartTable) chartTable.innerHTML = labels.map((label, index) => `
+          <tr><th scope="row">${escapeHtml(useHourly ? label : displayShiftDate(label))}</th>
+          <td>${countFormat.format(unknown[index])}</td><td>${countFormat.format(done[index])}</td>
+          <td>${countFormat.format(notDone[index])}</td><td>${countFormat.format(excluded[index])}</td></tr>
+        `).join("");
+        const plotted = [...done, ...unknown, ...notDone, ...excluded].reduce((total, value) => total + value, 0);
+        const skipped = sessions.length - plotted;
+        setDashboardChartState(plotted ? "ready" : "empty", skipped > 0 ?
+          `${countFormat.format(skipped)} sesi tidak memiliki waktu yang dapat ditampilkan pada grafik.` :
+          plotted ? `${countFormat.format(plotted)} sesi dalam grafik` : "Tidak ada sesi pada periode grafik.");
       };
 
       await renderDashboardTrend();
+      if (loadVersion !== dashboardLoadVersion) return;
 
       const latestBody = document.getElementById("dashboard-latest-sessions-body");
       if (latestBody instanceof HTMLTableSectionElement) {
         try {
           const latestPayload = await apiFetchJson(withDateApiQuery("/api/sessions?limit=3"));
+          if (loadVersion !== dashboardLoadVersion) return;
           const latestSessions = Array.isArray(latestPayload.sessions) ? latestPayload.sessions : [];
           if (latestSessions.length === 0) {
             latestBody.innerHTML = `<tr><td colspan="6"><span class="pill">No sessions found</span></td></tr>`;
@@ -1875,31 +1869,36 @@ import {
                 const source = String(session.review_source || "PENDING");
                 const remark =
                   Number(session.clip_count || 0) > 0
-                    ? `${String(session.clip_count)} clip(s) attached`
+                    ? `${countFormat.format(Number(session.clip_count))} klip bukti`
                     : session.has_thumbnail
-                    ? "Thumbnail available"
-                    : "No evidence attached";
+                    ? "Thumbnail tersedia"
+                    : "Belum ada bukti";
                 return `
                   <tr>
-                    <td> <strong>${sid}</strong></td>
+                    <td><strong>${escapeHtml(sid)}</strong></td>
                     <td>${start}</td>
                     <td>${dashboardSopPills(session)}</td>
-                    <td>${reviewSourceLabel(source)}</td>
-                    <td>${remark}</td>
-                    <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Inspect</a></td>
+                    <td>${escapeHtml(reviewSourceLabel(source))}</td>
+                    <td>${escapeHtml(remark)}</td>
+                    <td><a class="btn btn-compact action-inspect" href="${buildSessionDetailHref(uid)}">Lihat sesi</a></td>
                   </tr>
                 `;
               })
               .join("");
           }
         } catch (err) {
+          if (loadVersion !== dashboardLoadVersion) return;
           latestBody.innerHTML = `<tr><td colspan="6"><span class="pill no">Failed to load sessions</span></td></tr>`;
         }
       }
     } catch (err) {
-      // ignore
+      if (!statsLoaded && loadVersion === dashboardLoadVersion) {
+        renderDashboardSummary(null, "error");
+        setDashboardChartState("error", "Grafik belum tersedia. Muat ringkasan kembali.");
+        if (latestTable) latestTable.innerHTML = '<tr><td colspan="6">Sesi belum tersedia</td></tr>';
+      }
     } finally {
-      if (dashboardBody && dashboardBody.classList.contains("page-dashboard")) {
+      if (loadVersion === dashboardLoadVersion && dashboardBody && dashboardBody.classList.contains("page-dashboard")) {
         dashboardBody.classList.remove("is-hydrating");
       }
     }
@@ -1920,6 +1919,7 @@ import {
   const body = document.body;
   applyDateSliceToStaticNav();
   if (body && body.classList.contains("page-review-queue")) {
+    document.getElementById("queue-load-retry")?.addEventListener("click", () => populateQueue());
     bindStaleIndicator({ pillId: "stale-pill-queue", onRefresh: () => populateQueue() });
     bindDateControls({
       fromId: "queue-date-from",
@@ -2024,6 +2024,7 @@ import {
   }
   initSetupPage();
   if (body && body.classList.contains("page-dashboard")) {
+    document.getElementById("dashboard-summary-retry")?.addEventListener("click", () => populateDashboard());
     bindStaleIndicator({ pillId: "stale-pill-dashboard", onRefresh: () => populateDashboard() });
     bindDateControls({
       fromId: "date-from",

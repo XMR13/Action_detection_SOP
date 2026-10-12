@@ -7,7 +7,7 @@
     <link rel="preload" as="image" href="assets/images.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="css/site.css?v=20260930-scope-review" />
+    <link rel="stylesheet" href="css/site.css?v=20261012-status-colors" />
     <link rel="icon" type="image/png" href="assets/images.png" />
   </head>
   <body class="page-dashboard is-hydrating">
@@ -36,7 +36,7 @@
           </a>
           <a href="helmet-alerts.html">
             <strong>Helmet Alerts</strong>
-            <span class="pill no">safety</span>
+            <span class="pill no" aria-hidden="true">safety</span>
           </a>
           <a href="session-detail.html">
             <strong>Session Detail</strong>
@@ -116,161 +116,112 @@
         </header>
         <p class="caption">Tanggal mengikuti awal shift (WIB): Shift 1 07:30–15:29, Shift 2 15:30–23:29, Shift 3 23:30–07:29 hari berikutnya. Contoh: 4 Oktober pukul 03:00 masuk Shift 3 tanggal 3 Oktober.</p>
 
-        <section class="mode-banner">
-          <div class="mode-copy">
-            <span class="mode-eyebrow">Overview</span>
-            <span class="mode-title">Roll Wrapping 3</span>
-            <span class="mode-desc">
-              status: OK
-            </span>
+        <section data-session-summary aria-label="Ringkasan sesi">
+          <div class="panel">
+            <h3>Total sesi terdeteksi: <span id="kpi-total-sessions" data-session-stat="total_sessions">—</span></h3>
+            <p class="caption" id="kpi-total-hint">Memuat ringkasan…</p>
+            <span class="pill" id="dashboard-active-date-slice">Semua tanggal · WIB</span>
+            <div class="session-summary-feedback-row">
+              <p class="session-summary-feedback" role="status" aria-live="polite">Memuat ringkasan…</p>
+              <button class="btn" id="dashboard-summary-retry" type="button" hidden>Coba lagi</button>
+            </div>
           </div>
-          <div class="mode-tags">
-            <span class="pill" id="banner-pending-pill">perlu ditinjau --</span>
-            <span class="pill" id="dashboard-active-date-slice">Shift date: all</span>
+          <div class="kpis dashboard-status-cards">
+            <a class="card session-status-card" href="review-queue.html?verdict=NEEDS_REVIEW" data-summary-verdict="NEEDS_REVIEW">
+              <div class="pad">
+                <div class="kpi-top"><span class="kpi-label">Perlu ditinjau</span><span class="pill pending" aria-hidden="true">Perlu ditinjau</span></div>
+                <div class="kpi-value" id="kpi-pending" data-session-stat="verdict_needs_review">—</div>
+                <div class="kpi-hint" id="kpi-pending-hint">Menunggu hasil akhir</div>
+              </div>
+            </a>
+            <a class="card session-status-card" href="review-queue.html?verdict=DONE" data-summary-verdict="DONE">
+              <div class="pad">
+                <div class="kpi-top"><span class="kpi-label">Sesuai SOP</span><span class="pill yes" aria-hidden="true">Sesuai SOP</span></div>
+                <div class="kpi-value" id="kpi-helmet-checked" data-session-stat="verdict_done">—</div>
+                <div class="kpi-hint" id="kpi-compliance">Kepatuhan: —</div>
+              </div>
+            </a>
+            <a class="card session-status-card" href="review-queue.html?verdict=NOT_DONE" data-summary-verdict="NOT_DONE">
+              <div class="pad">
+                <div class="kpi-top"><span class="kpi-label">Tidak sesuai SOP</span><span class="pill no">Tidak sesuai SOP</span></div>
+                <div class="kpi-value" id="kpi-manual-review" data-session-stat="verdict_not_done">—</div>
+                <div class="kpi-hint">Hasil akhir tidak sesuai</div>
+              </div>
+            </a>
+            <a class="card session-status-card" href="review-queue.html?verdict=OUT_OF_SCOPE" data-summary-verdict="OUT_OF_SCOPE">
+              <div class="pad">
+                <div class="kpi-top"><span class="kpi-label">Di luar cakupan</span><span class="pill excluded" aria-hidden="true">Di luar cakupan</span></div>
+                <div class="kpi-value" id="kpi-out-of-scope" data-session-stat="out_of_scope">—</div>
+                <div class="kpi-hint">Tidak dinilai dalam SOP</div>
+              </div>
+            </a>
           </div>
         </section>
 
-        <section class="kpis">
-          <article class="card">
-            <div class="pad">
-              <div class="kpi-top">
-                <span class="kpi-label">Sesi yang dideteksi</span>
-                <span class="kpi-accent ink">S</span>
+        <article class="dashboard-trend">
+          <div class="pad">
+            <div class="dashboard-chart-heading">
+              <div>
+                <h3>Aktivitas sesi</h3>
+                <p class="caption" id="trend-active-slice">Memuat aktivitas…</p>
               </div>
-              <div class="kpi-value" id="kpi-total-sessions">--</div>
-              <div class="kpi-hint" id="kpi-total-hint">Memuat statistik…</div>
-              <a class="kpi-hint" id="kpi-out-of-scope" href="review-queue.html?verdict=OUT_OF_SCOPE">Di luar cakupan: --</a>
+              <span class="dashboard-chart-unit">Jumlah sesi</span>
             </div>
-          </article>
-          <article class="card">
-            <div class="pad">
-              <div class="kpi-top">
-                <span class="kpi-label">Perlu ditinjau</span>
-                <span class="kpi-accent brand">Q</span>
+            <div class="trend-meta-pills" aria-label="Legenda hasil sesi">
+              <span class="trend-key"><span class="trend-key-line pending" aria-hidden="true"></span>Perlu ditinjau</span>
+              <span class="trend-key"><span class="trend-key-line yes" aria-hidden="true"></span>Sesuai SOP</span>
+              <span class="trend-key"><span class="trend-key-line no" aria-hidden="true"></span>Tidak sesuai SOP</span>
+              <span class="trend-key"><span class="trend-key-line excluded" aria-hidden="true"></span>Di luar cakupan</span>
+            </div>
+            <div class="trend-chart-wrap" tabindex="0" aria-label="Grafik aktivitas sesi; geser horizontal pada layar kecil">
+              <svg class="trend-svg" viewBox="0 0 920 280" role="img" aria-label="Jumlah sesi per interval untuk empat kategori hasil akhir">
+                <line class="trend-grid-line" x1="64" y1="32" x2="888" y2="32"></line>
+                <line class="trend-grid-line" x1="64" y1="99" x2="888" y2="99"></line>
+                <line class="trend-grid-line" x1="64" y1="165" x2="888" y2="165"></line>
+                <line class="trend-grid-line" x1="64" y1="232" x2="888" y2="232"></line>
+                <text class="trend-grid-value" x="48" y="36">—</text>
+                <text class="trend-grid-value" x="48" y="103">—</text>
+                <text class="trend-grid-value" x="48" y="169">—</text>
+                <text class="trend-grid-value" x="48" y="236">0</text>
+                <path class="trend-line yes" d=""></path>
+                <path class="trend-line pending" d=""></path>
+                <path class="trend-line no" d=""></path>
+                <path class="trend-line excluded" d=""></path>
+                <circle class="trend-focus-dot yes" cx="888" cy="232" r="4"></circle>
+                <circle class="trend-focus-dot pending" cx="888" cy="232" r="4"></circle>
+                <circle class="trend-focus-dot no" cx="888" cy="232" r="4"></circle>
+                <circle class="trend-focus-dot excluded" cx="888" cy="232" r="4"></circle>
+                <text class="trend-axis-label" x="64" y="266">—</text>
+                <text class="trend-axis-label" x="279" y="266">—</text>
+                <text class="trend-axis-label" x="494" y="266">—</text>
+                <text class="trend-axis-label" x="709" y="266">—</text>
+                <text class="trend-axis-label" x="888" y="266">—</text>
+              </svg>
+            </div>
+            <div class="dashboard-chart-footer">
+              <span class="trend-x-title" id="trend-x-title">Jam (WIB)</span>
+              <span id="trend-data-status" role="status" aria-live="polite">Memuat grafik…</span>
+            </div>
+            <details class="dashboard-chart-data">
+              <summary>Lihat data grafik</summary>
+              <div class="table-scroll">
+                <table class="table">
+                  <caption class="visually-hidden">Jumlah sesi per interval yang ditampilkan pada grafik</caption>
+                  <thead><tr><th scope="col">Interval</th><th scope="col">Perlu ditinjau</th><th scope="col">Sesuai SOP</th><th scope="col">Tidak sesuai SOP</th><th scope="col">Di luar cakupan</th></tr></thead>
+                  <tbody id="trend-data-body"></tbody>
+                </table>
               </div>
-              <div class="kpi-value" id="kpi-pending">--</div>
-              <div class="kpi-hint" id="kpi-pending-hint">Memuat statistik…</div>
-            </div>
-          </article>
-          <article class="card">
-            <div class="pad">
-              <div class="kpi-top">
-	                <span class="kpi-label">Sesuai SOP</span>
-                <span class="kpi-accent yes">Y</span>
-              </div>
-              <div class="kpi-value" id="kpi-helmet-checked">--</div>
-              <div class="kpi-hint" id="kpi-helmet-checked-hint">Memuat statistik…</div>
-              <div class="kpi-hint" id="kpi-compliance">Kepatuhan: —</div>
-            </div>
-          </article>
-          <article class="card">
-            <div class="pad">
-              <div class="kpi-top">
-                <span class="kpi-label">Tidak sesuai SOP</span>
-                <span class="kpi-accent no">M</span>
-              </div>
-              <div class="kpi-value" id="kpi-manual-review">--</div>
-              <div class="kpi-hint" id="kpi-manual-review-hint">Memuat statistik…</div>
-            </div>
-          </article>
-        </section>
+            </details>
+          </div>
+        </article>
 
-        <section class="row2">
-          <article class="dashboard-trend">
-            <div class="pad">
-              <div class="btn-row">
-                <span class="pill dir-a">Sesuai SOP</span>
-                <span class="pill dir-b">Perlu ditinjau</span>
-                <span class="pill no">Tidak sesuai SOP</span>
-              </div>
-              <div class="trend-context">
-                <p class="trend-meaning">
-                  <b>Hasil SOP final</b> pada rentang tanggal yang dipilih
-                </p>
-                <p class="caption" id="trend-active-slice">Shift date: all</p>
-                <div class="trend-meta-pills">
-                  <span class="trend-key"><span class="trend-key-line dir-a"></span>Sesuai SOP</span>
-                  <span class="trend-key"><span class="trend-key-line dir-b"></span>Perlu ditinjau</span>
-                  <span class="trend-key"><span class="trend-key-line no"></span>Tidak sesuai SOP</span>
-                </div>
-              </div>
-              <div class="trend-chart-wrap">
-                <svg class="trend-svg" viewBox="0 0 760 190" role="img" aria-label="Session trend">
-                  <line class="trend-grid-line" x1="52" y1="26" x2="720" y2="26"></line>
-                  <line class="trend-grid-line" x1="52" y1="84" x2="720" y2="84"></line>
-                  <line class="trend-grid-line" x1="52" y1="142" x2="720" y2="142"></line>
-                  <text class="trend-grid-value" x="42" y="29">50</text>
-                  <text class="trend-grid-value" x="42" y="87">30</text>
-                  <text class="trend-grid-value" x="42" y="145">10</text>
-                  <path class="trend-line dir-a" d="M60 138 C140 128, 180 114, 240 118 S360 102, 420 88 S560 64, 720 72"></path>
-                  <path class="trend-line dir-b" d="M60 152 C130 149, 180 142, 240 138 S360 128, 420 132 S560 121, 720 126"></path>
-                  <path class="trend-line no" d="M60 152 L720 152"></path>
-                  <circle class="trend-focus-dot dir-a" cx="720" cy="72" r="4.5"></circle>
-                  <circle class="trend-focus-dot dir-b" cx="720" cy="126" r="4.5"></circle>
-                  <circle class="trend-focus-dot no" cx="720" cy="152" r="4.5"></circle>
-                  <text class="trend-axis-label" x="100" y="176">06:00</text>
-                  <text class="trend-axis-label" x="240" y="176">09:00</text>
-                  <text class="trend-axis-label" x="380" y="176">12:00</text>
-                  <text class="trend-axis-label" x="520" y="176">15:00</text>
-                  <text class="trend-axis-label" x="660" y="176">18:00</text>
-                </svg>
-                <div class="trend-x-title" id="trend-x-title">Time (WIB, 07:30–07:30)</div>
-              </div>
-              <div class="trend-value-strip">
-                <span class="pill" id="trend-strip-done">sesuai --</span>
-                <span class="pill" id="trend-strip-unknown">perlu ditinjau --</span>
-                <span class="pill no" id="trend-strip-not-done">tidak sesuai --</span>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel">
-            <h3>Antrian review</h3>
-            <p class="caption">
-              Jumlah sesi menurut hasil akhir yang dapat ditampilkan kepada operator.
-              
-            </p>
-            <div class="queue-status-grid compact-grid">
-              <div class="queue-status-card yes">
-                <div class="label">Sesuai SOP</div>
-                <div class="value" id="dashboard-compact-approved">--</div>
-              </div>
-              <div class="queue-status-card no">
-                <div class="label">Tidak sesuai SOP</div>
-                <div class="value" id="dashboard-compact-rejected">--</div>
-              </div>
-              <div class="queue-status-card">
-                <div class="label">Perlu ditinjau</div>
-                <div class="value" id="dashboard-compact-pending">--</div>
-              </div>
-            </div>
-            <div class="queue-next-strip">
-              <div class="queue-next-copy">
-                <span class="head">Sesi selanjutnya</span>
-                <span class="body">Memuat sesi berikutnya…</span>
-              </div>
-              <a class="btn primary" href="review-queue.html">Buka Antrian</a>
-            </div>
-            <div class="timeline compact">
-              <div class="tl-item">
-                <span class="t">Path Bukti</span>
-                <span class="d">Thumbnail + clip pengecekan SOP yang berlaku.</span>
-              </div>
-              <div class="tl-item">
-                <span class="t">Workflow operator manual</span>
-                <span class="d">Mengecek, komen, ubah jika perlu, kemudian lanjut ke sesi berikutnya.</span>
-              </div>
-            </div>
-          </article>
-        </section>
-
-        <section class="panel">
+        <section class="panel dashboard-latest">
           <div class="section-head">
             <div>
               <h3>Sesi terbaru</h3>
-              <p class="caption">Hasil pengecekan terbaru berdasarkan pemrosesan di Jetson</p>
+              <p class="caption">Sesi terakhir dalam rentang tanggal yang dipilih.</p>
             </div>
-            <span class="pill">sessions.csv + checklist.json</span>
+            <a class="pill" href="review-queue.html" data-summary-verdict="ALL">Lihat semua sesi <span aria-hidden="true">→</span></a>
           </div>
           <div class="table-scroll">
             <table class="table">
@@ -278,10 +229,10 @@
                 <tr>
                   <th scope="col">Sesi</th>
                   <th scope="col">Mulai</th>
-                  <th scope="col">Pengecekan SOP</th>
-                  <th scope="col">Pemeriksaan</th>
-                  <th scope="col">Remark</th>
-                  <th scope="col">Action</th>
+                  <th scope="col">Hasil akhir</th>
+                  <th scope="col">Sumber hasil</th>
+                  <th scope="col">Bukti</th>
+                  <th scope="col"><span class="visually-hidden">Tindakan</span></th>
                 </tr>
               </thead>
               <tbody id="dashboard-latest-sessions-body">
@@ -294,6 +245,6 @@
         </section>
       </main>
     </div>
-    <script type="module" src="js/site.js?v=20260930-scope-review"></script>
+    <script type="module" src="js/site.js?v=20261012-shared-dashboard"></script>
   </body>
 </html>

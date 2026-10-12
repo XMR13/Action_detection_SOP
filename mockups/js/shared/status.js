@@ -38,7 +38,7 @@ export const verdictLabel = (verdict) => {
 };
 
 export const verdictClass = (verdict) => {
-  if (verdict === "OUT_OF_SCOPE") return "dir-b";
+  if (verdict === "OUT_OF_SCOPE") return "excluded";
   if (verdict === "DONE") return "yes";
   if (verdict === "NOT_DONE") return "no";
   return "pending";
@@ -53,7 +53,7 @@ export const reviewSourceLabel = (raw) => {
 
 export const pillClassForReviewStatus = (raw) => {
   const v = String(raw || "PENDING").toUpperCase();
-  if (v === "OUT_OF_SCOPE") return "dir-b";
+  if (v === "OUT_OF_SCOPE") return "excluded";
   if (v === "QUALIFIED") return "yes";
   if (v === "NOT_QUALIFIED") return "no";
   return "pending";

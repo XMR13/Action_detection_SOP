@@ -1,3 +1,107 @@
+:root {
+  --sop-pending: #92920d;
+  --sop-pending-bg: #fef3c7;
+  --sop-pending-border: #d7d53b;
+  --sop-done: #15803d;
+  --sop-done-bg: #dcfce7;
+  --sop-done-border: #16a34a;
+  --sop-not-done: #b91c1c;
+  --sop-not-done-bg: #fee2e2;
+  --sop-not-done-border: #dc2626;
+  --sop-excluded: #475569;
+  --sop-excluded-bg: #e2e8f0;
+  --sop-excluded-border: #64748b;
+}
+
+.pill.pending {
+  background: var(--sop-pending-bg);
+  border-color: var(--sop-pending-border);
+  color: var(--sop-pending);
+}
+
+.pill.yes {
+  background: var(--sop-done-bg);
+  border-color: var(--sop-done-border);
+  color: var(--sop-done);
+}
+
+.pill.no {
+  background: var(--sop-not-done-bg);
+  border-color: var(--sop-not-done-border);
+  color: var(--sop-not-done);
+}
+
+.pill.excluded {
+  background: var(--sop-excluded-bg);
+  border-color: var(--sop-excluded-border);
+  color: var(--sop-excluded);
+}
+
+.trend-line.yes { stroke: var(--sop-done); }
+.trend-line.pending { stroke: var(--sop-pending); stroke-dasharray: 7 4; }
+.trend-line.no { stroke: var(--sop-not-done); stroke-dasharray: 2 4; }
+.trend-line.excluded { stroke: var(--sop-excluded); stroke-dasharray: 9 3 2 3; }
+.trend-focus-dot.yes { fill: var(--sop-done); }
+.trend-focus-dot.pending { fill: var(--sop-pending); }
+.trend-focus-dot.no { fill: var(--sop-not-done); }
+.trend-focus-dot.excluded { fill: var(--sop-excluded); }
+.trend-key-line.yes { color: var(--sop-done); }
+.trend-key-line.pending { color: var(--sop-pending); border-top-style: dashed; }
+.trend-key-line.no { color: var(--sop-not-done); border-top-style: dotted; }
+.trend-key-line.excluded { color: var(--sop-excluded); border-top-style: dashed; }
+
+/* Dashboard uses the same cards, navigation, and typography as other pages. */
+.dashboard-status-cards { margin-top: 18px; }
+.session-status-card { color: var(--text); text-decoration: none; }
+.session-status-card[data-summary-verdict="NEEDS_REVIEW"] { --status-color: var(--sop-pending); }
+.session-status-card[data-summary-verdict="DONE"] { --status-color: var(--sop-done); }
+.session-status-card[data-summary-verdict="NOT_DONE"] { --status-color: var(--sop-not-done); }
+.session-status-card[data-summary-verdict="OUT_OF_SCOPE"] { --status-color: var(--sop-excluded); }
+.session-status-card { border-left: 4px solid var(--status-color); }
+.session-status-card .kpi-value { color: var(--status-color); }
+.session-status-card .kpi-top .pill { width: 10px; height: 10px; min-width: 10px; padding: 0; font-size: 0; background: var(--status-color); border-color: var(--status-color); }
+.session-summary-feedback-row { display: flex; align-items: center; gap: 12px; }
+.session-summary-feedback-row:has(.session-summary-feedback:empty):has(button[hidden]) { display: none; }
+#dashboard-summary-retry[hidden] { display: none; }
+.session-summary-feedback:empty { display: none; }
+.session-summary-feedback { color: var(--muted); }
+[data-session-summary][data-state="error"] .session-summary-feedback { color: var(--no); }
+.dashboard-chart-heading, .dashboard-chart-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.dashboard-chart-heading h3 { margin: 0; }
+.dashboard-chart-unit, .dashboard-chart-footer { color: var(--muted); font-size: 12px; }
+.page-dashboard .trend-chart-wrap { overflow-x: auto; }
+.page-dashboard .trend-svg { min-width: 640px; height: auto; aspect-ratio: 920 / 280; }
+.page-dashboard .trend-axis-label, .page-dashboard .trend-grid-value { font-size: 12px; }
+.dashboard-chart-data { margin-top: 12px; }
+.dashboard-chart-data summary { cursor: pointer; min-height: 44px; padding: 12px 0; }
+.dashboard-chart-data .table { min-width: 600px; }
+.dashboard-chart-data td, .dashboard-chart-data th:not(:first-child) { text-align: right; }
+.page-dashboard .dashboard-latest .table { min-width: 760px; }
+.page-dashboard .dashboard-latest .table th, .page-dashboard .dashboard-latest .table td { white-space: nowrap; }
+.page-dashboard .dashboard-trend, .page-dashboard .dashboard-latest { content-visibility: visible; }
+.page-dashboard .dashboard-trend:is([data-state="loading"], [data-state="error"], [data-state="empty"]) :is(.trend-line, .trend-focus-dot) { visibility: hidden; }
+
+.queue-load-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.queue-load-status:has(p:empty):has(button[hidden]) {
+  display: none;
+}
+
+#queue-load-feedback {
+  color: var(--no);
+}
+
+#queue-open-selected[hidden],
+#selected-detail-link[hidden],
+#stale-pill-queue[hidden],
+#stale-pill-dashboard[hidden] {
+  display: none;
+}
+
 .queue-table-stage {
   display: grid;
   gap: 18px;
