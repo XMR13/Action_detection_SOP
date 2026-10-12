@@ -683,7 +683,8 @@ class HelmetAlertConfig:
 
     @property
     def recovery_frames(self) -> int:
-        return max(1, int(round(self.recovery_seconds * self.analysis_fps)))
+        # Sustained recovery needs repeated hits even at low analysis cadence.
+        return max(2, int(round(self.recovery_seconds * self.analysis_fps)))
 
     @property
     def absence_frames(self) -> int:

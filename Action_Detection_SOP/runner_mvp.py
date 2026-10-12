@@ -919,6 +919,14 @@ def run_mvp(
                         frame_width=frame.shape[1],
                         frame_height=frame.shape[0],
                     )
+                    if helmet_alert_roi_for_frame.frame_size is None:
+                        # Legacy ROI points are already in stream pixels. Supply
+                        # decoded dimensions for head checks without rescaling
+                        # points or inventing a calibration size for the source.
+                        helmet_alert_roi_for_frame = RoiPolygon(
+                            points=helmet_alert_roi_for_frame.points,
+                            frame_size=stream_size,
+                        )
                     if helmet_alert_roi_base.frame_size is not None:
                         base_w, base_h = helmet_alert_roi_base.frame_size
                         if (base_w, base_h) != stream_size:

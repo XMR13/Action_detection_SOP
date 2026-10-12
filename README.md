@@ -193,7 +193,9 @@ Helmet alerts keep a separate timer for each person matched by bounding-box IoU.
 The default remains 10 seconds of qualifying observations, with helmet confidence
 thresholds of 0.15 and 0.35. Repeated helmet evidence in at least half of the
 bounded recent window, including two hits in the recovery tail, suppresses a
-pending alert; one isolated detection cannot cancel its timer. Brief person
+pending alert; one isolated detection cannot cancel its timer. Episode
+recovery requires at least two consecutive helmet observations, even when
+the configured duration rounds to one sample at low analysis FPS. Brief person
 detection gaps pause the count and expire helmet history after `max_gap_frames`;
 absence for `absence_seconds` drops the evidence track. Up to 32 cooldowns are
 retained by normalized bounding-box position for returning matched people;
@@ -211,6 +213,12 @@ head band is inside the image. This geometry guard cannot detect every occluded
 head or torso-only box away from an edge. Person detections still serve the roll
 pipeline, and existing diagnostic flags expose `head_visible` and
 `head_region_cropped` decisions for review.
+
+Legacy `--helmet-alert-roi` JSON files without calibration `frame_size` remain
+supported. Their polygon points stay in stream pixel coordinates; the worker
+attaches the current decoded image dimensions for head-visibility checks and
+refreshes them on resolution changes. These files do not auto-rescale when the
+stream changes size; re-save them with calibration dimensions to enable scaling.
 
 Each session `checklist.json` includes `session_uid`, used by the web API and uploader for idempotent sync.
 

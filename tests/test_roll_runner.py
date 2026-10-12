@@ -198,6 +198,60 @@ def test_person_without_roll_emits_independent_helmet_alert_and_no_session(
 
 
 @pytest.mark.parametrize("reconnect_after", [None, 1])
+@pytest.mark.parametrize("new_size", [(160, 160), (80, 80), (320, 320)])
+def test_legacy_helmet_roi_uses_decoded_dimensions_without_rescaling_points(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    new_size: tuple[int, int], reconnect_after: int | None,
+) -> None:
+    points = [[0, 0], [159, 0], [159, 159], [0, 159]]
+    helmet_roi = tmp_path / "helmet_legacy.json"
+    helmet_roi.write_text(json.dumps({"polygon": points}), encoding="utf-8")
+    person = Detection(
+        x1=10, y1=10, x2=min(159, new_size[0] - 5),
+        y2=min(150, new_size[1] - 5), score=0.9, class_id=0,
+    )
+    run = _run(
+        monkeypatch, tmp_path, [[]] + [[person]] * 3,
+        "--enable-helmet-alerts", "--helmet-alert-s", "2",
+        "--helmet-alert-min-person-height", "1",
+        "--helmet-alert-roi", str(helmet_roi),
+        frame_sizes=[(160, 160)] + [new_size] * 3,
+        reconnect_after=reconnect_after,
+    )
+
+    alerts = list(run.out_dir.glob("alerts/*/*/alert.json"))
+    assert len(alerts) == 1
+    assert _json(alerts[0])["trigger_frame_idx"] == 3
+    config = _json(next(run.out_dir.glob("reports/*/run_config.json")))
+    assert config["helmet_alerts"]["roi"]["frame_size"] is None
+    assert config["helmet_alerts"]["roi_resolved"] == {
+        "frame_size": list(new_size), "points": points,
+    }
+    assert _json(helmet_roi) == {"polygon": points}
+
+
+@pytest.mark.parametrize("box", [(0, 10, 100, 150), (10, 0, 100, 150)])
+def test_legacy_helmet_roi_still_rejects_cropped_heads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    box: tuple[int, int, int, int],
+) -> None:
+    helmet_roi = tmp_path / "helmet_legacy.json"
+    helmet_roi.write_text(json.dumps({
+        "polygon": [[0, 0], [159, 0], [159, 159], [0, 159]],
+    }), encoding="utf-8")
+    person = Detection(
+        x1=box[0], y1=box[1], x2=box[2], y2=box[3], score=0.9, class_id=0,
+    )
+    run = _run(
+        monkeypatch, tmp_path, [[person]] * 3,
+        "--enable-helmet-alerts", "--helmet-alert-s", "1",
+        "--helmet-alert-roi", str(helmet_roi),
+    )
+
+    assert not list(run.out_dir.glob("alerts/*/*/alert.json"))
+
+
+@pytest.mark.parametrize("reconnect_after", [None, 1])
 @pytest.mark.parametrize("stream_sizes", [
     ((160, 160), (80, 80)),
     ((160, 160), (320, 320)),

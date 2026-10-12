@@ -867,6 +867,48 @@ def test_low_analysis_cadence_is_not_a_stream_discontinuity() -> None:
     assert [alert.trigger_frame_idx for alert in alerts] == [2]
 
 
+@pytest.mark.parametrize("score, trigger_frame", [(0.2, 2), (0.9, 4)])
+def test_isolated_helmet_hits_at_low_fps_cannot_cancel_pending_evidence(
+    score: float, trigger_frame: int,
+) -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
+    alerts = []
+    for frame_idx in range(1, 13):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx * 5), frame_idx=frame_idx,
+            persons=[_person()],
+            helmets=[_helmet(score=score)] if frame_idx % 2 else [],
+            safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [trigger_frame]
+
+
+def test_one_weak_helmet_hit_at_low_fps_does_not_rearm_an_emitted_alert() -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
+    alerts = []
+    for frame_idx in range(1, 9):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx * 5), frame_idx=frame_idx,
+            persons=[_person()],
+            helmets=[_helmet(score=0.2)] if frame_idx == 3 else [],
+            safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [2]
+
+
+def test_repeated_helmet_hits_at_low_fps_allow_a_new_episode() -> None:
+    engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
+    alerts = []
+    for frame_idx in range(1, 9):
+        alerts.extend(engine.update(
+            time_s=float(frame_idx * 5), frame_idx=frame_idx,
+            persons=[_person()],
+            helmets=[_helmet(score=0.2)] if frame_idx in (3, 4) else [],
+            safety_roi=_roi(),
+        ))
+    assert [alert.trigger_frame_idx for alert in alerts] == [2, 6]
+
+
 def test_a_real_gap_at_low_analysis_fps_still_restarts_pending_evidence() -> None:
     engine = HelmetAlertEngine(HelmetAlertConfig(analysis_fps=0.2), source="camera-1")
     alerts = []
