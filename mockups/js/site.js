@@ -96,7 +96,16 @@ import {
       `${pending} perlu ditinjau + ${count("verdict_done")} sesuai + ${count("verdict_not_done")} tidak sesuai + ${count("out_of_scope")} di luar cakupan = ${count("total_sessions")} sesi` :
       state === "loading" ? "Memuat ringkasan…" : "Ringkasan belum tersedia";
     text("kpi-total-hint", equation);
-    text("kpi-pending-hint", ready && stats.total_sessions === 0 ? "Belum ada sesi" : "Menunggu hasil akhir");
+    let completionHint = state === "loading" ? "Memuat statistik…" : "Ringkasan belum tersedia";
+    if (ready) {
+      const total = Number(stats.total_sessions ?? 0);
+      const resolved = Number(stats.verdict_done ?? 0) + Number(stats.verdict_not_done ?? 0) + Number(stats.out_of_scope ?? 0);
+      const completionPct = Number(stats.review_completion_pct ?? (total > 0 ? 100 * resolved / total : 0));
+      completionHint = total > 0
+        ? `${countFormat.format(resolved)}/${countFormat.format(total)} sesi sudah memiliki hasil akhir (${percentFormat.format(completionPct)}%)`
+        : "Belum ada sesi";
+    }
+    text("kpi-pending-hint", completionHint);
     const compliance = ready ? stats.compliance_pct : null;
     text("kpi-compliance", `Kepatuhan: ${compliance != null && Number.isFinite(Number(compliance)) ? percentFormat.format(Number(compliance)) + "% dari sesi yang dinilai" : "—"}`);
   };
