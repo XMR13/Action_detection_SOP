@@ -54,6 +54,7 @@ from Action_Detection_SOP.safety_alerts import (
     write_helmet_alert_artifacts,
 )
 from Action_Detection_SOP.source_security import redact_source_credentials
+from Action_Detection_SOP.thumbnails import write_thumbnail
 from yolo_kit import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
 from yolo_kit.types import Detection
 
@@ -1139,10 +1140,7 @@ def run_mvp(
                     raise RuntimeError(f"Failed to open run video writer: {run_video_path}")
 
             if need_thumb and session_id and active_session_dir is not None:
-                thumb_path = active_session_dir / "thumbnail.jpg"
-                ok = cv2.imwrite(str(thumb_path), vis)
-                if not ok:
-                    raise RuntimeError(f"Failed to write thumbnail: {thumb_path}")
+                write_thumbnail(active_session_dir / "thumbnail.jpg", vis)
                 thumb_written.add(session_id)
 
             if evidence_enabled and evidence_clipper is not None and evidence_session_id is not None and should_process:
