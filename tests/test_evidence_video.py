@@ -172,3 +172,24 @@ def test_encoder_failure_never_publishes_session_and_cleans_partial_output(tmp_p
         encoder.close()
     assert not published
     assert not (tmp_path / 'evidence.json').exists()
+
+
+def test_session_evidence_downscales_wide_frames(tmp_path: Path) -> None:
+    writer = SessionEvidenceWriter(session_dir=tmp_path, fps=2, max_width=128)
+    clipper = EvidenceClipper(EvidenceClipConfig(pre_seconds=10, post_seconds=10, max_seconds=20, analysis_fps=2))
+    for t in (1, 1.5, 2):
+        clipper.add_frame(time_s=t, frame=np.full((360, 640, 3), 100, dtype=np.uint8))
+    clipper.trigger(name="cleaned_done", time_s=1.5, frame_idx=3)
+    writer.append(clipper.flush()[0])
+    result = writer.finalize()
+    cap = cv2.VideoCapture(str(tmp_path / result["file"]))
+    try:
+        ok, frame = cap.read()
+    finally:
+        cap.release()
+    assert ok and frame.shape[:2] == (72, 128)
+
+
+def test_session_evidence_rejects_tiny_max_width(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="max_width"):
+        SessionEvidenceWriter(session_dir=tmp_path, fps=2, max_width=10)

@@ -348,6 +348,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-pre-s", type=float, default=2.0, help="Seconds of evidence before DONE events.")
     parser.add_argument("--evidence-post-s", type=float, default=2.0, help="Seconds of evidence after DONE events.")
     parser.add_argument("--evidence-max-s", type=float, default=6.0, help="Max total length for each evidence clip.")
+    parser.add_argument(
+        "--evidence-max-width",
+        type=int,
+        default=1280,
+        help="Downscale evidence video frames wider than this (keeps aspect). 0 = source resolution.",
+    )
     _add_bool_optional_flag(
         parser,
         "--progress",

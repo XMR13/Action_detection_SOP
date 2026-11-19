@@ -114,6 +114,7 @@ def apply_run_config(
         "cleaning_max_gap",
         "labeling_max_gap",
         "out_crf",
+        "evidence_max_width",
     }
     float_keys = {
         "reconnect_wait_s",

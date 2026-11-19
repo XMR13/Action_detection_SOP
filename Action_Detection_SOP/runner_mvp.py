@@ -485,6 +485,8 @@ def run_mvp(
             raise ValueError("--evidence-post-s must be >= 0")
         if args.evidence_max_s <= 0:
             raise ValueError("--evidence-max-s must be > 0")
+        if int(getattr(args, "evidence_max_width", 0)) != 0 and int(args.evidence_max_width) < 64:
+            raise ValueError("--evidence-max-width must be 0 (source resolution) or >= 64")
     if len(str(args.out_codec)) != 4:
         raise ValueError("--out-codec must be a four-character OpenCV codec such as mp4v")
     if not (0 <= int(args.out_crf) <= 51):
@@ -557,6 +559,7 @@ def run_mvp(
 
     # Build the SOP/alert engines and run metadata.
     evidence_enabled = not bool(args.no_evidence)
+    evidence_max_width: Optional[int] = int(getattr(args, "evidence_max_width", 0)) or None
     evidence_cfg: Optional[EvidenceClipConfig] = None
     evidence_clipper: Optional[EvidenceClipper] = None
     if evidence_enabled:
@@ -1071,7 +1074,11 @@ def run_mvp(
                 if evidence_session_id is None and session_id is not None:
                     evidence_session_id = session_id
                     evidence_clipper.reset()
-                    evidence_writer = SessionEvidenceWriter(session_dir=active_session_dir, fps=float(analysis_fps))
+                    evidence_writer = SessionEvidenceWriter(
+                        session_dir=active_session_dir,
+                        fps=float(analysis_fps),
+                        max_width=evidence_max_width,
+                    )
 
             if args.save_video and session_id and active_session_dir is not None and writer is None:
                 active_video_path = active_session_dir / "annotated.mp4"

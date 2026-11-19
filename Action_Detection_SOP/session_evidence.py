@@ -28,11 +28,15 @@ EVENT_LABELS = {
 class SessionEvidenceWriter:
     """Append completed windows in source order, encoding overlapping frames once."""
 
-    def __init__(self, *, session_dir: Path, fps: float) -> None:
+    def __init__(self, *, session_dir: Path, fps: float, max_width: int | None = None) -> None:
         if not math.isfinite(fps) or not 0 < fps <= 240:
             raise ValueError("Evidence FPS must be finite and between 0 and 240")
+        if max_width is not None and max_width < 64:
+            raise ValueError("Evidence max_width must be >= 64 (or None for source resolution)")
         self.session_dir = session_dir
         self.fps = float(fps)
+        # Frames wider than this are downscaled (aspect kept) before VP8 encoding.
+        self.max_width = max_width
         self._temporary = session_dir / f".evidence-{uuid.uuid4().hex}.webm"
         self._writer: Any = None
         self._size: tuple[int, int] | None = None
@@ -69,7 +73,10 @@ class SessionEvidenceWriter:
                 raise ValueError("Evidence frame dimensions must be between 1 and 4096")
             if self._writer is None:
                 self.session_dir.mkdir(parents=True, exist_ok=True)
-                self._size = ((w + 1) // 2 * 2, (h + 1) // 2 * 2)
+                out_w, out_h = w, h
+                if self.max_width is not None and w > self.max_width:
+                    out_w, out_h = self.max_width, max(1, round(h * self.max_width / w))
+                self._size = ((out_w + 1) // 2 * 2, (out_h + 1) // 2 * 2)
                 self._writer = cv2.VideoWriter(str(self._temporary), cv2.VideoWriter_fourcc(*"VP80"),
                                                self.fps, self._size)
                 if not self._writer.isOpened():

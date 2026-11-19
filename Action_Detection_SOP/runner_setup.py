@@ -121,6 +121,7 @@ def build_run_config_payload(payload: RunConfigPayloadInput) -> Dict[str, object
         "pre_seconds": float(args.evidence_pre_s),
         "post_seconds": float(args.evidence_post_s),
         "max_seconds": float(args.evidence_max_s),
+        "max_width": int(getattr(args, "evidence_max_width", 0)) or None,
         "analysis_fps": float(payload.analysis_fps),
         "events": ["roll_entered", "cleaned_done", "labeled_done", "roll_left"],
     }
