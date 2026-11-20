@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -49,14 +50,28 @@ def _preserve_metadata(path: Path, st: os.stat_result) -> None:
 
 
 def shrink_thumbnails(
-    *, sessions_dir: Path, spec: ThumbnailSpec, dry_run: bool, min_size_bytes: int = 150_000
+    *,
+    sessions_dir: Path,
+    spec: ThumbnailSpec,
+    dry_run: bool,
+    min_size_bytes: int = 150_000,
+    progress_every: int = 0,
 ) -> ShrinkSummary:
     if not sessions_dir.is_dir():
         raise FileNotFoundError(f"sessions directory not found: {sessions_dir}")
     scanned = shrunk = skipped = failed = 0
     before = after = 0
-    for path in sorted(sessions_dir.glob("*/*/thumbnail.jpg")):
+    paths = sorted(sessions_dir.glob("*/*/thumbnail.jpg"))
+    total = len(paths)
+    for path in paths:
         scanned += 1
+        if progress_every > 0 and scanned % progress_every == 0:
+            print(
+                f"[shrink_thumbnails] {scanned}/{total} scanned, {shrunk} to shrink, "
+                f"{(before - after) / 1e9:.2f} GB saved so far",
+                file=sys.stderr,
+                flush=True,
+            )
         try:
             st = path.stat()
             before += st.st_size
@@ -106,6 +121,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--min-size-kb", type=int, default=150, help="Skip thumbnails already smaller than this (KB)."
     )
+    parser.add_argument(
+        "--progress-every", type=int, default=500, help="Print progress to stderr every N files (0 = off)."
+    )
     parser.add_argument("--apply", action="store_true", help="Rewrite files. Default is dry-run.")
     args = parser.parse_args(argv)
 
@@ -115,6 +133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         spec=spec,
         dry_run=not args.apply,
         min_size_bytes=args.min_size_kb * 1000,
+        progress_every=args.progress_every,
     )
     payload = {
         "data_dir": str(args.data_dir),
